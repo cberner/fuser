@@ -6,6 +6,8 @@
 
 #![warn(missing_docs, missing_debug_implementations, rust_2018_idioms)]
 
+#[cfg(feature = "serializable")]
+use serde::{Deserialize, Serialize};
 use std::convert::AsRef;
 use std::io;
 use std::ffi::OsStr;
@@ -33,6 +35,7 @@ mod session;
 
 /// File types
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serializable", derive(Serialize, Deserialize))]
 pub enum FileType {
     /// Named pipe (S_IFIFO)
     NamedPipe,
@@ -52,6 +55,7 @@ pub enum FileType {
 
 /// File attributes
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serializable", derive(Serialize, Deserialize))]
 pub struct FileAttr {
     /// Inode number
     pub ino: u64,

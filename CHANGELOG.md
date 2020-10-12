@@ -1,6 +1,10 @@
 # FUSE for Rust - Changelog
 
-## 0.4.0 - UNRELEASED
+## 0.4.1 - 2020-10-12
+
+* Added new feature `serializable` that will enable serde serialization/deserialization for `FileType`, `FileAttr`
+
+## 0.4.0 - 2020-06-18
 
 * Forked as `fuser` crate, at https://github.com/cberner/fuser
 * Split into `fuse`, `fuse-abi` and `fuse-sys` crate
