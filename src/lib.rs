@@ -762,6 +762,61 @@ pub trait Filesystem {
     }
 }
 
+#[derive(Debug, Hash, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
+pub struct Inode(u64);
+
+impl From<u64> for Inode {
+    fn from(ino: u64) -> Self {
+        Self(ino)
+    }
+}
+
+pub trait Filesystem2 {
+    fn init(&mut self, _req: &Request<'_>, _config: &mut KernelConfig) -> Result<(), c_int> {
+        Ok(())
+    }
+    fn destroy(&mut self, _req: &Request<'_>) {}
+    fn forget(&mut self, _req: &Request<'_>, _ino: Inode, _nlookup: u64) {}
+    fn getattr(
+        &mut self,
+        _req: &Request<'_>,
+        _ino: Inode,
+    ) -> Result<(&std::time::Duration, &FileAttr), c_int> {
+        Err(ENOSYS)
+    }
+    fn readlink(&mut self, _req: &Request<'_>, _ino: Inode) -> Result<&[u8], c_int> {
+        Err(ENOSYS)
+    }
+}
+
+impl<T> Filesystem for T
+where
+    T: Filesystem2,
+{
+    fn init(&mut self, req: &Request<'_>, config: &mut KernelConfig) -> Result<(), c_int> {
+        self.init(req, config)
+    }
+
+    fn destroy(&mut self, req: &Request<'_>) {
+        self.destroy(req)
+    }
+    fn forget(&mut self, req: &Request<'_>, ino: u64, nlookup: u64) {
+        self.forget(req, ino.into(), nlookup)
+    }
+    fn getattr(&mut self, req: &Request<'_>, ino: u64, reply: ReplyAttr) {
+        match self.getattr(req, ino.into()) {
+            Ok((ttl, attr)) => reply.attr(ttl, attr),
+            Err(n) => reply.error(n),
+        }
+    }
+    fn readlink(&mut self, req: &Request<'_>, ino: u64, reply: ReplyData) {
+        match self.readlink(req, ino.into()) {
+            Ok(d) => reply.data(d),
+            Err(n) => reply.error(n),
+        }
+    }
+}
+
 /// Mount the given filesystem to the given mountpoint. This function will
 /// not return until the filesystem is unmounted.
 ///
