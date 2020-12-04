@@ -200,8 +200,11 @@ impl<T> ReplyRaw<T> {
     }
 
     /// Reply to a request with the given error code
-    pub fn error(mut self, err: c_int) {
-        self.send(err, &[]);
+    pub fn error<E>(mut self, err: E)
+    where
+        E: Into<c_int> + Sized,
+    {
+        self.send(err.into(), &[]);
     }
 }
 
@@ -268,7 +271,7 @@ impl ReplyData {
     }
 
     /// Reply to a request with the given error code
-    pub fn error(self, err: c_int) {
+    pub fn error<E: Into<c_int> + Sized>(self, err: E) {
         self.reply.error(err);
     }
 }
@@ -337,7 +340,7 @@ impl ReplyAttr {
     }
 
     /// Reply to a request with the given error code
-    pub fn error(self, err: c_int) {
+    pub fn error<E: Into<c_int> + Sized>(self, err: E) {
         self.reply.error(err);
     }
 }

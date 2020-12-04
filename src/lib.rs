@@ -896,13 +896,13 @@ where
     fn getattr(&mut self, req: &Request<'_>, ino: u64, reply: ReplyAttr) {
         match self.getattr(req, ino.into()) {
             Ok((ttl, attr)) => reply.attr(ttl, attr),
-            Err(n) => reply.error(n.into()),
+            Err(n) => reply.error(n),
         }
     }
     fn readlink(&mut self, req: &Request<'_>, ino: u64, reply: ReplyData) {
         match self.readlink(req, ino.into()) {
             Ok(d) => reply.data(d),
-            Err(n) => reply.error(n.into()),
+            Err(n) => reply.error(n),
         }
     }
 }
