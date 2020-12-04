@@ -771,8 +771,95 @@ impl From<u64> for Inode {
     }
 }
 
+// we are missing most of the error codes provided by linux
+// if necessary, add the necessary.
+// https://man7.org/linux/man-pages/man3/errno.3.html
+pub enum Errno {
+    EPERM,
+    ENOENT,
+    ESRCH,
+    EINTR,
+    EIO,
+    ENXIO,
+    E2BIG,
+    ENOEXEC,
+    EBADF,
+    ECHILD,
+    EAGAIN,
+    ENOMEM,
+    EACCES,
+    EFAULT,
+    ENOTBLK,
+    EBUSY,
+    EEXIST,
+    EXDEV,
+    ENODEV,
+    ENOTDIR,
+    EISDIR,
+    EINVAL,
+    ENFILE,
+    EMFILE,
+    ENOTTY,
+    ETXTBSY,
+    EFBIG,
+    ENOSPC,
+    ESPIPE,
+    EROFS,
+    EMLINK,
+    EPIPE,
+    EDOM,
+    ERANGE,
+    EWOULDBLOCK,
+    ENOSYS, // not implemented https://github.com/rust-lang/libc/blob/0293c4492901e95fd03705f16086c6b74cba8b2a/src/unix/uclibc/x86_64/mod.rs#L265
+    Custom(c_int),
+}
+
+impl From<Errno> for c_int {
+    fn from(e: Errno) -> Self {
+        match e {
+            Errno::EPERM => libc::EPERM,
+            Errno::ENOENT => libc::ENOENT,
+            Errno::ESRCH => libc::ESRCH,
+            Errno::EINTR => libc::EINTR,
+            Errno::EIO => libc::EIO,
+            Errno::ENXIO => libc::ENXIO,
+            Errno::E2BIG => libc::E2BIG,
+            Errno::ENOEXEC => libc::ENOEXEC,
+            Errno::EBADF => libc::EBADF,
+            Errno::ECHILD => libc::ECHILD,
+            Errno::EAGAIN => libc::EAGAIN,
+            Errno::ENOMEM => libc::ENOMEM,
+            Errno::EACCES => libc::EACCES,
+            Errno::EFAULT => libc::EFAULT,
+            Errno::ENOTBLK => libc::ENOTBLK,
+            Errno::EBUSY => libc::EBUSY,
+            Errno::EEXIST => libc::EEXIST,
+            Errno::EXDEV => libc::EXDEV,
+            Errno::ENODEV => libc::ENODEV,
+            Errno::ENOTDIR => libc::ENOTDIR,
+            Errno::EISDIR => libc::EISDIR,
+            Errno::EINVAL => libc::EINVAL,
+            Errno::ENFILE => libc::ENFILE,
+            Errno::EMFILE => libc::EMFILE,
+            Errno::ENOTTY => libc::ENOTTY,
+            Errno::ETXTBSY => libc::ETXTBSY,
+            Errno::EFBIG => libc::EFBIG,
+            Errno::ENOSPC => libc::ENOSPC,
+            Errno::ESPIPE => libc::ESPIPE,
+            Errno::EROFS => libc::EROFS,
+            Errno::EMLINK => libc::EMLINK,
+            Errno::EPIPE => libc::EPIPE,
+            Errno::EDOM => libc::EDOM,
+            Errno::ERANGE => libc::ERANGE,
+            Errno::EWOULDBLOCK => libc::EWOULDBLOCK,
+            Errno::ENOSYS => libc::ENOSYS,
+            Errno::Custom(c_int) => c_int,
+        }
+    }
+}
+
 pub trait Filesystem2 {
-    fn init(&mut self, _req: &Request<'_>, _config: &mut KernelConfig) -> Result<(), c_int> {
+    fn init(&mut self, _req: &Request<'_>, _config: &mut KernelConfig) -> Result<(), Errno> {
         Ok(())
     }
     fn destroy(&mut self, _req: &Request<'_>) {}
@@ -781,11 +868,11 @@ pub trait Filesystem2 {
         &mut self,
         _req: &Request<'_>,
         _ino: Inode,
-    ) -> Result<(&std::time::Duration, &FileAttr), c_int> {
-        Err(ENOSYS)
+    ) -> Result<(&std::time::Duration, &FileAttr), Errno> {
+        Err(Errno::ENOSYS)
     }
-    fn readlink(&mut self, _req: &Request<'_>, _ino: Inode) -> Result<&[u8], c_int> {
-        Err(ENOSYS)
+    fn readlink(&mut self, _req: &Request<'_>, _ino: Inode) -> Result<&[u8], Errno> {
+        Err(Errno::ENOSYS)
     }
 }
 
@@ -794,7 +881,10 @@ where
     T: Filesystem2,
 {
     fn init(&mut self, req: &Request<'_>, config: &mut KernelConfig) -> Result<(), c_int> {
-        self.init(req, config)
+        match self.init(req, config) {
+            Ok(()) => Ok(()),
+            Err(n) => Err(n.into()),
+        }
     }
 
     fn destroy(&mut self, req: &Request<'_>) {
@@ -806,13 +896,13 @@ where
     fn getattr(&mut self, req: &Request<'_>, ino: u64, reply: ReplyAttr) {
         match self.getattr(req, ino.into()) {
             Ok((ttl, attr)) => reply.attr(ttl, attr),
-            Err(n) => reply.error(n),
+            Err(n) => reply.error(n.into()),
         }
     }
     fn readlink(&mut self, req: &Request<'_>, ino: u64, reply: ReplyData) {
         match self.readlink(req, ino.into()) {
             Ok(d) => reply.data(d),
-            Err(n) => reply.error(n),
+            Err(n) => reply.error(n.into()),
         }
     }
 }
