@@ -134,8 +134,8 @@ pub struct KernelConfig {
 }
 
 impl KernelConfig {
-    fn new(capabilities: u32, max_readahead: u32) -> KernelConfig {
-        KernelConfig {
+    fn new(capabilities: u32, max_readahead: u32) -> Self {
+        Self {
             capabilities,
             requested: INIT_FLAGS,
             max_readahead,
@@ -151,6 +151,19 @@ impl KernelConfig {
             #[cfg(feature = "abi-7-28")]
             max_pages: 0,
         }
+    }
+
+    /// Add a set of capabilities.
+    ///
+    /// On success returns Ok, else return 1 when capabilities you provided are not all supported by kernel.
+    pub fn add_capabilities(
+        self: &mut Self,
+        capabilities_to_add: u32) -> Result<(), u16> {
+        if capabilities_to_add & self.capabilities != capabilities_to_add {
+            return Err(1);
+        }
+        self.requested |= capabilities_to_add;
+        Ok(())
     }
 
     /// Set the maximum number of pending background requests. Such as readahead requests.
