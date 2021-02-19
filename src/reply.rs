@@ -115,7 +115,7 @@ fn fuse_attr_from_attr(attr: &FileAttr) -> fuse_attr {
         #[cfg(feature = "abi-7-9")]
         blksize: attr.blksize,
         #[cfg(feature = "abi-7-9")]
-        padding: attr.padding,
+        padding: 0,
     }
 }
 
@@ -144,7 +144,7 @@ fn fuse_attr_from_attr(attr: &FileAttr) -> fuse_attr {
         #[cfg(feature = "abi-7-9")]
         blksize: attr.blksize,
         #[cfg(feature = "abi-7-9")]
-        padding: attr.padding,
+        padding: 0,
     }
 }
 
@@ -1020,7 +1020,7 @@ mod test {
         };
 
         if cfg!(feature = "abi-7-9") {
-            expected[1].extend(vec![0xbb, 0x00, 0x00, 0x00, 0xcc, 0x00, 0x00, 0x00]);
+            expected[1].extend(vec![0xbb, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
         }
         expected[0][0] = (expected[0].len() + expected[1].len()) as u8;
 
@@ -1089,7 +1089,7 @@ mod test {
         };
 
         if cfg!(feature = "abi-7-9") {
-            expected[1].extend(vec![0xbb, 0x00, 0x00, 0x00, 0xcc, 0x00, 0x00, 0x00]);
+            expected[1].extend(vec![0xbb, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
         }
         expected[0][0] = (expected[0].len() + expected[1].len()) as u8;
 
@@ -1243,7 +1243,7 @@ mod test {
             let insert_at = expected[1].len() - 16;
             expected[1].splice(
                 insert_at..insert_at,
-                vec![0xdd, 0x00, 0x00, 0x00, 0xee, 0x00, 0x00, 0x00],
+                vec![0xdd, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
             );
         }
         expected[0][0] = (expected[0].len() + expected[1].len()) as u8;

@@ -130,7 +130,7 @@ pub struct FileAttr {
     pub rdev: u32,
     /// Block size
     pub blksize: u32,
-    /// Padding
+    /// Unused - this will be removed in the future.
     pub padding: u32,
     /// Flags (macOS only, see chflags(2))
     pub flags: u32,
