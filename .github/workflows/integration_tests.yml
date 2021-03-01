@@ -2,8 +2,22 @@ name: Integration tests
 
 on: [push, pull_request]
 jobs:
+  pre_job:
+    # continue-on-error: true # Uncomment once integration is finished
+    runs-on: ubuntu-latest
+    outputs:
+      should_skip: ${{ steps.skip_check.outputs.should_skip }}
+    steps:
+      - id: skip_check
+        uses: fkirc/skip-duplicate-actions@master
+        with:
+          concurrent_skipping: 'always'
+          skip_after_successful_duplicate: 'false'
+          do_not_skip: '["pull_request", "workflow_dispatch", "schedule"]'
+
   integration_tests:
     runs-on: ubuntu-20.04
+    if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
     strategy:
       matrix:
         test_group: [mount_tests, pjdfs_tests_fuse2, pjdfs_tests_fuse3, pjdfs_tests_pure]
@@ -38,6 +52,7 @@ jobs:
       - name: Run tests
         run: INTERACTIVE="" make ${{ matrix.test_group }}
   xfs_integration_tests:
+    if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
     runs-on: ubuntu-20.04
     strategy:
       matrix:
