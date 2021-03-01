@@ -1,7 +1,6 @@
 name: Macos CI
 
-on:
-  pull_request:
+on: [push, pull_request]
 jobs:
   ci-macos:
     runs-on: macos-latest
