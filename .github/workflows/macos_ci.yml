@@ -2,7 +2,22 @@ name: Macos CI
 
 on: [push, pull_request]
 jobs:
+  pre_job:
+    # continue-on-error: true # Uncomment once integration is finished
+    runs-on: ubuntu-latest
+    outputs:
+      should_skip: ${{ steps.skip_check.outputs.should_skip }}
+    steps:
+      - id: skip_check
+        uses: fkirc/skip-duplicate-actions@master
+        with:
+          concurrent_skipping: 'always'
+          skip_after_successful_duplicate: 'false'
+          do_not_skip: '["pull_request", "workflow_dispatch", "schedule"]'
+
   ci-macos:
+    needs: pre_job
+    if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
     runs-on: macos-latest
     env:
       PKG_CONFIG_PATH: /usr/local/lib/pkgconfig:$PKG_CONFIG_PATH

@@ -2,8 +2,23 @@ name: CI
 
 on: [push, pull_request]
 jobs:
+  pre_job:
+    # continue-on-error: true # Uncomment once integration is finished
+    runs-on: ubuntu-latest
+    outputs:
+      should_skip: ${{ steps.skip_check.outputs.should_skip }}
+    steps:
+      - id: skip_check
+        uses: fkirc/skip-duplicate-actions@master
+        with:
+          concurrent_skipping: 'always'
+          skip_after_successful_duplicate: 'false'
+          do_not_skip: '["pull_request", "workflow_dispatch", "schedule"]'
+
   compile:
     runs-on: ubuntu-20.04
+    needs: pre_job
+    if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
     strategy:
       matrix:
         libfuse: [libfuse-dev, libfuse3-dev]
@@ -28,7 +43,8 @@ jobs:
           cargo doc --all --no-deps --features=${{ matrix.features }}
   ci:
     runs-on: ubuntu-20.04
-
+    needs: pre_job
+    if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
     steps:
       - uses: actions/checkout@v2
       - name: Install packages
