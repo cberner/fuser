@@ -42,6 +42,7 @@ use std::cmp::min;
 
 mod channel;
 mod fuse_sys;
+mod io_ops;
 mod ll;
 mod mount_options;
 mod reply;
