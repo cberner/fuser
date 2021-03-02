@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)]
+
 use fuser::{
     FileAttr, FileType, Filesystem, MountOption, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry,
     Request,
@@ -51,26 +53,27 @@ const HELLO_TXT_ATTR: FileAttr = FileAttr {
 
 struct HelloFS;
 
+#[async_trait::async_trait]
 impl Filesystem for HelloFS {
-    fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
+    async fn lookup(&self, _req: &Request<'_>, parent: u64, name: &OsStr, reply: ReplyEntry) {
         if parent == 1 && name.to_str() == Some("hello.txt") {
-            reply.entry(&TTL, &HELLO_TXT_ATTR, 0);
+            reply.entry(&TTL, &HELLO_TXT_ATTR, 0).await;
         } else {
-            reply.error(ENOENT);
+            reply.error(ENOENT).await;
         }
     }
 
-    fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
+    async fn getattr(&self, _req: &Request<'_>, ino: u64, reply: ReplyAttr) {
         match ino {
-            1 => reply.attr(&TTL, &HELLO_DIR_ATTR),
-            2 => reply.attr(&TTL, &HELLO_TXT_ATTR),
-            _ => reply.error(ENOENT),
+            1 => reply.attr(&TTL, &HELLO_DIR_ATTR).await,
+            2 => reply.attr(&TTL, &HELLO_TXT_ATTR).await,
+            _ => reply.error(ENOENT).await,
         }
     }
 
-    fn read(
-        &mut self,
-        _req: &Request,
+    async fn read(
+        &self,
+        _req: &Request<'_>,
         ino: u64,
         _fh: u64,
         offset: i64,
@@ -80,22 +83,24 @@ impl Filesystem for HelloFS {
         reply: ReplyData,
     ) {
         if ino == 2 {
-            reply.data(&HELLO_TXT_CONTENT.as_bytes()[offset as usize..]);
+            reply
+                .data(&HELLO_TXT_CONTENT.as_bytes()[offset as usize..])
+                .await;
         } else {
-            reply.error(ENOENT);
+            reply.error(ENOENT).await;
         }
     }
 
-    fn readdir(
-        &mut self,
-        _req: &Request,
+    async fn readdir(
+        &self,
+        _req: &Request<'_>,
         ino: u64,
         _fh: u64,
         offset: i64,
         mut reply: ReplyDirectory,
     ) {
         if ino != 1 {
-            reply.error(ENOENT);
+            reply.error(ENOENT).await;
             return;
         }
 
@@ -111,11 +116,12 @@ impl Filesystem for HelloFS {
                 break;
             }
         }
-        reply.ok();
+        reply.ok().await;
     }
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     env_logger::init();
     let mountpoint = env::args_os().nth(1).unwrap();
     let mut options = vec![MountOption::RO, MountOption::FSName("hello".to_string())];
@@ -124,5 +130,7 @@ fn main() {
             options.push(MountOption::AutoUnmount);
         }
     }
-    fuser::mount2(HelloFS, mountpoint, &options).unwrap();
+    fuser::mount2(HelloFS, 5, mountpoint, &options)
+        .await
+        .unwrap();
 }
