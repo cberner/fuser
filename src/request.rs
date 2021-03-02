@@ -6,13 +6,13 @@
 //! TODO: This module is meant to go away soon in favor of `ll::Request`.
 
 use crate::ll::fuse_abi as abi;
+use crate::{io_ops::ArcSubChannel, session::ActiveSession};
 use libc::{EIO, ENOSYS, EPROTO};
 use log::{debug, error, warn};
 use std::convert::TryFrom;
 #[cfg(feature = "abi-7-28")]
 use std::convert::TryInto;
 use std::path::Path;
-use crate::{io_ops::ArcSubChannel, session::ActiveSession};
 use std::sync::Arc;
 
 #[cfg(feature = "abi-7-21")]
@@ -113,7 +113,8 @@ impl<'a> Request<'a> {
             // Any operation is invalid before initialization
             _ => {
                 warn!("Ignoring FUSE operation before init: {}", self.request);
-                self.reply::<ReplyEmpty>(&ch).error(EIO).await;            }
+                self.reply::<ReplyEmpty>(&ch).error(EIO).await;
+            }
         }
     }
 
@@ -145,304 +146,399 @@ impl<'a> Request<'a> {
 
             ll::Operation::Lookup(x) => {
                 filesystem
-                    .lookup(self, self.request.nodeid().into(), &x.name(), self.reply(&ch)).await;
+                    .lookup(
+                        self,
+                        self.request.nodeid().into(),
+                        &x.name(),
+                        self.reply(&ch),
+                    )
+                    .await;
             }
             ll::Operation::Forget(x) => {
                 filesystem
-                    .forget(self, self.request.nodeid().into(), x.nlookup()).await; // no reply
+                    .forget(self, self.request.nodeid().into(), x.nlookup())
+                    .await; // no reply
             }
             ll::Operation::GetAttr(_) => {
                 filesystem
-                    .getattr(self, self.request.nodeid().into(), self.reply(&ch)).await;
+                    .getattr(self, self.request.nodeid().into(), self.reply(&ch))
+                    .await;
             }
             ll::Operation::SetAttr(x) => {
-                filesystem.setattr(
-                    self,
-                    self.request.nodeid().into(),
-                    x.mode(),
-                    x.uid(),
-                    x.gid(),
-                    x.size(),
-                    x.atime(),
-                    x.mtime(),
-                    x.ctime(),
-                    x.file_handle().map(|fh| fh.into()),
-                    x.crtime(),
-                    x.chgtime(),
-                    x.bkuptime(),
-                    x.flags(),
-                    self.reply(&ch),
-                ).await;
+                filesystem
+                    .setattr(
+                        self,
+                        self.request.nodeid().into(),
+                        x.mode(),
+                        x.uid(),
+                        x.gid(),
+                        x.size(),
+                        x.atime(),
+                        x.mtime(),
+                        x.ctime(),
+                        x.file_handle().map(|fh| fh.into()),
+                        x.crtime(),
+                        x.chgtime(),
+                        x.bkuptime(),
+                        x.flags(),
+                        self.reply(&ch),
+                    )
+                    .await;
             }
             ll::Operation::ReadLink(_) => {
                 filesystem
-                    .readlink(self, self.request.nodeid().into(), self.reply(&ch)).await;
+                    .readlink(self, self.request.nodeid().into(), self.reply(&ch))
+                    .await;
             }
             ll::Operation::MkNod(x) => {
-                filesystem.mknod(
-                    self,
-                    self.request.nodeid().into(),
-                    &x.name(),
-                    x.mode(),
-                    x.umask(),
-                    x.rdev(),
-                    self.reply(&ch),
-                ).await;
+                filesystem
+                    .mknod(
+                        self,
+                        self.request.nodeid().into(),
+                        &x.name(),
+                        x.mode(),
+                        x.umask(),
+                        x.rdev(),
+                        self.reply(&ch),
+                    )
+                    .await;
             }
             ll::Operation::MkDir(x) => {
-                filesystem.mkdir(
-                    self,
-                    self.request.nodeid().into(),
-                    x.name(),
-                    x.mode(),
-                    x.umask(),
-                    self.reply(&ch),
-                ).await;
+                filesystem
+                    .mkdir(
+                        self,
+                        self.request.nodeid().into(),
+                        x.name(),
+                        x.mode(),
+                        x.umask(),
+                        self.reply(&ch),
+                    )
+                    .await;
             }
             ll::Operation::Unlink(x) => {
                 filesystem
-                    .unlink(self, self.request.nodeid().into(), x.name(), self.reply(&ch)).await;
+                    .unlink(
+                        self,
+                        self.request.nodeid().into(),
+                        x.name(),
+                        self.reply(&ch),
+                    )
+                    .await;
             }
             ll::Operation::RmDir(x) => {
                 filesystem
-                    .rmdir(self, self.request.nodeid().into(), x.name(), self.reply(&ch)).await;
+                    .rmdir(
+                        self,
+                        self.request.nodeid().into(),
+                        x.name(),
+                        self.reply(&ch),
+                    )
+                    .await;
             }
             ll::Operation::SymLink(x) => {
-                filesystem.symlink(
-                    self,
-                    self.request.nodeid().into(),
-                    x.target(),
-                    &Path::new(x.link()),
-                    self.reply(&ch),
-                ).await;
+                filesystem
+                    .symlink(
+                        self,
+                        self.request.nodeid().into(),
+                        x.target(),
+                        &Path::new(x.link()),
+                        self.reply(&ch),
+                    )
+                    .await;
             }
             ll::Operation::Rename(x) => {
-                filesystem.rename(
-                    self,
-                    self.request.nodeid().into(),
-                    x.from().name,
-                    x.to().dir.into(),
-                    x.to().name,
-                    0,
-                    self.reply(&ch),
-                ).await;
+                filesystem
+                    .rename(
+                        self,
+                        self.request.nodeid().into(),
+                        x.from().name,
+                        x.to().dir.into(),
+                        x.to().name,
+                        0,
+                        self.reply(&ch),
+                    )
+                    .await;
             }
             ll::Operation::Link(x) => {
-                filesystem.link(
-                    self,
-                    x.inode_no().into(),
-                    self.request.nodeid().into(),
-                    x.to().name,
-                    self.reply(&ch),
-                ).await;
+                filesystem
+                    .link(
+                        self,
+                        x.inode_no().into(),
+                        self.request.nodeid().into(),
+                        x.to().name,
+                        self.reply(&ch),
+                    )
+                    .await;
             }
             ll::Operation::Open(x) => {
                 filesystem
-                    .open(self, self.request.nodeid().into(), x.flags(), self.reply(&ch)).await;
+                    .open(
+                        self,
+                        self.request.nodeid().into(),
+                        x.flags(),
+                        self.reply(&ch),
+                    )
+                    .await;
             }
             ll::Operation::Read(x) => {
-                filesystem.read(
-                    self,
-                    self.request.nodeid().into(),
-                    x.file_handle().into(),
-                    x.offset(),
-                    x.size(),
-                    x.flags(),
-                    x.lock_owner().map(|l| l.into()),
-                    self.reply(&ch),
-                ).await;
+                filesystem
+                    .read(
+                        self,
+                        self.request.nodeid().into(),
+                        x.file_handle().into(),
+                        x.offset(),
+                        x.size(),
+                        x.flags(),
+                        x.lock_owner().map(|l| l.into()),
+                        self.reply(&ch),
+                    )
+                    .await;
             }
             ll::Operation::Write(x) => {
-                filesystem.write(
-                    self,
-                    self.request.nodeid().into(),
-                    x.file_handle().into(),
-                    x.offset(),
-                    x.data(),
-                    x.write_flags(),
-                    x.flags(),
-                    x.lock_owner().map(|l| l.into()),
-                    self.reply(&ch),
-                ).await;
+                filesystem
+                    .write(
+                        self,
+                        self.request.nodeid().into(),
+                        x.file_handle().into(),
+                        x.offset(),
+                        x.data(),
+                        x.write_flags(),
+                        x.flags(),
+                        x.lock_owner().map(|l| l.into()),
+                        self.reply(&ch),
+                    )
+                    .await;
             }
             ll::Operation::Flush(x) => {
-                filesystem.flush(
-                    self,
-                    self.request.nodeid().into(),
-                    x.file_handle().into(),
-                    x.lock_owner().into(),
-                    self.reply(&ch),
-                ).await;
+                filesystem
+                    .flush(
+                        self,
+                        self.request.nodeid().into(),
+                        x.file_handle().into(),
+                        x.lock_owner().into(),
+                        self.reply(&ch),
+                    )
+                    .await;
             }
             ll::Operation::Release(x) => {
-                filesystem.release(
-                    self,
-                    self.request.nodeid().into(),
-                    x.file_handle().into(),
-                    x.flags(),
-                    x.lock_owner().map(|x| x.into()),
-                    x.flush(),
-                    self.reply(&ch),
-                ).await;
+                filesystem
+                    .release(
+                        self,
+                        self.request.nodeid().into(),
+                        x.file_handle().into(),
+                        x.flags(),
+                        x.lock_owner().map(|x| x.into()),
+                        x.flush(),
+                        self.reply(&ch),
+                    )
+                    .await;
             }
             ll::Operation::FSync(x) => {
-                filesystem.fsync(
-                    self,
-                    self.request.nodeid().into(),
-                    x.file_handle().into(),
-                    x.fdatasync(),
-                    self.reply(&ch),
-                ).await;
+                filesystem
+                    .fsync(
+                        self,
+                        self.request.nodeid().into(),
+                        x.file_handle().into(),
+                        x.fdatasync(),
+                        self.reply(&ch),
+                    )
+                    .await;
             }
             ll::Operation::OpenDir(x) => {
                 filesystem
-                    .opendir(self, self.request.nodeid().into(), x.flags(), self.reply(&ch)).await;
+                    .opendir(
+                        self,
+                        self.request.nodeid().into(),
+                        x.flags(),
+                        self.reply(&ch),
+                    )
+                    .await;
             }
             ll::Operation::ReadDir(x) => {
-                filesystem.readdir(
-                    self,
-                    self.request.nodeid().into(),
-                    x.file_handle().into(),
-                    x.offset(),
-                    ReplyDirectory::new(self.request.unique().into(), ch.clone(), x.size() as usize),
-                ).await;
+                filesystem
+                    .readdir(
+                        self,
+                        self.request.nodeid().into(),
+                        x.file_handle().into(),
+                        x.offset(),
+                        ReplyDirectory::new(
+                            self.request.unique().into(),
+                            ch.clone(),
+                            x.size() as usize,
+                        ),
+                    )
+                    .await;
             }
             ll::Operation::ReleaseDir(x) => {
-                filesystem.releasedir(
-                    self,
-                    self.request.nodeid().into(),
-                    x.file_handle().into(),
-                    x.flags(),
-                    self.reply(&ch),
-                ).await;
+                filesystem
+                    .releasedir(
+                        self,
+                        self.request.nodeid().into(),
+                        x.file_handle().into(),
+                        x.flags(),
+                        self.reply(&ch),
+                    )
+                    .await;
             }
             ll::Operation::FSyncDir(x) => {
-                filesystem.fsyncdir(
-                    self,
-                    self.request.nodeid().into(),
-                    x.file_handle().into(),
-                    x.fdatasync(),
-                    self.reply(&ch),
-                ).await;
+                filesystem
+                    .fsyncdir(
+                        self,
+                        self.request.nodeid().into(),
+                        x.file_handle().into(),
+                        x.fdatasync(),
+                        self.reply(&ch),
+                    )
+                    .await;
             }
             ll::Operation::StatFs(_) => {
                 filesystem
-                    .statfs(self, self.request.nodeid().into(), self.reply(&ch)).await;
+                    .statfs(self, self.request.nodeid().into(), self.reply(&ch))
+                    .await;
             }
             ll::Operation::SetXAttr(x) => {
-                filesystem.setxattr(
-                    self,
-                    self.request.nodeid().into(),
-                    x.name(),
-                    x.value(),
-                    x.flags(),
-                    x.position(),
-                    self.reply(&ch),
-                ).await;
+                filesystem
+                    .setxattr(
+                        self,
+                        self.request.nodeid().into(),
+                        x.name(),
+                        x.value(),
+                        x.flags(),
+                        x.position(),
+                        self.reply(&ch),
+                    )
+                    .await;
             }
             ll::Operation::GetXAttr(x) => {
-                filesystem.getxattr(
-                    self,
-                    self.request.nodeid().into(),
-                    x.name(),
-                    x.size(),
-                    self.reply(&ch),
-                ).await;
+                filesystem
+                    .getxattr(
+                        self,
+                        self.request.nodeid().into(),
+                        x.name(),
+                        x.size(),
+                        self.reply(&ch),
+                    )
+                    .await;
             }
             ll::Operation::ListXAttr(x) => {
                 filesystem
-                    .listxattr(self, self.request.nodeid().into(), x.size(), self.reply(&ch)).await;
+                    .listxattr(
+                        self,
+                        self.request.nodeid().into(),
+                        x.size(),
+                        self.reply(&ch),
+                    )
+                    .await;
             }
             ll::Operation::RemoveXAttr(x) => {
-                filesystem.removexattr(
-                    self,
-                    self.request.nodeid().into(),
-                    x.name(),
-                    self.reply(&ch),
-                ).await;
+                filesystem
+                    .removexattr(
+                        self,
+                        self.request.nodeid().into(),
+                        x.name(),
+                        self.reply(&ch),
+                    )
+                    .await;
             }
             ll::Operation::Access(x) => {
                 filesystem
-                    .access(self, self.request.nodeid().into(), x.mask(), self.reply(&ch)).await;
+                    .access(
+                        self,
+                        self.request.nodeid().into(),
+                        x.mask(),
+                        self.reply(&ch),
+                    )
+                    .await;
             }
             ll::Operation::Create(x) => {
-                filesystem.create(
-                    self,
-                    self.request.nodeid().into(),
-                    x.name(),
-                    x.mode(),
-                    x.umask(),
-                    x.flags(),
-                    self.reply(&ch),
-                ).await;
+                filesystem
+                    .create(
+                        self,
+                        self.request.nodeid().into(),
+                        x.name(),
+                        x.mode(),
+                        x.umask(),
+                        x.flags(),
+                        self.reply(&ch),
+                    )
+                    .await;
             }
             ll::Operation::GetLk(x) => {
-                filesystem.getlk(
-                    self,
-                    self.request.nodeid().into(),
-                    x.file_handle().into(),
-                    x.lock_owner().into(),
-                    x.lock().range.0,
-                    x.lock().range.1,
-                    x.lock().typ,
-                    x.lock().pid,
-                    self.reply(&ch),
-                ).await;
+                filesystem
+                    .getlk(
+                        self,
+                        self.request.nodeid().into(),
+                        x.file_handle().into(),
+                        x.lock_owner().into(),
+                        x.lock().range.0,
+                        x.lock().range.1,
+                        x.lock().typ,
+                        x.lock().pid,
+                        self.reply(&ch),
+                    )
+                    .await;
             }
             ll::Operation::SetLk(x) => {
-                filesystem.setlk(
-                    self,
-                    self.request.nodeid().into(),
-                    x.file_handle().into(),
-                    x.lock_owner().into(),
-                    x.lock().range.0,
-                    x.lock().range.1,
-                    x.lock().typ,
-                    x.lock().pid,
-                    false,
-                    self.reply(&ch),
-                ).await;
+                filesystem
+                    .setlk(
+                        self,
+                        self.request.nodeid().into(),
+                        x.file_handle().into(),
+                        x.lock_owner().into(),
+                        x.lock().range.0,
+                        x.lock().range.1,
+                        x.lock().typ,
+                        x.lock().pid,
+                        false,
+                        self.reply(&ch),
+                    )
+                    .await;
             }
             ll::Operation::SetLkW(x) => {
-                filesystem.setlk(
-                    self,
-                    self.request.nodeid().into(),
-                    x.file_handle().into(),
-                    x.lock_owner().into(),
-                    x.lock().range.0,
-                    x.lock().range.1,
-                    x.lock().typ,
-                    x.lock().pid,
-                    true,
-                    self.reply(&ch),
-                ).await;
+                filesystem
+                    .setlk(
+                        self,
+                        self.request.nodeid().into(),
+                        x.file_handle().into(),
+                        x.lock_owner().into(),
+                        x.lock().range.0,
+                        x.lock().range.1,
+                        x.lock().typ,
+                        x.lock().pid,
+                        true,
+                        self.reply(&ch),
+                    )
+                    .await;
             }
             ll::Operation::BMap(x) => {
-                filesystem.bmap(
-                    self,
-                    self.request.nodeid().into(),
-                    x.block_size(),
-                    x.block(),
-                    self.reply(&ch),
-                ).await;
+                filesystem
+                    .bmap(
+                        self,
+                        self.request.nodeid().into(),
+                        x.block_size(),
+                        x.block(),
+                        self.reply(&ch),
+                    )
+                    .await;
             }
 
             #[cfg(feature = "abi-7-11")]
             ll::Operation::IoCtl(x) => {
                 if x.unrestricted() {
-                    self.reply::<ReplyEmpty>().error(ENOSYS);
+                    self.reply::<ReplyEmpty>(&ch).error(ENOSYS).await;
                 } else {
-                    filesystem.ioctl(
-                        self,
-                        self.request.nodeid().into(),
-                        x.file_handle().into(),
-                        x.flags(),
-                        x.command(),
-                        x.in_data(),
-                        x.out_size(),
-                        self.reply(&ch),
-                    );
-
+                    filesystem
+                        .ioctl(
+                            self,
+                            self.request.nodeid().into(),
+                            x.file_handle().into(),
+                            x.flags(),
+                            x.command(),
+                            x.in_data(),
+                            x.out_size(),
+                            self.reply(&ch),
+                        )
+                        .await;
                 }
             }
             #[cfg(feature = "abi-7-11")]
@@ -457,72 +553,82 @@ impl<'a> Request<'a> {
             }
             #[cfg(feature = "abi-7-16")]
             ll::Operation::BatchForget(x) => {
-                filesystem.batch_forget(self, x.nodes()); // no reply
+                filesystem.batch_forget(self, x.nodes()).await; // no reply
             }
             #[cfg(feature = "abi-7-19")]
             ll::Operation::FAllocate(x) => {
-                filesystem.fallocate(
-                    self,
-                    self.request.nodeid().into(),
-                    x.file_handle().into(),
-                    x.offset(),
-                    x.len(),
-                    x.mode(),
-                    self.reply(&ch),
-                ).await;
+                filesystem
+                    .fallocate(
+                        self,
+                        self.request.nodeid().into(),
+                        x.file_handle().into(),
+                        x.offset(),
+                        x.len(),
+                        x.mode(),
+                        self.reply(&ch),
+                    )
+                    .await;
             }
             #[cfg(feature = "abi-7-21")]
             ll::Operation::ReadDirPlus(x) => {
-                filesystem.readdirplus(
-                    self,
-                    self.request.nodeid().into(),
-                    x.file_handle().into(),
-                    x.offset(),
-                    ReplyDirectoryPlus::new(
-                        self.request.unique().into(),
-                        self.ch,
-                        x.size() as usize,
-                    ),
-                ).await;
+                filesystem
+                    .readdirplus(
+                        self,
+                        self.request.nodeid().into(),
+                        x.file_handle().into(),
+                        x.offset(),
+                        ReplyDirectoryPlus::new(
+                            self.request.unique().into(),
+                            ch.clone(),
+                            x.size() as usize,
+                        ),
+                    )
+                    .await;
             }
             #[cfg(feature = "abi-7-23")]
             ll::Operation::Rename2(x) => {
-                filesystem.rename(
-                    self,
-                    x.from().dir.into(),
-                    x.from().name,
-                    x.to().dir.into(),
-                    x.to().name,
-                    x.flags(),
-                    self.reply(&ch),
-                ).await;
+                filesystem
+                    .rename(
+                        self,
+                        x.from().dir.into(),
+                        x.from().name,
+                        x.to().dir.into(),
+                        x.to().name,
+                        x.flags(),
+                        self.reply(&ch),
+                    )
+                    .await;
             }
             #[cfg(feature = "abi-7-24")]
             ll::Operation::Lseek(x) => {
-                filesystem.lseek(
-                    self,
-                    self.request.nodeid().into(),
-                    x.file_handle().into(),
-                    x.offset(),
-                    x.whence(),
-                    self.reply(&ch),
-                ).await;
+                filesystem
+                    .lseek(
+                        self,
+                        self.request.nodeid().into(),
+                        x.file_handle().into(),
+                        x.offset(),
+                        x.whence(),
+                        self.reply(&ch),
+                    )
+                    .await;
             }
             #[cfg(feature = "abi-7-28")]
             ll::Operation::CopyFileRange(x) => {
                 let (i, o) = (x.input(), x.output());
-                filesystem.copy_file_range(
-                    self,
-                    i.inode.into(),
-                    i.file_handle.into(),
-                    i.offset,
-                    o.inode.into(),
-                    o.file_handle.into(),
-                    o.offset,
-                    x.len(),
-                    x.flags().try_into().unwrap(),
-                    self.reply(&ch),
-                ).await;
+                filesystem
+                    .copy_file_range(
+                        self,
+                        i.inode.into(),
+                        i.file_handle.into(),
+                        i.offset,
+                        o.inode.into(),
+                        o.file_handle.into(),
+                        o.offset,
+                        x.len(),
+                        x.flags().try_into().unwrap(),
+                        self.reply(&ch),
+                    )
+                    .await;
             }
             #[cfg(target_os = "macos")]
             ll::Operation::SetVolName(x) => {
@@ -531,19 +637,22 @@ impl<'a> Request<'a> {
             #[cfg(target_os = "macos")]
             ll::Operation::GetXTimes(_) => {
                 filesystem
-                    .getxtimes(self, self.request.nodeid().into(), self.reply(&ch)).await;
+                    .getxtimes(self, self.request.nodeid().into(), self.reply(&ch))
+                    .await;
             }
             #[cfg(target_os = "macos")]
             ll::Operation::Exchange(x) => {
-                filesystem.exchange(
-                    self,
-                    x.from().dir.into(),
-                    x.from().name,
-                    x.to().dir.into(),
-                    x.to().name,
-                    x.options(),
-                    self.reply(&ch),
-                ).await;
+                filesystem
+                    .exchange(
+                        self,
+                        x.from().dir.into(),
+                        x.from().name,
+                        x.to().dir.into(),
+                        x.to().name,
+                        x.options(),
+                        self.reply(&ch),
+                    )
+                    .await;
             }
 
             #[cfg(feature = "abi-7-12")]
