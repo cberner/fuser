@@ -22,6 +22,9 @@ log = "0.4.6"
 users = "0.11.0"
 page_size = "0.4.2"
 serde = {version = "1.0.102", features = ["std", "derive"], optional = true}
+tokio = {version = "1.1.0", features = ["fs", "net", "macros", "rt-multi-thread", "sync", "time"]}
+async-trait = "0.1.42"
+futures = "0.3.12"
 zerocopy = "0.3"
 
 [dev-dependencies]
