@@ -2,20 +2,21 @@ use super::FileDescriptorRawHandle;
 use libc::O_NONBLOCK;
 use libc::{self, c_int, c_void, size_t};
 use log::error;
-use std::io;
 use std::sync::Arc;
+use std::{io, time::Duration};
 use tokio::io::unix::AsyncFd;
 
 #[derive(Debug, Clone)]
 pub struct SubChannel {
     fd: Arc<AsyncFd<FileDescriptorRawHandle>>,
+    max_poll_timeout: Duration,
 }
 impl SubChannel {
     pub fn as_raw_fd(&self) -> &FileDescriptorRawHandle {
         self.fd.as_ref().get_ref()
     }
 
-    pub fn new(fd: FileDescriptorRawHandle) -> io::Result<SubChannel> {
+    pub fn new(fd: FileDescriptorRawHandle, max_poll_timeout: Duration) -> io::Result<SubChannel> {
         let code = unsafe { libc::fcntl(fd.fd, libc::F_SETFL, O_NONBLOCK) };
         if code == -1 {
             error!(
@@ -27,6 +28,7 @@ impl SubChannel {
 
         Ok(SubChannel {
             fd: Arc::new(AsyncFd::new(fd)?),
+            max_poll_timeout,
         })
     }
     /// Send all data in the slice of slice of bytes in a single write (can block).
@@ -62,11 +64,9 @@ impl SubChannel {
     }
 
     pub async fn do_receive(&self, buffer: &'_ mut [u8]) -> io::Result<Option<usize>> {
-        use std::time::Duration;
         use tokio::time::timeout;
         loop {
-            if let Ok(guard_result) = timeout(Duration::from_millis(1000), self.fd.readable()).await
-            {
+            if let Ok(guard_result) = timeout(self.max_poll_timeout, self.fd.readable()).await {
                 let mut guard = guard_result?;
                 match guard.try_io(|inner| super::blocking_receive(inner.get_ref(), buffer)) {
                     Ok(result) => return result,

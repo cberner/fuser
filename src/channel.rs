@@ -19,7 +19,7 @@ use log::error;
 use log::warn;
 #[cfg(any(feature = "libfuse", test))]
 use std::ffi::OsStr;
-use std::os::unix::io::IntoRawFd;
+use std::{os::unix::io::IntoRawFd, time::Duration};
 
 use crate::io_ops::{ArcSubChannel, FileDescriptorRawHandle, SubChannel};
 use std::os::unix::ffi::OsStrExt;
@@ -109,6 +109,7 @@ impl Channel {
 
         Ok(ArcSubChannel(Arc::new(SubChannel::new(
             FileDescriptorRawHandle::new(fd),
+            Duration::from_millis(1000),
         )?)))
     }
 
@@ -132,7 +133,10 @@ impl Channel {
     ) -> io::Result<Channel> {
         let mut worker_channels = Vec::default();
 
-        let root_sub_channel = ArcSubChannel(Arc::new(SubChannel::new(root_fd)?));
+        let root_sub_channel = ArcSubChannel(Arc::new(SubChannel::new(
+            root_fd,
+            Duration::from_millis(1),
+        )?));
         worker_channels.push(root_sub_channel.clone());
 
         for _ in 0..worker_channel_count {

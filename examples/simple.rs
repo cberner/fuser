@@ -1837,7 +1837,10 @@ async fn main() {
         .filter_level(log_level)
         .init();
 
-    let mut options = vec![MountOption::FSName("fuser".to_string())];
+    let mut options = vec![
+        MountOption::FSName("fuser".to_string()),
+        MountOption::AutoUnmount,
+    ];
     if let Ok(enabled) = fuse_allow_other_enabled() {
         if enabled {
             options.push(MountOption::AllowOther);
