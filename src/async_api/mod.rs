@@ -48,6 +48,9 @@ mod opened_session;
 mod reply;
 mod request;
 
+#[cfg(feature = "async_tokio")]
+mod tokio;
+
 /// Filesystem trait.
 ///
 /// This trait must be implemented to provide a userspace filesystem via FUSE.
@@ -613,4 +616,72 @@ pub trait Filesystem: Send + Sync + 'static {
     async fn getxtimes(&self, _req: &Request<'_>, _ino: u64, reply: ReplyXTimes) {
         reply.error(ENOSYS).await;
     }
+}
+
+/// Mount the given filesystem to the given mountpoint. This function will
+/// not return until the filesystem is unmounted.
+///
+/// Note that you need to lead each option with a separate `"-o"` string. See
+/// `examples/hello.rs`.
+#[cfg(all(feature = "libfuse", feature = "async_tokio"))]
+pub async fn mount<FS: Filesystem, P: AsRef<Path>>(
+    filesystem: FS,
+    worker_channel_count: usize,
+    mountpoint: P,
+    options: &[&OsStr],
+) -> io::Result<()> {
+    let session = crate::async_api::tokio::OpenedTokio::create(
+        filesystem,
+        worker_channel_count,
+        mountpoint.as_ref(),
+        options,
+    )?;
+    session.run().await
+}
+
+/// Mount the given filesystem to the given mountpoint. This function will
+/// not return until the filesystem is unmounted.
+///
+/// NOTE: This will eventually replace mount(), once the API is stable
+#[cfg(all(not(feature = "libfuse"), feature = "async_tokio"))]
+pub async fn mount2<FS: Filesystem, P: AsRef<Path>>(
+    filesystem: FS,
+    worker_channel_count: usize,
+    mountpoint: P,
+    options: &[MountOption],
+) -> io::Result<()> {
+    check_option_conflicts(options)?;
+    let session = crate::async_api::tokio::OpenedTokio::create2(
+        filesystem,
+        worker_channel_count,
+        mountpoint.as_ref(),
+        options,
+    )?;
+
+    session.run().await
+}
+
+/// Mount the given filesystem to the given mountpoint. This function will
+/// not return until the filesystem is unmounted.
+///
+/// NOTE: This will eventually replace mount(), once the API is stable
+#[cfg(all(feature = "libfuse", feature = "async_tokio"))]
+pub async fn mount2<FS: Filesystem, P: AsRef<Path>>(
+    filesystem: FS,
+    worker_channel_count: usize,
+    mountpoint: P,
+    options: &[MountOption],
+) -> io::Result<()> {
+    check_option_conflicts(options)?;
+
+    let options: Vec<String> = options.iter().map(|x| option_to_string(x)).collect();
+    let option_str = options.join(",");
+    let args = vec![OsStr::new("-o"), OsStr::new(&option_str)];
+    let session = crate::async_api::tokio::OpenedTokio::create(
+        filesystem,
+        worker_channel_count,
+        mountpoint.as_ref(),
+        &args,
+    )?;
+    session.run().await
 }

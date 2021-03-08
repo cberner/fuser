@@ -21,6 +21,21 @@ cargo build --release --examples --features=abi-7-28${EXTRA_FEATURES}
 cp target/release/examples/$EXAMPLE_NAME /bin/fuser
 
 
+if [ "$TEST_TARGET" == "TOKIO" ]; then
+  EXTRA_FEATURES=",async_tokio"
+  EXAMPLE_NAME="simple_async"
+else
+  EXTRA_FEATURES=""
+  EXAMPLE_NAME="simple"
+fi
+
+cd /code/fuser
+
+cargo build --release --examples --features=abi-7-28${EXTRA_FEATURES}
+
+cp target/release/examples/$EXAMPLE_NAME /bin/fuser
+
+
 exit_handler() {
     exit "$XFSTESTS_EXIT_STATUS"
 }
