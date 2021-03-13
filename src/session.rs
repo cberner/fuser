@@ -7,9 +7,12 @@
 
 use libc::{EAGAIN, EINTR, ENODEV, ENOENT};
 use log::info;
-use std::fmt;
 use std::path::{Path, PathBuf};
 use std::thread::{self, JoinHandle};
+use std::{
+    fmt,
+    ops::{Deref, Range},
+};
 use std::{io, ops::DerefMut};
 
 use crate::ll::fuse_abi as abi;
@@ -82,15 +85,11 @@ impl<FS: Filesystem> Session<FS> {
     pub fn run(&mut self) -> io::Result<()> {
         // Buffer for receiving requests from the kernel. Only one is allocated and
         // it is reused immediately after dispatching to conserve memory and allocations.
-        let mut buffer = vec![0; BUFFER_SIZE];
-        let buf = aligned_sub_buf(
-            buffer.deref_mut(),
-            std::mem::align_of::<abi::fuse_in_header>(),
-        );
+        let mut buf = AlignedBox::new(BUFFER_SIZE);
         loop {
             // Read the next request from the given channel to kernel driver
             // The kernel driver makes sure that we get exactly one request per read
-            match self.ch.receive(buf) {
+            match self.ch.receive(&mut buf) {
                 Ok(size) => match Request::new(self.ch.sender(), &buf[..size]) {
                     // Dispatch request
                     Some(req) => req.dispatch(self),
@@ -119,15 +118,6 @@ impl<FS: Filesystem> Session<FS> {
     }
 }
 
-fn aligned_sub_buf(buf: &mut [u8], alignment: usize) -> &mut [u8] {
-    let off = alignment - (buf.as_ptr() as usize) % alignment;
-    if off == alignment {
-        buf
-    } else {
-        &mut buf[off..]
-    }
-}
-
 impl<FS: 'static + Filesystem + Send> Session<FS> {
     /// Run the session loop in a background thread
     pub fn spawn(self) -> io::Result<BackgroundSession> {
@@ -138,6 +128,42 @@ impl<FS: 'static + Filesystem + Send> Session<FS> {
 impl<FS: Filesystem> Drop for Session<FS> {
     fn drop(&mut self) {
         info!("Unmounted {}", self.mountpoint().display());
+    }
+}
+
+
+/// We want u8 data, but with u64 alignment so we can cast the data to our fuse_abi structs.  This
+/// represents such a buffer implemented with only safe code.
+struct AlignedBox {
+    buf: Box<[u8]>,
+    range: Range<usize>,
+}
+impl AlignedBox {
+    const ALIGNMENT: usize = std::mem::align_of::<abi::fuse_in_header>();
+
+    fn new(size: usize) -> Self {
+        // We can't create the box directly because it can overflow the stack.  Instead we create
+        // a vec and convert it.  It's 0 initialized.  The hope is that for large allocations the
+        // memory will be allocated from new pages cheaply avoiding a `memset()`.
+        let v = vec![0u8; size + Self::ALIGNMENT];
+        let buf = v.into_boxed_slice();
+        let off = Self::ALIGNMENT - (buf.as_ptr() as usize) % Self::ALIGNMENT;
+        Self {
+            buf,
+            range: off..off + size,
+        }
+    }
+}
+impl Deref for AlignedBox {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        &self.buf[self.range.clone()]
+    }
+}
+impl DerefMut for AlignedBox {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.buf[self.range.clone()]
     }
 }
 
