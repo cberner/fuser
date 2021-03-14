@@ -10,7 +10,7 @@ pub struct SubChannel {
 }
 
 #[async_trait::async_trait]
-impl crate::async_api::reply::ReplySender for SubChannel {
+impl super::super::super::reply::ReplySender for SubChannel {
     async fn send(&self, data: &[&[u8]]) {
         if let Err(err) = SubChannel::send(self, data).await {
             error!("Failed to send FUSE reply: {}", err);

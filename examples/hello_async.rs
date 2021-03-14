@@ -133,12 +133,12 @@ async fn main() {
             options.push(MountOption::AutoUnmount);
         }
     }
-    fuser::async_api::mount2(HelloFS, 5, mountpoint, &options)
+    fuser::async_api::mount(HelloFS, 5, mountpoint, &options)
         .await
         .unwrap();
 }
 
-#[cfg(not(feature = "async_impl"))]
+#[cfg(not(any(feature = "async_tokio")))]
 fn main() {
     panic!("No async implementation enabled.")
 }

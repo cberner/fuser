@@ -69,3 +69,12 @@ abi-7-28 = ["abi-7-27"]
 abi-7-29 = ["abi-7-28"]
 abi-7-30 = ["abi-7-29"]
 abi-7-31 = ["abi-7-30"]
+
+
+[[example]]
+name = "hello_async"
+required-features = ["async_api"]
+
+[[example]]
+name = "simple_async"
+required-features = ["async_api"]

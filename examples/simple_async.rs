@@ -1865,7 +1865,7 @@ async fn main() {
         .to_string();
 
     // wrap the FS in a mutex lock such that we don't need to concern ourselves about concurrent updates.
-    fuser::async_api::mount2(
+    fuser::async_api::mount(
         SimpleFS::new(data_dir, matches.is_present("direct-io")),
         0,
         mountpoint,
@@ -1875,7 +1875,7 @@ async fn main() {
     .unwrap();
 }
 
-#[cfg(not(feature = "async_impl"))]
+#[cfg(not(any(feature = "async_tokio")))]
 fn main() {
     panic!("No async implementation enabled.")
 }

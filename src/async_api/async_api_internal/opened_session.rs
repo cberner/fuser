@@ -5,7 +5,7 @@
 //! filesystem is mounted, the session loop receives, dispatches and replies to kernel requests
 //! for filesystem operations under its mount point.
 
-use crate::async_api::Filesystem;
+use super::Filesystem;
 
 use std::{io, sync::Arc};
 
@@ -22,7 +22,7 @@ pub struct OpenedSession<FS: Filesystem + 'static, OF: OpenedFlavor + 'static> {
     /// Filesystem operation implementations
     pub filesystem: FS,
     /// Communication channel to the kernel driver
-    pub(in crate::async_api) opened_flavor: OF,
+    pub(super) opened_flavor: OF,
 }
 
 impl<FS: Filesystem + 'static, OF: OpenedFlavor + 'static> OpenedSession<FS, OF> {

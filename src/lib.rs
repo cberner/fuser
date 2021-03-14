@@ -40,8 +40,27 @@ use std::cmp::max;
 #[cfg(feature = "abi-7-13")]
 use std::cmp::min;
 
+/// Exported interface for working with the async FileSystem interface
+/// Implemenatations such as tokio
 #[cfg(feature = "async_api")]
-pub mod async_api;
+pub mod async_api {
+    mod async_api_internal;
+    pub use async_api_internal::{Filesystem, Request};
+
+    #[cfg(target_os = "macos")]
+    pub use async_api_internal::reply::ReplyXTimes;
+    pub use async_api_internal::reply::ReplyXattr;
+    pub use async_api_internal::reply::{
+        Reply, ReplyAttr, ReplyData, ReplyEmpty, ReplyEntry, ReplyOpen,
+    };
+    pub use async_api_internal::reply::{
+        ReplyBmap, ReplyCreate, ReplyDirectory, ReplyDirectoryPlus, ReplyIoctl, ReplyLock,
+        ReplyLseek, ReplyStatfs, ReplyWrite,
+    };
+
+    #[cfg(any(feature = "async_tokio"))]
+    pub use async_api_internal::mount;
+}
 mod channel;
 mod ll;
 mod reply;

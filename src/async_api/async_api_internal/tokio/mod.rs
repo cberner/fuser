@@ -85,6 +85,11 @@ impl SessionHandle for TokioSession {
         if let Some(e) = d.take() {
             let _ = e.await;
         }
+
+        let mut driver_task_join = self.driver_join.lock().await;
+        if let Some(inner) = driver_task_join.take() {
+            let _ = inner.await;
+        }
         ()
     }
 }
@@ -92,12 +97,12 @@ impl SessionHandle for TokioSession {
 #[async_trait::async_trait]
 impl ActiveSession for TokioSession {
     fn destroyed(&self) -> bool {
-        self.is_destroyed.load(std::sync::atomic::Ordering::Relaxed)
+        self.is_destroyed.load(std::sync::atomic::Ordering::Acquire)
     }
 
     fn initialized(&self) -> bool {
         self.is_initialized
-            .load(std::sync::atomic::Ordering::Relaxed)
+            .load(std::sync::atomic::Ordering::Acquire)
     }
 
     async fn initialize(&self, version: &crate::ll::Version) -> () {
@@ -105,7 +110,7 @@ impl ActiveSession for TokioSession {
         cfg.proto_major = version.major();
         cfg.proto_minor = version.minor();
         self.is_initialized
-            .store(true, std::sync::atomic::Ordering::Relaxed);
+            .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
     async fn wait_worker_shutdown(&self) -> () {
@@ -126,7 +131,12 @@ impl ActiveSession for TokioSession {
         }
     }
 }
-
+/// WorkerIsTerminated
+/// This is to allow us to wait on the Receiver multiple times, even if nothing has come in
+/// The usual await on a Receiver consumes the type, here we want to possibly wait on it more than once
+/// so we cannot consume.
+/// The option covers the case that we await/try use this future after its finished. We will
+/// be set to a none and so always complete as ready rather than an error.
 struct WorkerIsTerminated(Option<Pin<Box<tokio::sync::oneshot::Receiver<()>>>>);
 impl<'a> Future for &'a mut WorkerIsTerminated {
     type Output = ();
@@ -187,7 +197,7 @@ impl Worker for TokioWorker {
                 _ => Some(Err(err)),
             },
             Ok(Some(size)) => {
-                if let Some(req) = crate::async_api::Request::new(&buffer[..size]) {
+                if let Some(req) = super::super::Request::new(&buffer[..size]) {
                     Some(Ok(req))
                 } else {
                     None
@@ -202,7 +212,7 @@ impl Worker for TokioWorker {
     }
 }
 
-pub(in crate::async_api) struct OpenedTokio {
+pub(in super::super) struct OpenedTokio {
     channel: channel::Channel,
 }
 

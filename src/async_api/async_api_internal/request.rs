@@ -6,7 +6,7 @@
 //! TODO: This module is meant to go away soon in favor of `ll::Request`.
 
 #[cfg(feature = "async_impl")]
-use crate::async_api::ActiveSession;
+use super::ActiveSession;
 #[cfg(feature = "async_impl")]
 use crate::ll::fuse_abi as abi;
 #[cfg(feature = "async_impl")]
@@ -27,12 +27,12 @@ use std::path::Path;
 use std::sync::Arc;
 
 #[cfg(feature = "abi-7-21")]
-use crate::async_api::reply::ReplyDirectoryPlus;
+use super::reply::ReplyDirectoryPlus;
 
 #[cfg(feature = "async_impl")]
-use crate::async_api::reply::{Reply, ReplyDirectory, ReplyEmpty, ReplyRaw};
+use super::reply::{Reply, ReplyDirectory, ReplyEmpty, ReplyRaw};
 #[cfg(feature = "async_impl")]
-use crate::async_api::Filesystem;
+use super::Filesystem;
 use crate::ll;
 
 #[cfg(feature = "async_impl")]
@@ -66,7 +66,7 @@ impl<'a> Request<'a> {
     }
 
     #[cfg(feature = "async_impl")]
-    pub(in crate::async_api) async fn dispatch_init(
+    pub(super) async fn dispatch_init(
         &self,
         se: &Arc<dyn ActiveSession>,
         filesystem: &Arc<dyn Filesystem>,
@@ -138,7 +138,7 @@ impl<'a> Request<'a> {
     /// This calls the appropriate filesystem operation method for the
     /// request and sends back the returned reply to the kernel
     #[cfg(feature = "async_impl")]
-    pub(in crate::async_api) async fn dispatch(
+    pub(super) async fn dispatch(
         &self,
         active_session: &Arc<dyn ActiveSession>,
         filesystem: Arc<dyn Filesystem>,

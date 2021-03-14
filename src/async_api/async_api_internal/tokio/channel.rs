@@ -17,12 +17,11 @@ use log::warn;
 use std::ffi::OsStr;
 use std::{os::unix::io::IntoRawFd, time::Duration};
 
+use crate::channel::unmount;
 #[cfg(any(feature = "libfuse", test))]
 use crate::channel::with_fuse_args;
-use crate::{
-    async_api::tokio::io_ops::{FileDescriptorRawHandle, SubChannel},
-    channel::unmount,
-};
+
+use super::io_ops::{FileDescriptorRawHandle, SubChannel};
 
 #[cfg(feature = "libfuse")]
 use std::ffi::CString;
@@ -244,6 +243,10 @@ impl Drop for Channel {
         // (closing it before unnmount prevents sync unmount deadlock)
 
         // Close all the channel/file handles. This will include the session fd.
+        // We close these since on macos(the blocking sub-channel path, we could use it on multiple platforms but today only osx)
+        // we don't actually have non-blocking sockets,
+        // as such one of the sub channels could be in a blocking read and not seeing our notification
+        // of shutdown. For non-osx this could likely be avoided.
         for sub_channel in self.sub_channels.iter() {
             sub_channel.close()
         }

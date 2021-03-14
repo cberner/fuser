@@ -5,9 +5,9 @@
 //! filesystem is mounted, the session loop receives, dispatches and replies to kernel requests
 //! for filesystem operations under its mount point.
 
-use crate::async_api::request::Request;
+use super::request::Request;
 #[cfg(feature = "async_impl")]
-use crate::async_api::Filesystem;
+use super::Filesystem;
 #[cfg(feature = "async_impl")]
 use crate::ll::fuse_abi as abi;
 
@@ -57,7 +57,7 @@ pub(super) trait ActiveSession: SessionHandle {
 }
 
 #[async_trait::async_trait]
-pub(in crate::async_api) trait Worker: Send + Sync {
+pub(super) trait Worker: Send + Sync {
     // this method can presumed to only return when the worker/session is being shut down
     // generally something like a one shot channel will back this.
     async fn wait_for_shutdown(&mut self) -> ();
@@ -71,7 +71,7 @@ pub(in crate::async_api) trait Worker: Send + Sync {
 }
 
 #[cfg(feature = "async_impl")]
-pub(in crate::async_api) async fn main_request_loop(
+pub(super) async fn main_request_loop(
     active_session: &Arc<dyn ActiveSession>,
     worker: &mut dyn Worker,
     filesystem: Arc<dyn Filesystem>,
@@ -111,7 +111,7 @@ pub(in crate::async_api) async fn main_request_loop(
 /// get a valid message. So while we won't process messages _before_ an init, a single channel if it gets its first message
 /// after a different channel got the init we will need to process that as if we were in the main loop.
 #[cfg(feature = "async_impl")]
-pub(in crate::async_api) async fn wait_for_init(
+pub(super) async fn wait_for_init(
     active_session: &Arc<dyn ActiveSession>,
     worker: &mut dyn Worker,
     filesystem: Arc<dyn Filesystem>,
@@ -153,19 +153,17 @@ pub(in crate::async_api) async fn wait_for_init(
 }
 
 #[cfg(feature = "async_impl")]
-pub(in crate::async_api) async fn spawn_worker_loop(
+pub(super) async fn spawn_worker_loop(
     active_session: Arc<dyn ActiveSession>,
     worker: &mut dyn Worker,
     filesystem: Arc<dyn Filesystem>,
 ) -> io::Result<()> {
-    crate::async_api::active_session::wait_for_init(&active_session, worker, filesystem.clone())
-        .await?;
-    crate::async_api::active_session::main_request_loop(&active_session, worker, filesystem.clone())
-        .await
+    super::active_session::wait_for_init(&active_session, worker, filesystem.clone()).await?;
+    super::active_session::main_request_loop(&active_session, worker, filesystem.clone()).await
 }
 
 #[cfg(feature = "async_impl")]
-pub(in crate::async_api) async fn driver_evt_loop(
+pub(super) async fn driver_evt_loop(
     active_session: Arc<dyn ActiveSession>,
     mut filesystem: Arc<dyn Filesystem>,
 ) -> io::Result<()> {
@@ -178,6 +176,7 @@ pub(in crate::async_api) async fn driver_evt_loop(
             break;
         }
     }
+
     return Ok(());
 }
 
