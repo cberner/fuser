@@ -6,9 +6,12 @@
 //! for filesystem operations under its mount point.
 
 use libc::{EAGAIN, EINTR, ENODEV, ENOENT};
-use log::info;
-use std::path::{Path, PathBuf};
+use log::{info, warn};
 use std::thread::{self, JoinHandle};
+use std::{
+    convert::TryFrom,
+    path::{Path, PathBuf},
+};
 use std::{
     fmt,
     ops::{Deref, Range},
@@ -19,7 +22,12 @@ use crate::ll::fuse_abi as abi;
 use crate::request::Request;
 use crate::Filesystem;
 use crate::MountOption;
-use crate::{channel::Channel, mnt::Mount};
+use crate::{
+    channel::Channel,
+    ll::{self, Request as _},
+    mnt::Mount,
+    reply::ReplySender,
+};
 
 /// The max size of write requests from the kernel. The absolute minimum is 4k,
 /// FUSE recommends at least 128k, max 16M. The FUSE default is 16M on macOS
@@ -131,6 +139,60 @@ impl<FS: Filesystem> Drop for Session<FS> {
     }
 }
 
+pub fn mount3(mountpoint: &Path, options: &[MountOption]) -> io::Result<(Channel, Mount)> {
+    let (file, mount) = Mount::new(mountpoint, options)?;
+    Ok((Channel::new(file), mount))
+}
+
+/// Serve
+pub fn serve_sync<FS>(chan: &Channel, mut fs: FS) -> std::io::Result<()>
+where
+    FS: FnMut(&ll::AnyRequest<'_>) -> Result<ll::Response, ll::Errno>,
+{
+    // Buffer for receiving requests from the kernel. Only one is allocated and
+    // it is reused immediately after dispatching to conserve memory and allocations.
+    let mut buf = AlignedBox::new(BUFFER_SIZE);
+    let sender = chan.sender();
+    loop {
+        // Read the next request from the given channel to kernel driver
+        // The kernel driver makes sure that we get exactly one request per read
+        let data = match chan.receive(&mut buf) {
+            Ok(size) => &buf[..size],
+            Err(err) => match err.raw_os_error() {
+                // Operation interrupted. Accordingly to FUSE, this is safe to retry
+                Some(ENOENT) => continue,
+                // Interrupted system call, retry
+                Some(EINTR) => continue,
+                // Filesystem was unmounted, quit the loop
+                Some(ENODEV) => break,
+                // Unhandled error
+                _ => return Err(err),
+            },
+        };
+        let req = match ll::AnyRequest::try_from(data) {
+            Ok(req) => req,
+            // Quit loop on illegal request
+            Err(_) => {
+                warn!("Error parsing request");
+                break;
+            }
+        };
+        // Dispatch request
+        let unique = req.unique();
+        let response = match fs(&req) {
+            Ok(resp) => resp,
+            Err(err) => {
+                eprintln!("Returning err {:?} to request {:?}", err, req.operation());
+                ll::Response::new_error(err)
+            }
+        };
+        // Send response
+        if let Err(err) = response.with_iovec(unique, |iov| sender.send(iov)) {
+            warn!("Sending response to request {:?} failed: {}", unique, err);
+        };
+    }
+    Ok(())
+}
 
 /// We want u8 data, but with u64 alignment so we can cast the data to our fuse_abi structs.  This
 /// represents such a buffer implemented with only safe code.

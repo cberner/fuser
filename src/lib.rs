@@ -10,6 +10,7 @@ pub use crate::ll::{
     fuse_abi::consts, AnyRequest, Attr, DirEntOffset, DirEntry, Errno, FileHandle, FilenameInDir,
     Generation, INodeNo, Operation, Request as RT, Response, TimeOrNow,
 };
+pub use crate::session::{mount3, serve_sync};
 use libc::{c_int, ENOSYS};
 use mnt::mount_options::parse_options_from_args;
 #[cfg(feature = "serializable")]
