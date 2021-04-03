@@ -22,4 +22,7 @@ RUN cd /code/fuser && mkdir src && touch src/lib.rs && cargo build --locked --re
 
 ADD . /code/fuser/
 
-RUN cd /code/fuser && cargo build --release --examples $BUILD_FEATURES && cp target/release/examples/simple /bin/fuser
+RUN cd /code/fuser && \
+  cargo build --release --examples $BUILD_FEATURES && \
+  cp target/release/examples/simple /bin/fuser && \
+  cp target/release/examples/simple_enum /bin/fuser_enum

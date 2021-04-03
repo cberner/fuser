@@ -21,19 +21,19 @@ xfstests:
 pjdfs_tests: pjdfs_tests_fuse2 pjdfs_tests_fuse3 pjdfs_tests_pure
 
 pjdfs_tests_fuse2:
-	docker build --build-arg BUILD_FEATURES='--features=abi-7-19' -t fuser:pjdfs -f pjdfs.Dockerfile .
+	docker build --build-arg BUILD_FEATURES='--features=abi-7-19,serializable' -t fuser:pjdfs -f pjdfs.Dockerfile .
 	# Additional permissions are needed to be able to mount FUSE
 	docker run --rm -$(INTERACTIVE)t --cap-add SYS_ADMIN --device /dev/fuse --security-opt apparmor:unconfined \
 	 -v "$(shell pwd)/logs:/code/logs" fuser:pjdfs bash -c "cd /code/fuser && ./pjdfs.sh"
 
 pjdfs_tests_fuse3:
-	docker build --build-arg BUILD_FEATURES='--features=abi-7-21' -t fuser:pjdfs -f pjdfs.Dockerfile .
+	docker build --build-arg BUILD_FEATURES='--features=abi-7-21,serializable' -t fuser:pjdfs -f pjdfs.Dockerfile .
 	# Additional permissions are needed to be able to mount FUSE
 	docker run --rm -$(INTERACTIVE)t --cap-add SYS_ADMIN --device /dev/fuse --security-opt apparmor:unconfined \
 	 -v "$(shell pwd)/logs:/code/logs" fuser:pjdfs bash -c "cd /code/fuser && ./pjdfs.sh"
 
 pjdfs_tests_pure:
-	docker build --build-arg BUILD_FEATURES='--no-default-features --features=abi-7-19' -t fuser:pjdfs -f pjdfs.Dockerfile .
+	docker build --build-arg BUILD_FEATURES='--no-default-features --features=abi-7-19,serializable' -t fuser:pjdfs -f pjdfs.Dockerfile .
 	# Additional permissions are needed to be able to mount FUSE
 	docker run --rm -$(INTERACTIVE)t --cap-add SYS_ADMIN --device /dev/fuse --security-opt apparmor:unconfined \
 	 -v "$(shell pwd)/logs:/code/logs" fuser:pjdfs bash -c "cd /code/fuser && ./pjdfs.sh"
