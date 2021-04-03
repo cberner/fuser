@@ -6,6 +6,10 @@
 
 #![warn(missing_docs, missing_debug_implementations, rust_2018_idioms)]
 
+pub use crate::ll::{
+    fuse_abi::consts, AnyRequest, Attr, DirEntOffset, DirEntry, Errno, FileHandle, FilenameInDir,
+    Generation, INodeNo, Operation, Request as RT, Response, TimeOrNow,
+};
 use libc::{c_int, ENOSYS};
 use mnt::mount_options::parse_options_from_args;
 #[cfg(feature = "serializable")]
@@ -18,9 +22,7 @@ use std::time::Duration;
 use std::time::SystemTime;
 use std::{convert::AsRef, io::ErrorKind};
 
-use crate::ll::fuse_abi::consts::*;
 pub use crate::ll::fuse_abi::FUSE_ROOT_ID;
-pub use crate::ll::{fuse_abi::consts, TimeOrNow};
 use crate::mnt::mount_options::check_option_conflicts;
 use crate::session::MAX_WRITE_SIZE;
 pub use mnt::mount_options::MountOption;
@@ -48,15 +50,18 @@ mod session;
 
 /// We generally support async reads
 #[cfg(all(not(target_os = "macos"), not(feature = "abi-7-10")))]
-const INIT_FLAGS: u32 = FUSE_ASYNC_READ;
+const INIT_FLAGS: u32 = consts::FUSE_ASYNC_READ;
 #[cfg(all(not(target_os = "macos"), feature = "abi-7-10"))]
-const INIT_FLAGS: u32 = FUSE_ASYNC_READ | FUSE_BIG_WRITES;
+const INIT_FLAGS: u32 = consts::FUSE_ASYNC_READ | consts::FUSE_BIG_WRITES;
 // TODO: Add FUSE_EXPORT_SUPPORT
 
 /// On macOS, we additionally support case insensitiveness, volume renames and xtimes
 /// TODO: we should eventually let the filesystem implementation decide which flags to set
 #[cfg(target_os = "macos")]
-const INIT_FLAGS: u32 = FUSE_ASYNC_READ | FUSE_CASE_INSENSITIVE | FUSE_VOL_RENAME | FUSE_XTIMES;
+const INIT_FLAGS: u32 = consts::FUSE_ASYNC_READ
+    | consts::FUSE_CASE_INSENSITIVE
+    | consts::FUSE_VOL_RENAME
+    | consts::FUSE_XTIMES;
 // TODO: Add FUSE_EXPORT_SUPPORT and FUSE_BIG_WRITES (requires ABI 7.10)
 
 const fn default_init_flags(#[allow(unused_variables)] capabilities: u32) -> u32 {
@@ -68,8 +73,8 @@ const fn default_init_flags(#[allow(unused_variables)] capabilities: u32) -> u32
     #[cfg(feature = "abi-7-28")]
     {
         let mut flags = INIT_FLAGS;
-        if capabilities & FUSE_MAX_PAGES != 0 {
-            flags |= FUSE_MAX_PAGES;
+        if capabilities & consts::FUSE_MAX_PAGES != 0 {
+            flags |= consts::FUSE_MAX_PAGES;
         }
         flags
     }

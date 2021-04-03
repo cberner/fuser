@@ -7,9 +7,10 @@ mod request;
 
 use std::{convert::TryInto, num::NonZeroI32, time::SystemTime};
 
-pub use reply::Response;
+pub use reply::{Attr, DirEntOffset, DirEntry, Response};
 pub use request::{
-    AnyRequest, FileHandle, INodeNo, Lock, Operation, Request, RequestError, RequestId, Version,
+    AnyRequest, FileHandle, FilenameInDir, INodeNo, Lock, Operation, Request, RequestError,
+    RequestId, Version,
 };
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
