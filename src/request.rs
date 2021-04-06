@@ -462,7 +462,7 @@ impl<'a> Request<'a> {
                     x.file_handle().into(),
                     x.offset(),
                     x.len(),
-                    x.mode(),
+                    x.mode_i32(),
                     self.reply(),
                 );
             }

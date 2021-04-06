@@ -9,7 +9,7 @@ use std::{convert::TryInto, num::NonZeroI32, time::SystemTime};
 
 pub use reply::{Attr, DirEntOffset, DirEntry, Response};
 pub use request::{
-    AnyRequest, FileHandle, FilenameInDir, INodeNo, Lock, Operation, Request, RequestError,
+    op, AnyRequest, FileHandle, FilenameInDir, INodeNo, Lock, Operation, Request, RequestError,
     RequestId, Version,
 };
 
@@ -271,7 +271,6 @@ mod test {
     use std::ops::{Deref, DerefMut};
     /// If we want to be able to cast bytes to our fuse C struct types we need it
     /// to be aligned.  This struct helps getting &[u8]s which are 8 byte aligned.
-    #[cfg(test)]
     #[repr(align(8))]
     pub(crate) struct AlignedData<T>(pub T);
     impl<T> Deref for AlignedData<T> {

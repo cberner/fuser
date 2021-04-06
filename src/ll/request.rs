@@ -76,6 +76,10 @@ impl From<INodeNo> for u64 {
         fh.0
     }
 }
+impl INodeNo {
+    /// The filesystem's root directory always has INodeNo 1.
+    pub const ROOT: INodeNo = INodeNo(1);
+}
 
 /// A newtype for file handles
 ///
@@ -271,7 +275,7 @@ macro_rules! impl_request {
     };
 }
 
-mod op {
+pub mod op {
     #[cfg(feature = "abi-7-21")]
     use super::super::reply::{DirEntPlusList, DirEntryPlus};
 
@@ -285,7 +289,8 @@ mod op {
         FilenameInDir, Request,
     };
     use super::{
-        abi::consts::*, abi::*, FileHandle, INodeNo, Lock, LockOwner, Operation, RequestId,
+        abi::consts::*, abi::*, FileHandle, FilenameInDir, INodeNo, Lock, LockOwner, Operation,
+        RequestId,
     };
     use std::{
         convert::TryInto,
@@ -293,6 +298,7 @@ mod op {
         fmt::Display,
         iter::Peekable,
         num::NonZeroU32,
+        ops::Range,
         os::unix::prelude::OsStrExt,
         path::Path,
         time::{Duration, SystemTime},
@@ -345,7 +351,10 @@ mod op {
     #[derive(Debug)]
     pub struct Forget<'a> {
         header: &'a fuse_in_header,
+
         arg: &'a fuse_forget_in,
+        //        arg: &'a fuse_batch_forget_in,
+        //        nodes: &'a [fuse_forget_one],
     }
     impl_request!(Forget<'_>);
     impl<'a> Forget<'a> {
@@ -767,6 +776,7 @@ mod op {
     }
     impl_request!(Open<'_>);
     impl<'a> Open<'a> {
+        // TODO: Split this up so
         pub fn flags(&self) -> i32 {
             self.arg.flags
         }
@@ -1696,10 +1706,17 @@ mod op {
         pub fn file_handle(&self) -> FileHandle {
             FileHandle(self.arg.fh)
         }
+        pub fn offset(&self) -> i64 {
+            self.arg.offset
+        }
+        pub fn len(&self) -> i64 {
+            self.arg.length
+        }
         /// The range of bytes in the file that this operation should be applied to:
         pub fn range(&self) -> Result<Range<u64>, Errno> {
-            Ok(self.arg.offset.try_into().map_err(|_| Errno::EINVAL)?
-                ..self.arg.length.try_into().map_err(|_| Errno::EINVAL)?)
+            let off = self.arg.offset.try_into().map_err(|_| Errno::EINVAL)?;
+            let len: u64 = self.arg.length.try_into().map_err(|_| Errno::EINVAL)?;
+            Ok(off..off + len)
         }
         /// `mode` as passed to fallocate.  See `man 2 fallocate`
         /// TODO: Make an enum
@@ -1953,6 +1970,7 @@ mod op {
             self.arg.options
         }
     }
+
     /// TODO: Document
     #[cfg(feature = "abi-7-12")]
     #[derive(Debug)]

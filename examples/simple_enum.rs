@@ -1267,6 +1267,7 @@ impl SimpleFS {
                 )
             }
 
+            #[cfg(feature = "abi-7-19")]
             #[cfg(target_os = "linux")]
             FAllocate(x) => {
                 let path = self.content_path(x.nodeid());
@@ -1275,15 +1276,16 @@ impl SimpleFS {
                     .open(&path)
                     .map_err(|_| Errno::ENOENT)?;
                 unsafe {
-                    libc::fallocate64(file.into_raw_fd(), x.mode(), x.offset(), x.len());
+                    libc::fallocate64(file.into_raw_fd(), x.mode_i32(), x.offset(), x.len());
                 }
                 // TODO: Make mode -> mode_u32
-                if x.mode() & libc::FALLOC_FL_KEEP_SIZE == 0 {
+                if x.mode_i32() & libc::FALLOC_FL_KEEP_SIZE == 0 {
                     let mut attrs = self.get_inode(x.nodeid()).unwrap();
                     attrs.last_metadata_changed = time_now();
                     attrs.last_modified = time_now();
-                    if (x.offset() + x.len()) as u64 > attrs.size {
-                        attrs.size = (x.offset() + x.len()) as u64;
+                    let end = x.range()?.end;
+                    if end > attrs.size {
+                        attrs.size = end;
                     }
                     self.write_inode(&attrs);
                 }

@@ -7,8 +7,8 @@
 #![warn(missing_docs, missing_debug_implementations, rust_2018_idioms)]
 
 pub use crate::ll::{
-    fuse_abi::consts, AnyRequest, Attr, DirEntOffset, DirEntry, Errno, FileHandle, FilenameInDir,
-    Generation, INodeNo, Operation, Request as RT, Response, TimeOrNow,
+    fuse_abi::consts, op, AnyRequest, Attr, DirEntOffset, DirEntry, Errno, FileHandle,
+    FilenameInDir, Generation, INodeNo, Operation, Request as RT, Response, TimeOrNow,
 };
 pub use crate::session::{mount3, serve_sync};
 use libc::{c_int, ENOSYS};
@@ -156,7 +156,7 @@ pub struct KernelConfig {
 }
 
 impl KernelConfig {
-    fn new(capabilities: u32, max_readahead: u32) -> Self {
+    pub fn new(capabilities: u32, max_readahead: u32) -> Self {
         Self {
             capabilities,
             requested: default_init_flags(capabilities),
