@@ -1696,14 +1696,14 @@ mod op {
         pub fn file_handle(&self) -> FileHandle {
             FileHandle(self.arg.fh)
         }
-        pub fn offset(&self) -> i64 {
-            self.arg.offset
-        }
-        pub fn len(&self) -> i64 {
-            self.arg.length
+        /// The range of bytes in the file that this operation should be applied to:
+        pub fn range(&self) -> Result<Range<u64>, Errno> {
+            Ok(self.arg.offset.try_into().map_err(|_| Errno::EINVAL)?
+                ..self.arg.length.try_into().map_err(|_| Errno::EINVAL)?)
         }
         /// `mode` as passed to fallocate.  See `man 2 fallocate`
-        pub fn mode(&self) -> i32 {
+        /// TODO: Make an enum
+        pub fn mode_i32(&self) -> i32 {
             self.arg.mode
         }
         pub fn reply(&self) -> Response {
