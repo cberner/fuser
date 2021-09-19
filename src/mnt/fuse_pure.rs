@@ -23,9 +23,11 @@ use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::{mem, ptr};
 
-const FUSERMOUNT_BIN: &str = "fusermount";
-const FUSERMOUNT3_BIN: &str = "fusermount3";
-const FUSERMOUNT_COMM_ENV: &str = "_FUSE_COMMFD";
+#[cfg(target_os = "linux")]
+const FUSE_PROGRAM_NAME: &str = "fusermount";
+
+#[cfg(target_os = "macos")]
+const FUSE_PROGRAM_NAME: &str = "macfuse";
 
 #[derive(Debug)]
 pub struct Mount {
@@ -75,13 +77,14 @@ impl Drop for Mount {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn fuse_mount_pure(
     mountpoint: &OsStr,
     options: &[MountOption],
 ) -> Result<(File, Option<UnixStream>), io::Error> {
     if options.contains(&MountOption::AutoUnmount) {
         // Auto unmount is only supported via fusermount
-        return fuse_mount_fusermount(mountpoint, options);
+        return fuse_mount(mountpoint, options);
     }
 
     let res = fuse_mount_sys(mountpoint, options)?;
@@ -89,8 +92,16 @@ fn fuse_mount_pure(
         Ok((file, None))
     } else {
         // Retry
-        fuse_mount_fusermount(mountpoint, options)
+        fuse_mount(mountpoint, options)
     }
+}
+
+#[cfg(target_os = "macos")]
+fn fuse_mount_pure(
+    mountpoint: &OsStr,
+    options: &[MountOption],
+) -> Result<(File, Option<UnixStream>), io::Error> {
+    fuse_mount(mountpoint, options)
 }
 
 fn fuse_unmount_pure(mountpoint: &CStr) {
@@ -109,7 +120,7 @@ fn fuse_unmount_pure(mountpoint: &CStr) {
         }
     }
 
-    let mut builder = Command::new(detect_fusermount_bin());
+    let mut builder = Command::new(detect_fuse_program());
     builder.stdout(Stdio::piped()).stderr(Stdio::piped());
     builder
         .arg("-u")
@@ -119,17 +130,21 @@ fn fuse_unmount_pure(mountpoint: &CStr) {
         .arg(OsStr::new(&mountpoint.to_string_lossy().into_owned()));
 
     if let Ok(output) = builder.output() {
-        debug!("fusermount: {}", String::from_utf8_lossy(&output.stdout));
-        debug!("fusermount: {}", String::from_utf8_lossy(&output.stderr));
+        debug!("{}: {}", FUSE_PROGRAM_NAME, String::from_utf8_lossy(&output.stdout));
+        debug!("{}: {}", FUSE_PROGRAM_NAME, String::from_utf8_lossy(&output.stderr));
     }
 }
 
-fn detect_fusermount_bin() -> String {
+#[cfg(target_os = "linux")]
+fn detect_fuse_program() -> String {
+    let fusermount_bin = "fusermount";
+    let fusermount3_bin = "fusermount3";
+
     for name in [
-        FUSERMOUNT3_BIN.to_string(),
-        FUSERMOUNT_BIN.to_string(),
-        format!("/bin/{}", FUSERMOUNT3_BIN),
-        format!("/bin/{}", FUSERMOUNT_BIN),
+        fusermount3_bin.to_string(),
+        fusermount_bin.to_string(),
+        format!("/bin/{}", fusermount3_bin),
+        format!("/bin/{}", fusermount_bin),
     ]
     .iter()
     {
@@ -138,10 +153,15 @@ fn detect_fusermount_bin() -> String {
         }
     }
     // Default to fusermount3
-    FUSERMOUNT3_BIN.to_string()
+    fusermount3_bin.to_string()
 }
 
-fn receive_fusermount_message(socket: &UnixStream) -> Result<File, Error> {
+#[cfg(target_os = "macos")]
+fn detect_fuse_program() -> String {
+    return "/Library/Filesystems/macfuse.fs/Contents/Resources/mount_macfuse".to_string()
+}
+
+fn receive_fuse_message(socket: &UnixStream) -> Result<File, Error> {
     let mut io_vec_buf = [0u8];
     let mut io_vec = libc::iovec {
         iov_base: (&mut io_vec_buf).as_mut_ptr() as *mut libc::c_void,
@@ -191,7 +211,7 @@ fn receive_fusermount_message(socket: &UnixStream) -> Result<File, Error> {
     if result == 0 {
         return Err(Error::new(
             ErrorKind::UnexpectedEof,
-            "Unexpected EOF reading from fusermount",
+            format!("Unexpected EOF reading from {}", FUSE_PROGRAM_NAME),
         ));
     }
 
@@ -201,7 +221,8 @@ fn receive_fusermount_message(socket: &UnixStream) -> Result<File, Error> {
             return Err(Error::new(
                 ErrorKind::InvalidData,
                 format!(
-                    "Unknown control message from fusermount: {}",
+                    "Unknown control message from {}: {}",
+                    FUSE_PROGRAM_NAME,
                     (*control_msg).cmsg_type
                 ),
             ));
@@ -217,7 +238,7 @@ fn receive_fusermount_message(socket: &UnixStream) -> Result<File, Error> {
     }
 }
 
-fn fuse_mount_fusermount(
+fn fuse_mount(
     mountpoint: &OsStr,
     options: &[MountOption],
 ) -> Result<(File, Option<UnixStream>), Error> {
@@ -227,7 +248,7 @@ fn fuse_mount_fusermount(
         libc::fcntl(child_socket.as_raw_fd(), libc::F_SETFD, 0);
     }
 
-    let mut builder = Command::new(detect_fusermount_bin());
+    let mut builder = Command::new(detect_fuse_program());
     builder.stdout(Stdio::piped()).stderr(Stdio::piped());
     if !options.is_empty() {
         builder.arg("-o");
@@ -237,24 +258,31 @@ fn fuse_mount_fusermount(
     builder
         .arg("--")
         .arg(mountpoint)
-        .env(FUSERMOUNT_COMM_ENV, child_socket.as_raw_fd().to_string());
+        .env("_FUSE_COMMFD", child_socket.as_raw_fd().to_string());
 
-    let fusermount_child = builder.spawn()?;
+    #[cfg(target_os = "macos")]
+    {
+        builder
+            .env("_FUSE_CALL_BY_LIB", "1")
+            .env("_FUSE_DAEMON_PATH", std::env::current_exe()?);
+    }
+
+    let fuse_child = builder.spawn()?;
 
     drop(child_socket); // close socket in parent
 
-    let file = receive_fusermount_message(&receive_socket)?;
+    let file = receive_fuse_message(&receive_socket)?;
     let mut receive_socket = Some(receive_socket);
 
     if !options.contains(&MountOption::AutoUnmount) {
         // Only close the socket, if auto unmount is not set.
         // fusermount will keep running until the socket is closed, if auto unmount is set
         drop(mem::take(&mut receive_socket));
-        let output = fusermount_child.wait_with_output()?;
+        let output = fuse_child.wait_with_output()?;
         debug!("fusermount: {}", String::from_utf8_lossy(&output.stdout));
         debug!("fusermount: {}", String::from_utf8_lossy(&output.stderr));
     } else {
-        if let Some(mut stdout) = fusermount_child.stdout {
+        if let Some(mut stdout) = fuse_child.stdout {
             let stdout_fd = stdout.as_raw_fd();
             unsafe {
                 let mut flags = libc::fcntl(stdout_fd, libc::F_GETFL, 0);
@@ -263,10 +291,10 @@ fn fuse_mount_fusermount(
             }
             let mut buf = vec![0; 64 * 1024];
             if let Ok(len) = stdout.read(&mut buf) {
-                debug!("fusermount: {}", String::from_utf8_lossy(&buf[..len]));
+                debug!("{}: {}", FUSE_PROGRAM_NAME, String::from_utf8_lossy(&buf[..len]));
             }
         }
-        if let Some(mut stderr) = fusermount_child.stderr {
+        if let Some(mut stderr) = fuse_child.stderr {
             let stderr_fd = stderr.as_raw_fd();
             unsafe {
                 let mut flags = libc::fcntl(stderr_fd, libc::F_GETFL, 0);
@@ -275,7 +303,7 @@ fn fuse_mount_fusermount(
             }
             let mut buf = vec![0; 64 * 1024];
             if let Ok(len) = stderr.read(&mut buf) {
-                debug!("fusermount: {}", String::from_utf8_lossy(&buf[..len]));
+                debug!("{}: {}", FUSE_PROGRAM_NAME, String::from_utf8_lossy(&buf[..len]));
             }
         }
     }
