@@ -130,8 +130,16 @@ fn fuse_unmount_pure(mountpoint: &CStr) {
         .arg(OsStr::new(&mountpoint.to_string_lossy().into_owned()));
 
     if let Ok(output) = builder.output() {
-        debug!("{}: {}", FUSE_PROGRAM_NAME, String::from_utf8_lossy(&output.stdout));
-        debug!("{}: {}", FUSE_PROGRAM_NAME, String::from_utf8_lossy(&output.stderr));
+        debug!(
+            "{}: {}",
+            FUSE_PROGRAM_NAME,
+            String::from_utf8_lossy(&output.stdout)
+        );
+        debug!(
+            "{}: {}",
+            FUSE_PROGRAM_NAME,
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 }
 
@@ -158,7 +166,7 @@ fn detect_fuse_program() -> String {
 
 #[cfg(target_os = "macos")]
 fn detect_fuse_program() -> String {
-    return "/Library/Filesystems/macfuse.fs/Contents/Resources/mount_macfuse".to_string()
+    "/Library/Filesystems/macfuse.fs/Contents/Resources/mount_macfuse".to_string()
 }
 
 fn receive_fuse_message(socket: &UnixStream) -> Result<File, Error> {
@@ -291,7 +299,11 @@ fn fuse_mount(
             }
             let mut buf = vec![0; 64 * 1024];
             if let Ok(len) = stdout.read(&mut buf) {
-                debug!("{}: {}", FUSE_PROGRAM_NAME, String::from_utf8_lossy(&buf[..len]));
+                debug!(
+                    "{}: {}",
+                    FUSE_PROGRAM_NAME,
+                    String::from_utf8_lossy(&buf[..len])
+                );
             }
         }
         if let Some(mut stderr) = fuse_child.stderr {
@@ -303,7 +315,11 @@ fn fuse_mount(
             }
             let mut buf = vec![0; 64 * 1024];
             if let Ok(len) = stderr.read(&mut buf) {
-                debug!("{}: {}", FUSE_PROGRAM_NAME, String::from_utf8_lossy(&buf[..len]));
+                debug!(
+                    "{}: {}",
+                    FUSE_PROGRAM_NAME,
+                    String::from_utf8_lossy(&buf[..len])
+                );
             }
         }
     }
