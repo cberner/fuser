@@ -27,7 +27,7 @@ use std::{mem, ptr};
 const FUSE_PROGRAM_NAME: &str = "fusermount";
 
 #[cfg(target_os = "macos")]
-const FUSE_PROGRAM_NAME: &str = "macfuse";
+const FUSE_PROGRAM_NAME: &str = "mount_macfuse";
 
 #[derive(Debug)]
 pub struct Mount {
