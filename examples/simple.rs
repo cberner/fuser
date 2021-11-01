@@ -17,6 +17,7 @@ use log::info;
 use log::LevelFilter;
 use log::{debug, warn};
 use serde::{Deserialize, Serialize};
+use tempfile::NamedTempFile;
 use std::cmp::min;
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
@@ -304,13 +305,9 @@ impl SimpleFS {
             fuser::FUSE_ROOT_ID
         };
 
-        let file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&path)
-            .unwrap();
-        bincode::serialize_into(file, &(current_inode + 1)).unwrap();
+        let file = NamedTempFile::new_in(&self.data_dir).unwrap();
+        bincode::serialize_into(file.as_file(), &(current_inode + 1)).unwrap();
+        file.persist(path).unwrap();
 
         current_inode + 1
     }
@@ -355,16 +352,13 @@ impl SimpleFS {
     }
 
     fn write_directory_content(&self, inode: Inode, entries: DirectoryDescriptor) {
+        let tf = NamedTempFile::new_in(&self.data_dir).unwrap();
+        bincode::serialize_into(tf.as_file(), &entries).unwrap();
+
         let path = Path::new(&self.data_dir)
             .join("contents")
             .join(inode.to_string());
-        let file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&path)
-            .unwrap();
-        bincode::serialize_into(file, &entries).unwrap();
+        tf.persist(path).unwrap();
     }
 
     fn get_inode(&self, inode: Inode) -> Result<InodeAttributes, c_int> {
@@ -379,16 +373,13 @@ impl SimpleFS {
     }
 
     fn write_inode(&self, inode: &InodeAttributes) {
+        let tf = NamedTempFile::new_in(&self.data_dir).unwrap();
+        bincode::serialize_into(tf.as_file(), inode).unwrap();
+
         let path = Path::new(&self.data_dir)
             .join("inodes")
             .join(inode.inode.to_string());
-        let file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&path)
-            .unwrap();
-        bincode::serialize_into(file, inode).unwrap();
+        tf.persist(path).unwrap();
     }
 
     // Check whether a file should be removed from storage. Should be called after decrementing
@@ -1050,14 +1041,9 @@ impl Filesystem for SimpleFS {
         }
         self.write_inode(&attrs);
 
-        let path = self.content_path(inode);
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&path)
-            .unwrap();
-        file.write_all(link.as_os_str().as_bytes()).unwrap();
+        let f = NamedTempFile::new_in(&self.data_dir).unwrap();
+        f.as_file().write_all(link.as_os_str().as_bytes()).unwrap();
+        f.persist(self.content_path(inode)).unwrap();
 
         reply.entry(&Duration::new(0, 0), &attrs.into(), 0);
     }
