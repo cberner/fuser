@@ -9,8 +9,10 @@
 use libc::{c_int, ENOSYS};
 use log::{debug, warn};
 use mnt::mount_options::parse_options_from_args;
+use mnt::Mount;
 #[cfg(feature = "serializable")]
 use serde::{Deserialize, Serialize};
+pub use session::{serve_fs_sync_forever, ChannelInit, ChannelUninit};
 use std::ffi::OsStr;
 use std::io;
 use std::path::Path;
@@ -135,7 +137,7 @@ pub struct FileAttr {
 }
 
 /// Configuration of the fuse kernel module connection
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct KernelConfig {
     capabilities: u32,
     requested: u32,
@@ -990,6 +992,18 @@ pub fn mount2<FS: Filesystem, P: AsRef<Path>>(
 ) -> io::Result<()> {
     check_option_conflicts(options)?;
     Session::new(filesystem, mountpoint.as_ref(), options).and_then(|mut se| se.run())
+}
+
+/// Mount a filesystem at the given mountpoint.
+///
+/// Note: unlike mount and mount2, this function returns immediately after
+/// mounting occurs, and does not call any of your filesystem functions.
+pub fn mount3<P: AsRef<Path>>(
+    mountpoint: P,
+    options: &[MountOption],
+) -> io::Result<(ChannelUninit, Mount)> {
+    check_option_conflicts(options)?;
+    session::mount3(mountpoint.as_ref(), options)
 }
 
 /// Mount the given filesystem to the given mountpoint. This function spawns

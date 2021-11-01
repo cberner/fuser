@@ -855,12 +855,19 @@ pub struct fuse_access_in {
 }
 
 #[repr(C)]
-#[derive(Debug, FromBytes)]
+#[derive(Debug, Copy, Clone, FromBytes)]
 pub struct fuse_init_in {
     pub major: u32,
     pub minor: u32,
     pub max_readahead: u32,
     pub flags: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, FromBytes)]
+pub struct fuse_init_in_msg {
+    pub header: fuse_in_header,
+    pub body: fuse_init_in,
 }
 
 #[repr(C)]
@@ -887,6 +894,13 @@ pub struct fuse_init_out {
     pub unused2: u16,
     #[cfg(feature = "abi-7-28")]
     pub reserved: [u32; 8],
+}
+
+#[repr(C)]
+#[derive(Debug, AsBytes)]
+pub struct fuse_init_out_msg {
+    pub header: fuse_out_header,
+    pub arg: fuse_init_out,
 }
 
 #[cfg(feature = "abi-7-12")]
@@ -1006,7 +1020,7 @@ pub struct fuse_fallocate_in {
 }
 
 #[repr(C)]
-#[derive(Debug, FromBytes)]
+#[derive(Debug, Copy, Clone, FromBytes)]
 pub struct fuse_in_header {
     pub len: u32,
     pub opcode: u32,

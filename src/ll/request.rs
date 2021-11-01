@@ -264,7 +264,7 @@ macro_rules! impl_request {
     };
 }
 
-mod op {
+pub(crate) mod op {
     use crate::ll::Response;
 
     use super::{
@@ -950,8 +950,8 @@ mod op {
 
     #[derive(Debug)]
     pub struct Init<'a> {
-        header: &'a fuse_in_header,
-        arg: &'a fuse_init_in,
+        pub(crate) header: &'a fuse_in_header,
+        pub(crate) arg: &'a fuse_init_in,
     }
     impl_request!(Init<'a>);
     impl<'a> Init<'a> {
@@ -2161,7 +2161,7 @@ impl<'a> TryFrom<&'a [u8]> for AnyRequest<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::test::AlignedData;
+    use super::super::AlignedData;
     use super::*;
     use std::ffi::OsStr;
 

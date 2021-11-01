@@ -86,7 +86,7 @@ impl<'a> ArgumentIterator<'a> {
 pub mod tests {
     use std::ops::Deref;
 
-    use super::super::test::AlignedData;
+    use super::super::AlignedData;
     use super::*;
     use zerocopy::FromBytes;
 

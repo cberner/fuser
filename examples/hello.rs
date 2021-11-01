@@ -143,5 +143,6 @@ fn main() {
     if matches.is_present("allow-root") {
         options.push(MountOption::AllowRoot);
     }
-    fuser::mount2(HelloFS, mountpoint, &options).unwrap();
+    let (chan, _mount) = fuser::mount3(mountpoint, &options).unwrap();
+    fuser::serve_fs_sync_forever(&chan.init().unwrap(), HelloFS).unwrap();
 }

@@ -8,9 +8,9 @@ use fuser::consts::FUSE_HANDLE_KILLPRIV;
 use fuser::consts::FUSE_WRITE_KILL_PRIV;
 use fuser::TimeOrNow::Now;
 use fuser::{
-    Filesystem, KernelConfig, MountOption, ReplyAttr, ReplyCreate, ReplyData, ReplyDirectory,
-    ReplyEmpty, ReplyEntry, ReplyOpen, ReplyStatfs, ReplyWrite, ReplyXattr, Request, TimeOrNow,
-    FUSE_ROOT_ID,
+    serve_fs_sync_forever, Filesystem, MountOption, ReplyAttr, ReplyCreate,
+    ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen, ReplyStatfs, ReplyWrite,
+    ReplyXattr, Request, TimeOrNow, FUSE_ROOT_ID,
 };
 #[cfg(feature = "abi-7-26")]
 use log::info;
@@ -250,29 +250,42 @@ struct SimpleFS {
 }
 
 impl SimpleFS {
-    fn new(
-        data_dir: String,
-        direct_io: bool,
-        #[allow(unused_variables)] suid_support: bool,
-    ) -> SimpleFS {
-        #[cfg(feature = "abi-7-26")]
-        {
-            SimpleFS {
-                data_dir,
-                next_file_handle: AtomicU64::new(1),
-                direct_io,
-                suid_support,
-            }
+    fn new(data_dir: String, direct_io: bool, mut suid_support: bool) -> SimpleFS {
+        if !cfg!(feature = "abi-7-26") {
+            suid_support = false;
+        };
+        fs::create_dir_all(Path::new(&data_dir).join("inodes")).unwrap();
+        fs::create_dir_all(Path::new(&data_dir).join("contents")).unwrap();
+
+        let out = SimpleFS {
+            data_dir,
+            next_file_handle: AtomicU64::new(1),
+            direct_io,
+            suid_support,
+        };
+
+        if out.get_inode(FUSE_ROOT_ID).is_err() {
+            // Initialize with empty filesystem
+            let root = InodeAttributes {
+                inode: FUSE_ROOT_ID,
+                open_file_handles: 0,
+                size: 0,
+                last_accessed: time_now(),
+                last_modified: time_now(),
+                last_metadata_changed: time_now(),
+                kind: FileKind::Directory,
+                mode: 0o777,
+                hardlinks: 2,
+                uid: 0,
+                gid: 0,
+                xattrs: Default::default(),
+            };
+            out.write_inode(&root);
+            let mut entries = BTreeMap::new();
+            entries.insert(b".".to_vec(), (FUSE_ROOT_ID, FileKind::Directory));
+            out.write_directory_content(FUSE_ROOT_ID, entries);
         }
-        #[cfg(not(feature = "abi-7-26"))]
-        {
-            SimpleFS {
-                data_dir,
-                next_file_handle: AtomicU64::new(1),
-                direct_io,
-                suid_support: false,
-            }
-        }
+        out
     }
 
     fn creation_mode(&self, mode: u32) -> u16 {
@@ -476,40 +489,6 @@ impl SimpleFS {
 }
 
 impl Filesystem for SimpleFS {
-    fn init(
-        &mut self,
-        _req: &Request,
-        #[allow(unused_variables)] config: &mut KernelConfig,
-    ) -> Result<(), c_int> {
-        #[cfg(feature = "abi-7-26")]
-        config.add_capabilities(FUSE_HANDLE_KILLPRIV).unwrap();
-
-        fs::create_dir_all(Path::new(&self.data_dir).join("inodes")).unwrap();
-        fs::create_dir_all(Path::new(&self.data_dir).join("contents")).unwrap();
-        if self.get_inode(FUSE_ROOT_ID).is_err() {
-            // Initialize with empty filesystem
-            let root = InodeAttributes {
-                inode: FUSE_ROOT_ID,
-                open_file_handles: 0,
-                size: 0,
-                last_accessed: time_now(),
-                last_modified: time_now(),
-                last_metadata_changed: time_now(),
-                kind: FileKind::Directory,
-                mode: 0o777,
-                hardlinks: 2,
-                uid: 0,
-                gid: 0,
-                xattrs: Default::default(),
-            };
-            self.write_inode(&root);
-            let mut entries = BTreeMap::new();
-            entries.insert(b".".to_vec(), (FUSE_ROOT_ID, FileKind::Directory));
-            self.write_directory_content(FUSE_ROOT_ID, entries);
-        }
-        Ok(())
-    }
-
     fn lookup(&mut self, req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
         if name.len() > MAX_NAME_LENGTH as usize {
             reply.error(libc::ENAMETOOLONG);
@@ -2032,14 +2011,18 @@ fn main() {
         .unwrap_or_default()
         .to_string();
 
-    fuser::mount2(
-        SimpleFS::new(
-            data_dir,
-            matches.is_present("direct-io"),
-            matches.is_present("suid"),
-        ),
-        mountpoint,
-        &options,
-    )
-    .unwrap();
+    let (chan, _mount) = fuser::mount3(mountpoint, &options).unwrap();
+
+    #[cfg(feature = "abi-7-26")]
+    chan.kernel_config()
+        .add_capabilities(FUSE_HANDLE_KILLPRIV)
+        .unwrap();
+    let chan = chan.init().unwrap();
+
+    let fs = SimpleFS::new(
+        data_dir,
+        matches.is_present("direct-io"),
+        matches.is_present("suid"),
+    );
+    serve_fs_sync_forever(&chan, fs).expect("Serving failed");
 }

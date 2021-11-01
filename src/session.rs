@@ -6,17 +6,23 @@
 //! for filesystem operations under its mount point.
 
 use libc::{EAGAIN, EINTR, ENODEV, ENOENT};
-use log::{info, warn};
+use log::{error, info, warn};
 use std::fmt;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::thread::{self, JoinHandle};
-use std::{io, ops::DerefMut};
+use zerocopy::FromBytes;
 
-use crate::ll::fuse_abi as abi;
+use crate::ll::{fuse_abi as abi, AlignedBox};
 use crate::request::Request;
-use crate::Filesystem;
 use crate::MountOption;
-use crate::{channel::Channel, mnt::Mount};
+use crate::{
+    channel::Channel,
+    ll::{self, Request as _},
+    mnt::Mount,
+    reply::ReplySender,
+};
+use crate::{Filesystem, KernelConfig};
 
 /// The max size of write requests from the kernel. The absolute minimum is 4k,
 /// FUSE recommends at least 128k, max 16M. The FUSE default is 16M on macOS
@@ -27,7 +33,7 @@ pub const MAX_WRITE_SIZE: usize = 16 * 1024 * 1024;
 /// up to MAX_WRITE_SIZE bytes in a write request, we use that value plus some extra space.
 const BUFFER_SIZE: usize = MAX_WRITE_SIZE + 4096;
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub(crate) enum SessionACL {
     All,
     RootAndOwner,
@@ -60,6 +66,37 @@ pub struct Session<FS: Filesystem> {
     pub(crate) destroyed: bool,
 }
 
+fn inner_mount(
+    mountpoint: &Path,
+    options: &[MountOption],
+) -> io::Result<(Channel, Mount, SessionACL)> {
+    info!("Mounting {}", mountpoint.display());
+    // If AutoUnmount is requested, but not AllowRoot or AllowOther we enforce the ACL
+    // ourself and implicitly set AllowOther because fusermount needs allow_root or allow_other
+    // to handle the auto_unmount option
+    let (file, mount) = if options.contains(&MountOption::AutoUnmount)
+        && !(options.contains(&MountOption::AllowRoot)
+            || options.contains(&MountOption::AllowOther))
+    {
+        warn!("Given auto_unmount without allow_root or allow_other; adding allow_other, with userspace permission handling");
+        let mut modified_options = options.to_vec();
+        modified_options.push(MountOption::AllowOther);
+        Mount::new(mountpoint, &modified_options)?
+    } else {
+        Mount::new(mountpoint, options)?
+    };
+
+    let ch = Channel::new(file);
+    let allowed = if options.contains(&MountOption::AllowRoot) {
+        SessionACL::RootAndOwner
+    } else if options.contains(&MountOption::AllowOther) {
+        SessionACL::All
+    } else {
+        SessionACL::Owner
+    };
+    Ok((ch, mount, allowed))
+}
+
 impl<FS: Filesystem> Session<FS> {
     /// Create a new session by mounting the given filesystem to the given mountpoint
     pub fn new(
@@ -67,31 +104,7 @@ impl<FS: Filesystem> Session<FS> {
         mountpoint: &Path,
         options: &[MountOption],
     ) -> io::Result<Session<FS>> {
-        info!("Mounting {}", mountpoint.display());
-        // If AutoUnmount is requested, but not AllowRoot or AllowOther we enforce the ACL
-        // ourself and implicitly set AllowOther because fusermount needs allow_root or allow_other
-        // to handle the auto_unmount option
-        let (file, mount) = if options.contains(&MountOption::AutoUnmount)
-            && !(options.contains(&MountOption::AllowRoot)
-                || options.contains(&MountOption::AllowOther))
-        {
-            warn!("Given auto_unmount without allow_root or allow_other; adding allow_other, with userspace permission handling");
-            let mut modified_options = options.to_vec();
-            modified_options.push(MountOption::AllowOther);
-            Mount::new(mountpoint, &modified_options)?
-        } else {
-            Mount::new(mountpoint, options)?
-        };
-
-        let ch = Channel::new(file);
-        let allowed = if options.contains(&MountOption::AllowRoot) {
-            SessionACL::RootAndOwner
-        } else if options.contains(&MountOption::AllowOther) {
-            SessionACL::All
-        } else {
-            SessionACL::Owner
-        };
-
+        let (ch, mount, allowed) = inner_mount(mountpoint, options)?;
         Ok(Session {
             filesystem,
             ch,
@@ -118,15 +131,11 @@ impl<FS: Filesystem> Session<FS> {
     pub fn run(&mut self) -> io::Result<()> {
         // Buffer for receiving requests from the kernel. Only one is allocated and
         // it is reused immediately after dispatching to conserve memory and allocations.
-        let mut buffer = vec![0; BUFFER_SIZE];
-        let buf = aligned_sub_buf(
-            buffer.deref_mut(),
-            std::mem::align_of::<abi::fuse_in_header>(),
-        );
+        let mut buf = AlignedBox::new(BUFFER_SIZE);
         loop {
             // Read the next request from the given channel to kernel driver
             // The kernel driver makes sure that we get exactly one request per read
-            match self.ch.receive(buf) {
+            match self.ch.receive(buf.as_mut()) {
                 Ok(size) => match Request::new(self.ch.sender(), &buf[..size]) {
                     // Dispatch request
                     Some(req) => req.dispatch(self),
@@ -156,15 +165,6 @@ impl<FS: Filesystem> Session<FS> {
     }
 }
 
-fn aligned_sub_buf(buf: &mut [u8], alignment: usize) -> &mut [u8] {
-    let off = alignment - (buf.as_ptr() as usize) % alignment;
-    if off == alignment {
-        buf
-    } else {
-        &mut buf[off..]
-    }
-}
-
 impl<FS: 'static + Filesystem + Send> Session<FS> {
     /// Run the session loop in a background thread
     pub fn spawn(self) -> io::Result<BackgroundSession> {
@@ -180,6 +180,118 @@ impl<FS: Filesystem> Drop for Session<FS> {
         }
         info!("Unmounted {}", self.mountpoint().display());
     }
+}
+
+pub fn mount3(mountpoint: &Path, options: &[MountOption]) -> io::Result<(ChannelUninit, Mount)> {
+    let (channel, mount, allowed) = inner_mount(mountpoint, options)?;
+    let mut buffer = vec![0; 8192];
+    let size = channel.receive(&mut buffer).map_err(|e| {
+        io::Error::new(
+            e.kind(),
+            format!("mount3: Error receiving INIT message: {}", e),
+        )
+    })?;
+    buffer.resize(size, 0);
+    let init_msg =
+        <abi::fuse_init_in_msg as FromBytes>::read_from_prefix(&*buffer).ok_or_else(|| {
+            std::io::Error::new(
+                io::ErrorKind::InvalidData,
+                "mount3: Invalid INIT message size received from kernel",
+            )
+        })?;
+    let init = ll::request::op::Init {
+        header: &init_msg.header,
+        arg: &init_msg.body,
+    };
+
+    let v = init.version();
+    if v < ll::Version(7, 6) {
+        error!("Unsupported FUSE ABI version {}", v);
+        return Err(io::Error::new(
+            std::io::ErrorKind::ConnectionRefused,
+            format!(
+                "Unsupported FUSE ABI version {}.  The fuser library requires at least v7.6",
+                v
+            ),
+        ));
+    }
+    let kernel_config = KernelConfig::new(init.capabilities(), init.max_readahead());
+    Ok((
+        ChannelUninit {
+            channel,
+            init_msg,
+            kernel_config,
+            allowed,
+        },
+        mount,
+    ))
+}
+
+/// A communication channel with the kernel that has not yet completed version
+/// and capability negotiation with the kernel.  You can customise according to
+/// your filesystem's requirements before calling `.init()`, much like with the
+/// builder pattern.
+#[derive(Debug)]
+pub struct ChannelUninit {
+    channel: Channel,
+    init_msg: abi::fuse_init_in_msg,
+    kernel_config: KernelConfig,
+    allowed: SessionACL,
+}
+
+impl ChannelUninit {
+    /// Get (and allow modification of) the config from the kernel.
+    pub fn kconfig(&mut self) -> &mut KernelConfig {
+        &mut self.kernel_config
+    }
+    /// Initialise this channel by sending a reply to the kernel's INIT request.
+    pub fn init(self) -> io::Result<ChannelInit> {
+        let msg = ll::request::op::Init {
+            header: &self.init_msg.header,
+            arg: &self.init_msg.body,
+        };
+        let resp = msg.reply(&self.kernel_config);
+        let sender = self.channel.sender();
+        resp.with_iovec(msg.unique(), |iov| sender.send(iov))?;
+        Ok(ChannelInit {
+            channel: self.channel,
+            kernel_config: self.kernel_config,
+            init_msg: self.init_msg,
+            allowed: self.allowed,
+        })
+    }
+}
+
+/// Represents a communication channel with the kernel (/dev/fuse device) that
+/// has been initialised.
+#[derive(Debug)]
+pub struct ChannelInit {
+    channel: Channel,
+    kernel_config: KernelConfig,
+    init_msg: abi::fuse_init_in_msg,
+    allowed: SessionACL,
+}
+
+/// Blocks reading from the kernel and dispatching reqests to your filesystem
+/// implementation until there is an error.  A single request is handled at
+/// any one time.
+pub fn serve_fs_sync_forever<FS: Filesystem>(
+    chan: &ChannelInit,
+    filesystem: FS,
+) -> std::io::Result<()> {
+    let mut session = Session::<FS> {
+        filesystem,
+        ch: chan.channel.clone(),
+        mount: None,
+        mountpoint: PathBuf::new(),
+        allowed: chan.allowed,
+        session_owner: unsafe { libc::geteuid() },
+        proto_major: chan.init_msg.body.major,
+        proto_minor: chan.init_msg.body.minor,
+        initialized: true,
+        destroyed: false,
+    };
+    session.run()
 }
 
 /// The background session data structure

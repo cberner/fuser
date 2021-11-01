@@ -8,5 +8,6 @@ impl Filesystem for NullFS {}
 fn main() {
     env_logger::init();
     let mountpoint = env::args_os().nth(1).unwrap();
-    fuser::mount2(NullFS, mountpoint, &[MountOption::AutoUnmount]).unwrap();
+    let (chan, _mount) = fuser::mount3(mountpoint, &[MountOption::AutoUnmount]).unwrap();
+    fuser::serve_fs_sync_forever(&chan.init().unwrap(), NullFS).unwrap();
 }

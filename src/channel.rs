@@ -5,7 +5,7 @@ use libc::{c_int, c_void, size_t};
 use crate::reply::ReplySender;
 
 /// A raw communication channel to the FUSE kernel driver
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Channel(Arc<File>);
 
 impl Channel {

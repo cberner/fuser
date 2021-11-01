@@ -3,7 +3,7 @@
 mod argument;
 pub mod fuse_abi;
 pub(crate) mod reply;
-mod request;
+pub(crate) mod request;
 
 use std::{convert::TryInto, num::NonZeroI32, time::SystemTime};
 
@@ -265,24 +265,54 @@ impl From<Generation> for u64 {
     }
 }
 
-#[cfg(test)]
-mod test {
-    use std::ops::{Deref, DerefMut};
-    /// If we want to be able to cast bytes to our fuse C struct types we need it
-    /// to be aligned.  This struct helps getting &[u8]s which are 8 byte aligned.
-    #[cfg(test)]
-    #[repr(align(8))]
-    pub(crate) struct AlignedData<T>(pub T);
-    impl<T> Deref for AlignedData<T> {
-        type Target = T;
+use std::ops::{Deref, DerefMut};
+/// If we want to be able to cast bytes to our fuse C struct types we need it
+/// to be aligned.  This struct helps getting &[u8]s which are 8 byte aligned.
+#[repr(align(8))]
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct AlignedData<T>(pub T);
+impl<T> Deref for AlignedData<T> {
+    type Target = T;
 
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
-    impl<T> DerefMut for AlignedData<T> {
-        fn deref_mut(&mut self) -> &mut Self::Target {
-            &mut self.0
-        }
+}
+impl<T> DerefMut for AlignedData<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+/// We want u8 data, but with u64 alignment so we can cast the data to our fuse_abi structs.  This
+/// represents such a buffer implemented with only safe code.
+#[derive(Debug)]
+pub(crate) struct AlignedBox {
+    buf: Box<[u8]>,
+}
+impl AlignedBox {
+    const ALIGNMENT: usize = std::mem::align_of::<fuse_abi::fuse_in_header>();
+
+    pub(crate) fn new(size: usize) -> Self {
+        // We can't create the box directly because it can overflow the stack.  Instead we create
+        // a vec and convert it.  It's 0 initialized.  The hope is that for large allocations the
+        // memory will be allocated from new pages cheaply avoiding a `memset()`.
+        let v = vec![0u8; size + Self::ALIGNMENT];
+        let buf = v.into_boxed_slice();
+        Self { buf }
+    }
+}
+impl Deref for AlignedBox {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        let off = Self::ALIGNMENT - (self.buf.as_ptr() as usize) % Self::ALIGNMENT;
+        &self.buf[off..]
+    }
+}
+impl DerefMut for AlignedBox {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        let off = Self::ALIGNMENT - (self.buf.as_ptr() as usize) % Self::ALIGNMENT;
+        &mut self.buf[off..]
     }
 }
