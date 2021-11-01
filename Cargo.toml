@@ -17,11 +17,13 @@ license = "MIT"
 travis-ci = { repository = "cberner/fuser" }
 
 [dependencies]
+crossbeam-channel = {version = "0.5", optional = true}
 libc = "0.2.51"
 log = "0.4.6"
 memchr = "2"
 users = "0.11.0"
 page_size = "0.4.2"
+rayon = { version = "1.5", optional = true }
 serde = {version = "1.0.102", features = ["std", "derive"], optional = true}
 smallvec = "1.6.1"
 zerocopy = "0.6"
@@ -40,6 +42,7 @@ pkg-config = {version = "0.3.14", optional = true }
 default = ["libfuse"]
 libfuse = ["pkg-config"]
 serializable = ["serde"]
+mt = ["rayon", "crossbeam-channel"]
 abi-7-9 = []
 abi-7-10 = ["abi-7-9"]
 abi-7-11 = ["abi-7-10"]

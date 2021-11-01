@@ -2100,6 +2100,63 @@ impl<'a> fmt::Display for Operation<'a> {
     }
 }
 
+#[cfg(feature = "mt")]
+mod owned_request {
+    use std::convert::TryInto;
+
+    use super::*;
+    use crate::ll::{AlignedBox, AlignedData};
+
+    // Bigger than the largest fixed-size request:
+    const OWNED_REQUEST_INLINE_THRESHOLD: usize = 184;
+    const ALIGNMENT: usize = std::mem::align_of::<abi::fuse_in_header>();
+
+    #[derive(Debug)]
+    pub(crate) enum OwnedRequest {
+        Inline(AlignedData<[u8; OWNED_REQUEST_INLINE_THRESHOLD]>),
+        Boxed(AlignedBox),
+    }
+
+    impl OwnedRequest {
+        pub(crate) fn from_boxed(
+            v: AlignedBox,
+        ) -> Result<(Self, Option<AlignedBox>), RequestError> {
+            let msg_len: usize = u32::from_ne_bytes(v[..4].try_into().unwrap()) as usize;
+            let _ = AnyRequest::try_from(&*v)?;
+            if msg_len as usize <= OWNED_REQUEST_INLINE_THRESHOLD {
+                let mut d = AlignedData::<_>([0u8; OWNED_REQUEST_INLINE_THRESHOLD]);
+                d[..msg_len]
+                    .as_mut()
+                    .copy_from_slice(&v.as_ref()[..msg_len]);
+                Ok((Self::Inline(d), Some(v)))
+            } else {
+                Ok((Self::Boxed(v), None))
+            }
+        }
+        pub(crate) fn data(&self) -> &[u8] {
+            match self {
+                OwnedRequest::Inline(x) => &**x,
+                OwnedRequest::Boxed(x) => x,
+            }
+        }
+        pub(crate) fn into_box(self) -> Option<AlignedBox> {
+            match self {
+                OwnedRequest::Inline(_) => None,
+                OwnedRequest::Boxed(x) => Some(x),
+            }
+        }
+        pub fn as_request<'a>(&'a self) -> AnyRequest<'a> {
+            AnyRequest::try_from(self.data()).expect("Validity checked at construction time")
+        }
+        pub fn operation(&self) -> Result<Operation<'_>, RequestError> {
+            self.as_request().operation()
+        }
+    }
+}
+
+#[cfg(feature = "mt")]
+pub(crate) use owned_request::OwnedRequest;
+
 /// Low-level request of a filesystem operation the kernel driver wants to perform.
 #[derive(Debug)]
 pub struct AnyRequest<'a> {

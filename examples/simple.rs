@@ -8,21 +8,21 @@ use fuser::consts::FUSE_HANDLE_KILLPRIV;
 use fuser::consts::FUSE_WRITE_KILL_PRIV;
 use fuser::TimeOrNow::Now;
 use fuser::{
-    serve_fs_sync_forever, Filesystem, MountOption, ReplyAttr, ReplyCreate,
-    ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen, ReplyStatfs, ReplyWrite,
-    ReplyXattr, Request, TimeOrNow, FUSE_ROOT_ID,
+    serve_fs_sync_forever, Filesystem, MountOption, ReplyAttr, ReplyCreate, ReplyData,
+    ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen, ReplyStatfs, ReplyWrite, ReplyXattr,
+    Request, TimeOrNow, FUSE_ROOT_ID,
 };
 #[cfg(feature = "abi-7-26")]
 use log::info;
 use log::LevelFilter;
 use log::{debug, warn};
 use serde::{Deserialize, Serialize};
-use tempfile::NamedTempFile;
 use std::cmp::min;
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
+use std::io::{BufRead, BufReader, ErrorKind, Read, Seek, SeekFrom, Write};
+use std::ops::Deref;
 use std::os::raw::c_int;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::FileExt;
@@ -30,8 +30,10 @@ use std::os::unix::fs::FileExt;
 use std::os::unix::io::IntoRawFd;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{env, fs, io};
+use tempfile::NamedTempFile;
 
 const BLOCK_SIZE: u64 = 512;
 const MAX_NAME_LENGTH: u32 = 255;
@@ -244,25 +246,33 @@ impl From<InodeAttributes> for fuser::FileAttr {
 // Stores inode metadata data in "$data_dir/inodes" and file contents in "$data_dir/contents"
 // Directory data is stored in the file's contents, as a serialized DirectoryDescriptor
 struct SimpleFS {
-    data_dir: String,
+    data_dir: PathBuf,
     next_file_handle: AtomicU64,
+    next_inode: Mutex<u64>,
     direct_io: bool,
     suid_support: bool,
 }
 
 impl SimpleFS {
-    fn new(data_dir: String, direct_io: bool, mut suid_support: bool) -> SimpleFS {
+    fn new(data_dir: PathBuf, direct_io: bool, mut suid_support: bool) -> SimpleFS {
         if !cfg!(feature = "abi-7-26") {
             suid_support = false;
         };
         fs::create_dir_all(Path::new(&data_dir).join("inodes")).unwrap();
         fs::create_dir_all(Path::new(&data_dir).join("contents")).unwrap();
 
+        let next_inode = if let Ok(file) = File::open(&data_dir.join("superblock")) {
+            bincode::deserialize_from(file).unwrap()
+        } else {
+            fuser::FUSE_ROOT_ID + 1
+        };
+
         let out = SimpleFS {
             data_dir,
             next_file_handle: AtomicU64::new(1),
             direct_io,
             suid_support,
+            next_inode: Mutex::new(next_inode),
         };
 
         if out.get_inode(FUSE_ROOT_ID).is_err() {
@@ -299,17 +309,14 @@ impl SimpleFS {
 
     fn allocate_next_inode(&self) -> Inode {
         let path = Path::new(&self.data_dir).join("superblock");
-        let current_inode = if let Ok(file) = File::open(&path) {
-            bincode::deserialize_from(file).unwrap()
-        } else {
-            fuser::FUSE_ROOT_ID
-        };
-
         let file = NamedTempFile::new_in(&self.data_dir).unwrap();
-        bincode::serialize_into(file.as_file(), &(current_inode + 1)).unwrap();
-        file.persist(path).unwrap();
 
-        current_inode + 1
+        let mut next_inode = self.next_inode.lock().unwrap();
+        let inode = *next_inode;
+        *next_inode += 1;
+        bincode::serialize_into(file.as_file(), &inode).unwrap();
+        file.persist(path).unwrap();
+        inode
     }
 
     fn allocate_next_file_handle(&self, read: bool, write: bool) -> u64 {
@@ -479,7 +486,18 @@ impl SimpleFS {
     }
 }
 
-impl Filesystem for SimpleFS {
+// A newtype around Arc so we can share a SimpleFS between threads while having
+// this implement `Filesystem`
+#[derive(Clone)]
+struct ArcSimpleFS(Arc<SimpleFS>);
+impl Deref for ArcSimpleFS {
+    type Target = SimpleFS;
+    fn deref(&self) -> &Self::Target {
+        &*self.0
+    }
+}
+
+impl Filesystem for ArcSimpleFS {
     fn lookup(&mut self, req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
         if name.len() > MAX_NAME_LENGTH as usize {
             reply.error(libc::ENAMETOOLONG);
@@ -1951,6 +1969,11 @@ fn main() {
                 .short("v")
                 .multiple(true)
                 .help("Sets the level of verbosity"),
+        )
+        .arg(
+            Arg::with_name("single-threaded")
+                .long("single-threaded")
+                .help("Run in single threaded mode"),
         )
         .get_matches();
 

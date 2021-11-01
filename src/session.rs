@@ -111,7 +111,7 @@ impl<FS: Filesystem> Session<FS> {
             mount: Some(mount),
             mountpoint: mountpoint.to_owned(),
             allowed,
-            session_owner: unsafe { libc::geteuid() },
+            session_owner: geteuid(),
             proto_major: 0,
             proto_minor: 0,
             initialized: false,
@@ -285,13 +285,130 @@ pub fn serve_fs_sync_forever<FS: Filesystem>(
         mount: None,
         mountpoint: PathBuf::new(),
         allowed: chan.allowed,
-        session_owner: unsafe { libc::geteuid() },
+        session_owner: geteuid(),
         proto_major: chan.init_msg.body.major,
         proto_minor: chan.init_msg.body.minor,
         initialized: true,
         destroyed: false,
     };
     session.run()
+}
+
+#[cfg(feature = "mt")]
+pub use multithread::serve_fs_mt_forever;
+
+#[cfg(feature = "mt")]
+mod multithread {
+    use super::*;
+    use ll::request::OwnedRequest;
+    use rayon::iter::{ParallelBridge, ParallelIterator};
+
+    struct RequestIterator {
+        chan: ChannelInit,
+        err: Option<io::Error>,
+
+        // This channel is used as a bufferpool.  When we need a buffer we pull
+        // one from here, and when we're done with a buffer we push it to
+        // `pool_s`.  The channel has a capacity of 1 to limit the number of
+        // idle buffers, thus limiting the total memory use.
+        pool_take: crossbeam_channel::Receiver<ll::AlignedBox>,
+        pool_put: crossbeam_channel::Sender<ll::AlignedBox>,
+    }
+
+    impl Iterator for RequestIterator {
+        type Item = OwnedRequest;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            if self.err.is_some() {
+                // Stop on first error
+                return None;
+            }
+            let mut buf = self
+                .pool_take
+                .try_recv()
+                .unwrap_or_else(|_| AlignedBox::new(BUFFER_SIZE));
+            loop {
+                // Read the next request from the given channel to kernel driver
+                // The kernel driver makes sure that we get exactly one request per read
+                match self.chan.channel.receive(buf.as_mut()) {
+                    Ok(size) => {
+                        let req = OwnedRequest::from_boxed(buf);
+                        let req = match req {
+                            Ok((req, buf)) => {
+                                if let Some(buf) = buf {
+                                    // Requeue our buffer in the bufferpool
+                                    let _ = self.pool_put.try_send(buf);
+                                }
+                                req
+                            }
+                            Err(_) => todo!(),
+                        };
+                        return Some(req);
+                    }
+                    Err(err) => match err.raw_os_error() {
+                        // Operation interrupted. Accordingly to FUSE, this is safe to retry
+                        Some(ENOENT) => continue,
+                        // Interrupted system call, retry
+                        Some(EINTR) => continue,
+                        // Explicitly try again
+                        Some(EAGAIN) => continue,
+                        // Unhandled error
+                        _ => {
+                            self.err = Some(err);
+                            return None;
+                        }
+                    },
+                }
+            }
+        }
+    }
+
+    /// Blocks reading from the kernel and dispatching reqests to your filesystem
+    /// implementation until there is an error.  Requests will be handled on a thread
+    /// pool.  Instead of providing a Filesystem implementation you must provide a
+    /// factory function for creating Filesystem implementations.  This will be called
+    /// once for each thread that is started.
+    pub fn serve_fs_mt_forever<FS: Filesystem>(
+        chan: ChannelInit,
+        factory: impl Fn() -> FS + Sync + Send,
+    ) -> Result<(), io::Error> {
+        let (pool_put, pool_take) = crossbeam_channel::bounded(1);
+        let channel = chan.channel.clone();
+        let ch_sender = channel.sender();
+        let (proto_major, proto_minor) = (chan.init_msg.body.major, chan.init_msg.body.minor);
+        let it = RequestIterator {
+            chan: chan,
+            err: None,
+            pool_put: pool_put.clone(),
+            pool_take: pool_take.clone(),
+        };
+        it.par_bridge().for_each_init(
+            move || Session::<FS> {
+                filesystem: factory(),
+                ch: channel.clone(),
+                mount: None,
+                mountpoint: PathBuf::new(),
+                // TODO: What is allowed?
+                allowed: SessionACL::All,
+                session_owner: geteuid(),
+                proto_major,
+                proto_minor,
+                initialized: true,
+                destroyed: false,
+            },
+            move |session, request| {
+                let rreq = Request::from_owned_request(ch_sender.clone(), &request);
+                rreq.dispatch(session);
+                if let Some(b) = request.into_box() {
+                    // We're done with it, so put it back in the buffer-pool
+                    let _ = pool_put.try_send(b);
+                }
+            },
+        );
+
+        // TODO: Return the error that caused iteration to stop
+        Ok(())
+    }
 }
 
 /// The background session data structure
@@ -347,4 +464,11 @@ impl<'a> fmt::Debug for BackgroundSession {
             self.mountpoint
         )
     }
+}
+
+fn geteuid() -> libc::uid_t {
+    // SAFETY: Nothing exciting here, it's just that all the functions in the
+    // libc crate are unsafe.  `man geteuid` says: "Errors: These functions are
+    // always successful."
+    unsafe { libc::geteuid() }
 }

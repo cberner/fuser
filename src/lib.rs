@@ -12,6 +12,8 @@ use mnt::mount_options::parse_options_from_args;
 use mnt::Mount;
 #[cfg(feature = "serializable")]
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "mt")]
+pub use session::serve_fs_mt_forever;
 pub use session::{serve_fs_sync_forever, ChannelInit, ChannelUninit};
 use std::ffi::OsStr;
 use std::io;

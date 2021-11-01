@@ -5,6 +5,8 @@
 //!
 //! TODO: This module is meant to go away soon in favor of `ll::Request`.
 
+#[cfg(mt)]
+use crate::ll::request::OwnedRequest;
 use crate::ll::{fuse_abi as abi, Errno, Response};
 use log::{debug, error, warn};
 use std::convert::TryFrom;
@@ -44,6 +46,17 @@ impl<'a> Request<'a> {
         };
 
         Some(Self { ch, data, request })
+    }
+    #[cfg(feature = "mt")]
+    pub(crate) fn from_owned_request(
+        ch: ChannelSender,
+        req: &'a ll::request::OwnedRequest,
+    ) -> Request<'a> {
+        Self {
+            ch,
+            data: req.data(),
+            request: req.as_request(),
+        }
     }
 
     /// Dispatch request to the given filesystem.
