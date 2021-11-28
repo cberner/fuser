@@ -39,5 +39,7 @@ function run_test {
 
 run_test --features=libfuse 'with libfuse'
 run_test --features=libfuse 'with libfuse' --auto_unmount
+run_test --no-default-features 'without libfuse'
+run_test --no-default-features 'without libfuse' --auto_unmount
 
 export TEST_EXIT_STATUS=0
