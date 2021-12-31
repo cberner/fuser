@@ -185,7 +185,10 @@ fn receive_fusermount_message(socket: &UnixStream) -> Result<File, Error> {
         }
         let err = Error::last_os_error();
         if err.kind() != ErrorKind::Interrupted {
-            return Err(err);
+            return Err(io::Error::new(
+                err.kind(),
+                format!("receive_fusermount_message: Error from recvmsg: {}", err),
+            ));
         }
     }
     if result == 0 {

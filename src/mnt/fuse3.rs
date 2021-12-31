@@ -13,6 +13,11 @@ use std::{
     sync::Arc,
 };
 
+fn last_os_err_ctx(ctx: &'static str) -> io::Error {
+    let err = io::Error::last_os_error();
+    io::Error::new(err.kind(), format!("libfuse error during {}: {}", ctx, err))
+}
+
 #[derive(Debug)]
 pub struct Mount {
     fuse_session: *mut c_void,
@@ -23,22 +28,22 @@ impl Mount {
         with_fuse_args(options, |args| {
             let fuse_session = unsafe { fuse_session_new(args, ptr::null(), 0, ptr::null_mut()) };
             if fuse_session.is_null() {
-                return Err(io::Error::last_os_error());
+                return Err(last_os_err_ctx("fuse_session_new"));
             }
             let mount = Mount { fuse_session };
             let result = unsafe { fuse_session_mount(mount.fuse_session, mnt.as_ptr()) };
             if result != 0 {
-                return Err(ensure_last_os_error());
+                return Err(last_os_err_ctx("fuse_session_mount"));
             }
             let fd = unsafe { fuse_session_fd(mount.fuse_session) };
             if fd < 0 {
-                return Err(io::Error::last_os_error());
+                return Err(last_os_err_ctx("fuse_session_fd"));
             }
             // We dup the fd here as the existing fd is owned by the fuse_session, and we
             // don't want it being closed out from under us:
             let fd = unsafe { libc::dup(fd) };
             if fd < 0 {
-                return Err(io::Error::last_os_error());
+                return Err(last_os_err_ctx("dup"));
             }
             let file = unsafe { File::from_raw_fd(fd) };
             Ok((Arc::new(file), mount))
