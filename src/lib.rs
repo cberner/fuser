@@ -1015,7 +1015,7 @@ pub fn spawn_mount<'a, FS: Filesystem + Send + 'static + 'a, P: AsRef<Path>>(
 /// and therefore returns immediately. The returned handle should be stored
 /// to reference the mounted filesystem. If it's dropped, the filesystem will
 /// be unmounted.
-/// 
+///
 /// NOTE: This is the corresponding function to mount2.
 pub fn spawn_mount2<'a, FS: Filesystem + Send + 'static + 'a, P: AsRef<Path>>(
     filesystem: FS,
