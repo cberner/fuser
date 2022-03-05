@@ -33,7 +33,7 @@ pub use reply::ReplyXattr;
 pub use reply::{Reply, ReplyAttr, ReplyData, ReplyEmpty, ReplyEntry, ReplyOpen};
 pub use reply::{
     ReplyBmap, ReplyCreate, ReplyDirectory, ReplyDirectoryPlus, ReplyIoctl, ReplyLock, ReplyLseek,
-    ReplyStatfs, ReplyWrite,
+    ReplyStatfs, ReplyWrite, ReplySender,
 };
 pub use request::Request;
 pub use session::{BackgroundSession, Session};
