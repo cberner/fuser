@@ -1,6 +1,6 @@
 #![allow(clippy::needless_return)]
 
-use clap::{crate_version, Command, Arg};
+use clap::{crate_version, Arg, Command};
 use fuser::consts::FOPEN_DIRECT_IO;
 #[cfg(feature = "abi-7-26")]
 use fuser::consts::FUSE_HANDLE_KILLPRIV;

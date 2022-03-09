@@ -1,4 +1,4 @@
-use clap::{crate_version, Command, Arg};
+use clap::{crate_version, Arg, Command};
 use fuser::{
     FileAttr, FileType, Filesystem, MountOption, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry,
     Request,
