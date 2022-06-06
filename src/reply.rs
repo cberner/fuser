@@ -29,7 +29,7 @@ use std::time::SystemTime;
 use crate::{FileAttr, FileType};
 
 /// Generic reply callback to send data
-pub trait ReplySender: Send + 'static {
+pub trait ReplySender: Send + Sync + Unpin + 'static {
     /// Send data.
     fn send(&self, data: &[IoSlice<'_>]) -> std::io::Result<()>;
 }
