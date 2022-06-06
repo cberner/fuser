@@ -634,8 +634,8 @@ impl ReplyLseek {
 mod test {
     use super::*;
     use crate::{FileAttr, FileType};
+    use flume::Sender;
     use std::io::IoSlice;
-    use std::sync::mpsc::{channel, Sender};
     use std::thread;
     use std::time::{Duration, UNIX_EPOCH};
     use zerocopy::AsBytes;
@@ -1020,13 +1020,6 @@ mod test {
         reply.ok();
     }
 
-    impl super::ReplySender for Sender<()> {
-        fn send(&self, _: &[IoSlice<'_>]) -> std::io::Result<()> {
-            Sender::send(self, ()).unwrap();
-            Ok(())
-        }
-    }
-
     #[test]
     fn reply_xattr_size() {
         let sender = AssertSender {
@@ -1051,9 +1044,16 @@ mod test {
         reply.data(&[0x11, 0x22, 0x33, 0x44]);
     }
 
+    impl super::ReplySender for Sender<()> {
+        fn send(&self, _: &[IoSlice<'_>]) -> std::io::Result<()> {
+            self.send(()).unwrap();
+            Ok(())
+        }
+    }
+
     #[test]
     fn async_reply() {
-        let (tx, rx) = channel::<()>();
+        let (tx, rx) = flume::unbounded::<()>();
         let reply: ReplyEmpty = Reply::new(0xdeadbeef, tx);
         thread::spawn(move || {
             reply.ok();
