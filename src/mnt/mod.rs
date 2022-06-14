@@ -130,7 +130,8 @@ fn ensure_last_os_error() -> io::Error {
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::{ffi::CStr, mem::ManuallyDrop};
+    use std::{ffi::CStr, mem::ManuallyDrop, time::Duration};
+    use ntest::timeout;
 
     #[test]
     fn fuse_args() {
@@ -166,6 +167,7 @@ mod test {
     }
 
     #[test]
+    #[timeout(1500)]
     fn mount_unmount() {
         // We use ManuallyDrop here to leak the directory on test failure.  We don't
         // want to try and clean up the directory if it's a mountpoint otherwise we'll
