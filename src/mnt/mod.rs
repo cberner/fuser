@@ -130,8 +130,8 @@ fn ensure_last_os_error() -> io::Error {
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::{ffi::CStr, mem::ManuallyDrop, time::Duration};
     use ntest::timeout;
+    use std::{ffi::CStr, mem::ManuallyDrop, time::Duration};
 
     #[test]
     fn fuse_args() {
