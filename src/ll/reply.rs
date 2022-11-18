@@ -23,7 +23,6 @@ pub enum Response {
     Data(ResponseBuf),
 }
 
-#[must_use]
 impl Response {
     pub(crate) fn with_iovec<F: FnOnce(&[IoSlice<'_>]) -> T, T>(
         &self,
@@ -411,6 +410,7 @@ impl DirEntList {
 
 #[derive(Debug)]
 pub struct DirEntryPlus<T: AsRef<Path>> {
+    #[allow(unused)]
     ino: INodeNo,
     generation: Generation,
     offset: DirEntOffset,
