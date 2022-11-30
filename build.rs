@@ -13,10 +13,16 @@ fn main() {
                 .is_ok()
             {
                 println!("cargo:rustc-cfg=feature=\"libfuse2\"");
+            } else if pkg_config::Config::new()
+                .atleast_version("2.6.0")
+                .probe("osxfuse") // for osxfuse 3.x
+                .map_err(|e| eprintln!("{}", e))
+                .is_ok()
+            {
             } else {
                 pkg_config::Config::new()
-                    .atleast_version("2.6.0")
-                    .probe("osxfuse") // for osxfuse 3.x
+                    .atleast_version("1.0.8")
+                    .probe("fuse-t")
                     .map_err(|e| eprintln!("{}", e))
                     .unwrap();
                 println!("cargo:rustc-cfg=feature=\"libfuse2\"");
