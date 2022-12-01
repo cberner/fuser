@@ -3,18 +3,15 @@ name: Macos CI
 on:
   pull_request:
 jobs:
-  ci-osxfuse:
-    runs-on: macos-10.15
+  ci-fuse-t:
+    runs-on: macos-latest
     env:
       PKG_CONFIG_PATH: /usr/local/lib/pkgconfig:$PKG_CONFIG_PATH
     steps:
       - uses: actions/checkout@v2
       - name: Install packages
         run: |
-          brew update > /dev/null && brew install --cask osxfuse
-      - name: Start fuse
-        run: |
-          /Library/Filesystems/osxfuse.fs/Contents/Resources/load_osxfuse
+          brew update > /dev/null && brew tap macos-fuse-t/homebrew-cask && brew install osxfuse
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
