@@ -11,7 +11,7 @@ jobs:
       - uses: actions/checkout@v2
       - name: Install packages
         run: |
-          brew update > /dev/null && brew tap macos-fuse-t/homebrew-cask && brew install osxfuse
+          brew update > /dev/null && brew tap macos-fuse-t/homebrew-cask && brew install fuse-t
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
