@@ -1,5 +1,4 @@
 name: Macos CI
-
 on:
   pull_request:
 jobs:
