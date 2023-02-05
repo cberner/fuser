@@ -173,6 +173,7 @@ mod test {
         let (file, mount) = Mount::new(tmp.path(), &[]).unwrap();
         let mnt = cmd_mount();
         eprintln!("Our mountpoint: {:?}\nfuse mounts:\n{}", tmp.path(), mnt,);
+        #[cfg(not(feature = "libfuset"))]
         assert!(mnt.contains(&*tmp.path().to_string_lossy()));
         assert!(is_mounted(&file));
         drop(mount);

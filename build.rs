@@ -19,6 +19,7 @@ fn main() {
                 .map_err(|e| eprintln!("{}", e))
                 .is_ok()
             {
+                println!("cargo:rustc-cfg=feature=\"libfuse2\"");
             } else {
                 pkg_config::Config::new()
                     .atleast_version("1.0.8")
@@ -26,6 +27,7 @@ fn main() {
                     .map_err(|e| eprintln!("{}", e))
                     .unwrap();
                 println!("cargo:rustc-cfg=feature=\"libfuse2\"");
+                println!("cargo:rustc-cfg=feature=\"libfuset\"");
             }
         }
         #[cfg(not(target_os = "macos"))]
