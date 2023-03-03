@@ -70,6 +70,12 @@ impl ResponseTrait for Response {
     }
 }
 
+impl ResponseTrait for [u8] {
+    fn get<'a>(&'a self) -> ResponseData<'a> {
+        ResponseData::Data(self)
+    }
+}
+
 #[must_use]
 impl Response {
     // Constructors
