@@ -76,6 +76,7 @@ impl ResponseTrait for [u8] {
     }
 }
 
+
 #[must_use]
 impl Response {
     // Constructors
@@ -101,8 +102,8 @@ impl Response {
         attr: &Attr,
         attr_ttl: Duration,
         entry_ttl: Duration,
-    ) -> Self {
-        let d = abi::fuse_entry_out {
+    ) -> abi::fuse_entry_out {
+        abi::fuse_entry_out {
             nodeid: ino.into(),
             generation: generation.into(),
             entry_valid: entry_ttl.as_secs(),
@@ -110,66 +111,59 @@ impl Response {
             entry_valid_nsec: entry_ttl.subsec_nanos(),
             attr_valid_nsec: attr_ttl.subsec_nanos(),
             attr: attr.attr,
-        };
-        Self::from_struct(d.as_bytes())
+        }
     }
 
-    pub(crate) fn new_attr(ttl: &Duration, attr: &Attr) -> Self {
-        let r = abi::fuse_attr_out {
+    pub(crate) fn new_attr(ttl: &Duration, attr: &Attr) -> abi::fuse_attr_out {
+        abi::fuse_attr_out {
             attr_valid: ttl.as_secs(),
             attr_valid_nsec: ttl.subsec_nanos(),
             dummy: 0,
             attr: attr.attr,
-        };
-        Self::from_struct(&r)
+        }
     }
 
     #[cfg(target_os = "macos")]
-    pub(crate) fn new_xtimes(bkuptime: SystemTime, crtime: SystemTime) -> Self {
+    pub(crate) fn new_xtimes(bkuptime: SystemTime, crtime: SystemTime) -> abi::fuse_getxtimes_out {
         let (bkuptime_secs, bkuptime_nanos) = time_from_system_time(&bkuptime);
         let (crtime_secs, crtime_nanos) = time_from_system_time(&crtime);
-        let r = abi::fuse_getxtimes_out {
+        abi::fuse_getxtimes_out {
             bkuptime: bkuptime_secs as u64,
             crtime: crtime_secs as u64,
             bkuptimensec: bkuptime_nanos,
             crtimensec: crtime_nanos,
-        };
-        Self::from_struct(&r)
+        }
     }
 
     // TODO: Could flags be more strongly typed?
-    pub(crate) fn new_open(fh: FileHandle, flags: u32) -> Self {
-        let r = abi::fuse_open_out {
+    pub(crate) fn new_open(fh: FileHandle, flags: u32) -> abi::fuse_open_out {
+        abi::fuse_open_out {
             fh: fh.into(),
             open_flags: flags,
             padding: 0,
-        };
-        Self::from_struct(&r)
+        }
     }
 
-    pub(crate) fn new_lock(lock: &Lock) -> Self {
-        let r = abi::fuse_lk_out {
+    pub(crate) fn new_lock(lock: &Lock) -> abi::fuse_lk_out {
+        abi::fuse_lk_out {
             lk: abi::fuse_file_lock {
                 start: lock.range.0,
                 end: lock.range.1,
                 typ: lock.typ,
                 pid: lock.pid,
             },
-        };
-        Self::from_struct(&r)
+        }
     }
 
-    pub(crate) fn new_bmap(block: u64) -> Self {
-        let r = abi::fuse_bmap_out { block };
-        Self::from_struct(&r)
+    pub(crate) fn new_bmap(block: u64) -> abi::fuse_bmap_out {
+        abi::fuse_bmap_out { block }
     }
 
-    pub(crate) fn new_write(written: u32) -> Self {
-        let r = abi::fuse_write_out {
+    pub(crate) fn new_write(written: u32) -> abi::fuse_write_out {
+        abi::fuse_write_out {
             size: written,
             padding: 0,
-        };
-        Self::from_struct(&r)
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -182,8 +176,8 @@ impl Response {
         bsize: u32,
         namelen: u32,
         frsize: u32,
-    ) -> Self {
-        let r = abi::fuse_statfs_out {
+    ) -> abi::fuse_statfs_out {
+        abi::fuse_statfs_out {
             st: abi::fuse_kstatfs {
                 blocks,
                 bfree,
@@ -196,8 +190,7 @@ impl Response {
                 padding: 0,
                 spare: [0; 6],
             },
-        };
-        Self::from_struct(&r)
+        }
     }
 
     // TODO: Can flags be more strongly typed?
@@ -207,8 +200,8 @@ impl Response {
         generation: Generation,
         fh: FileHandle,
         flags: u32,
-    ) -> Self {
-        let r = abi::fuse_create_out(
+    ) -> abi::fuse_create_out {
+        abi::fuse_create_out(
             abi::fuse_entry_out {
                 nodeid: attr.attr.ino,
                 generation: generation.into(),
@@ -223,8 +216,7 @@ impl Response {
                 open_flags: flags,
                 padding: 0,
             },
-        );
-        Self::from_struct(&r)
+        )
     }
 
     // TODO: Are you allowed to send data while result != 0?
@@ -249,18 +241,12 @@ impl Response {
         Self::Data(list.buf)
     }
 
-    pub(crate) fn new_xattr_size(size: u32) -> Self {
-        let r = abi::fuse_getxattr_out { size, padding: 0 };
-        Self::from_struct(&r)
+    pub(crate) fn new_xattr_size(size: u32) -> abi::fuse_getxattr_out {
+        abi::fuse_getxattr_out { size, padding: 0 }
     }
 
-    pub(crate) fn new_lseek(offset: i64) -> Self {
-        let r = abi::fuse_lseek_out { offset };
-        Self::from_struct(&r)
-    }
-
-    fn from_struct<T: AsBytes + ?Sized>(data: &T) -> Self {
-        Self::Data(data.as_bytes().into())
+    pub(crate) fn new_lseek(offset: i64) -> abi::fuse_lseek_out {
+        abi::fuse_lseek_out { offset }
     }
 }
 
@@ -607,7 +593,7 @@ mod test {
         };
         let r = Response::new_entry(INodeNo(0x11), Generation(0xaa), &attr.into(), ttl, ttl);
         assert_eq!(
-            send_with_iovec(&r, RequestId(0xdeadbeef), ioslice_to_vec),
+            send_with_iovec(r.as_bytes(), RequestId(0xdeadbeef), ioslice_to_vec),
             expected
         );
     }
@@ -666,7 +652,7 @@ mod test {
         };
         let r = Response::new_attr(&ttl, &attr.into());
         assert_eq!(
-            send_with_iovec(&r, RequestId(0xdeadbeef), ioslice_to_vec),
+            send_with_iovec(r.as_bytes(), RequestId(0xdeadbeef), ioslice_to_vec),
             expected
         );
     }
@@ -696,7 +682,7 @@ mod test {
         ];
         let r = Response::new_open(FileHandle(0x1122), 0x33);
         assert_eq!(
-            send_with_iovec(&r, RequestId(0xdeadbeef), ioslice_to_vec),
+            send_with_iovec(r.as_bytes(), RequestId(0xdeadbeef), ioslice_to_vec),
             expected
         );
     }
@@ -709,7 +695,7 @@ mod test {
         ];
         let r = Response::new_write(0x1122);
         assert_eq!(
-            send_with_iovec(&r, RequestId(0xdeadbeef), ioslice_to_vec),
+            send_with_iovec(r.as_bytes(), RequestId(0xdeadbeef), ioslice_to_vec),
             expected
         );
     }
@@ -727,7 +713,7 @@ mod test {
         ];
         let r = Response::new_statfs(0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88);
         assert_eq!(
-            send_with_iovec(&r, RequestId(0xdeadbeef), ioslice_to_vec),
+            send_with_iovec(r.as_bytes(), RequestId(0xdeadbeef), ioslice_to_vec),
             expected
         );
     }
@@ -795,7 +781,7 @@ mod test {
         };
         let r = Response::new_create(&ttl, &attr.into(), Generation(0xaa), FileHandle(0xbb), 0xcc);
         assert_eq!(
-            send_with_iovec(&r, RequestId(0xdeadbeef), ioslice_to_vec),
+            send_with_iovec(r.as_bytes(), RequestId(0xdeadbeef), ioslice_to_vec),
             expected
         );
     }
@@ -813,7 +799,7 @@ mod test {
             pid: 0x44,
         });
         assert_eq!(
-            send_with_iovec(&r, RequestId(0xdeadbeef), ioslice_to_vec),
+            send_with_iovec(r.as_bytes(), RequestId(0xdeadbeef), ioslice_to_vec),
             expected
         );
     }
@@ -826,7 +812,7 @@ mod test {
         ];
         let r = Response::new_bmap(0x1234);
         assert_eq!(
-            send_with_iovec(&r, RequestId(0xdeadbeef), ioslice_to_vec),
+            send_with_iovec(r.as_bytes(), RequestId(0xdeadbeef), ioslice_to_vec),
             expected
         );
     }
@@ -839,7 +825,7 @@ mod test {
         ];
         let r = Response::new_xattr_size(0x12345678);
         assert_eq!(
-            send_with_iovec(&r, RequestId(0xdeadbeef), ioslice_to_vec),
+            send_with_iovec(r.as_bytes(), RequestId(0xdeadbeef), ioslice_to_vec),
             expected
         );
     }

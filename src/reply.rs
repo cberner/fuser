@@ -22,6 +22,7 @@ use std::ffi::OsStr;
 use std::fmt;
 use std::io::IoSlice;
 use std::time::Duration;
+use zerocopy::AsBytes;
 
 #[cfg(target_os = "macos")]
 use std::time::SystemTime;
@@ -176,13 +177,13 @@ impl Reply for ReplyEntry {
 impl ReplyEntry {
     /// Reply to a request with the given entry
     pub fn entry(self, ttl: &Duration, attr: &FileAttr, generation: u64) {
-        self.reply.send_ll(&ll::Response::new_entry(
+        self.reply.send_ll(ll::Response::new_entry(
             ll::INodeNo(attr.ino),
             ll::Generation(generation),
             &attr.into(),
             *ttl,
             *ttl,
-        ));
+        ).as_bytes());
     }
 
     /// Reply to a request with the given error code
@@ -211,7 +212,7 @@ impl ReplyAttr {
     /// Reply to a request with the given attribute
     pub fn attr(self, ttl: &Duration, attr: &FileAttr) {
         self.reply
-            .send_ll(&ll::Response::new_attr(ttl, &attr.into()));
+            .send_ll(ll::Response::new_attr(ttl, &attr.into()).as_bytes());
     }
 
     /// Reply to a request with the given error code
@@ -272,7 +273,7 @@ impl ReplyOpen {
     /// Reply to a request with the given open result
     pub fn opened(self, fh: u64, flags: u32) {
         self.reply
-            .send_ll(&ll::Response::new_open(ll::FileHandle(fh), flags))
+            .send_ll(ll::Response::new_open(ll::FileHandle(fh), flags).as_bytes())
     }
 
     /// Reply to a request with the given error code
@@ -300,7 +301,7 @@ impl Reply for ReplyWrite {
 impl ReplyWrite {
     /// Reply to a request with the given open result
     pub fn written(self, size: u32) {
-        self.reply.send_ll(&ll::Response::new_write(size))
+        self.reply.send_ll(ll::Response::new_write(size).as_bytes())
     }
 
     /// Reply to a request with the given error code
@@ -339,9 +340,9 @@ impl ReplyStatfs {
         namelen: u32,
         frsize: u32,
     ) {
-        self.reply.send_ll(&ll::Response::new_statfs(
+        self.reply.send_ll(ll::Response::new_statfs(
             blocks, bfree, bavail, files, ffree, bsize, namelen, frsize,
-        ))
+        ).as_bytes())
     }
 
     /// Reply to a request with the given error code
@@ -369,13 +370,13 @@ impl Reply for ReplyCreate {
 impl ReplyCreate {
     /// Reply to a request with the given entry
     pub fn created(self, ttl: &Duration, attr: &FileAttr, generation: u64, fh: u64, flags: u32) {
-        self.reply.send_ll(&ll::Response::new_create(
+        self.reply.send_ll(ll::Response::new_create(
             ttl,
             &attr.into(),
             ll::Generation(generation),
             ll::FileHandle(fh),
             flags,
-        ))
+        ).as_bytes())
     }
 
     /// Reply to a request with the given error code
@@ -403,11 +404,11 @@ impl Reply for ReplyLock {
 impl ReplyLock {
     /// Reply to a request with the given open result
     pub fn locked(self, start: u64, end: u64, typ: i32, pid: u32) {
-        self.reply.send_ll(&ll::Response::new_lock(&ll::Lock {
+        self.reply.send_ll(ll::Response::new_lock(&ll::Lock {
             range: (start, end),
             typ,
             pid,
-        }))
+        }).as_bytes())
     }
 
     /// Reply to a request with the given error code
@@ -435,7 +436,7 @@ impl Reply for ReplyBmap {
 impl ReplyBmap {
     /// Reply to a request with the given open result
     pub fn bmap(self, block: u64) {
-        self.reply.send_ll(&ll::Response::new_bmap(block))
+        self.reply.send_ll(ll::Response::new_bmap(block).as_bytes())
     }
 
     /// Reply to a request with the given error code
@@ -588,7 +589,7 @@ impl Reply for ReplyXattr {
 impl ReplyXattr {
     /// Reply to a request with the size of the xattr.
     pub fn size(self, size: u32) {
-        self.reply.send_ll(&ll::Response::new_xattr_size(size))
+        self.reply.send_ll(ll::Response::new_xattr_size(size).as_bytes())
     }
 
     /// Reply to a request with the data in the xattr.
@@ -621,7 +622,7 @@ impl Reply for ReplyLseek {
 impl ReplyLseek {
     /// Reply to a request with seeked offset
     pub fn offset(self, offset: i64) {
-        self.reply.send_ll(&ll::Response::new_lseek(offset))
+        self.reply.send_ll(ll::Response::new_lseek(offset).as_bytes())
     }
 
     /// Reply to a request with the given error code
