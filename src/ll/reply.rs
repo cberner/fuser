@@ -76,16 +76,18 @@ impl ResponseTrait for [u8] {
     }
 }
 
+impl ResponseTrait for Errno {
+    fn get<'a>(&'a self) -> ResponseData<'a> {
+        ResponseData::Error((*self).into())
+    }
+}
+
 
 #[must_use]
 impl Response {
     // Constructors
     pub(crate) fn new_empty() -> Self {
         Self::Error(0)
-    }
-
-    pub(crate) fn new_error(error: Errno) -> Self {
-        Self::Error(error.into())
     }
 
     pub(crate) fn new_entry(
@@ -501,7 +503,7 @@ mod test {
 
     #[test]
     fn reply_error() {
-        let r = Response::new_error(Errno(NonZeroI32::new(66).unwrap()));
+        let r = Errno(NonZeroI32::new(66).unwrap());
         assert_eq!(
             send_with_iovec(&r, RequestId(0xdeadbeef), ioslice_to_vec),
             vec![

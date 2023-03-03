@@ -226,11 +226,6 @@ pub trait Request: Sized {
 
     /// Returns the PID of the process that triggered this request.
     fn pid(&self) -> u32;
-
-    /// Create an error response for this Request
-    fn reply_err(&self, errno: Errno) -> Response {
-        Response::new_error(errno)
-    }
 }
 
 macro_rules! impl_request {

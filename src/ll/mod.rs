@@ -37,7 +37,7 @@ macro_rules! errno {
 }
 
 /// Represents an error code to be returned to the caller
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct Errno(pub NonZeroI32);
 impl Errno {
     /// Operation not permitted

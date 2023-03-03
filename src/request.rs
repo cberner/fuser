@@ -53,12 +53,11 @@ impl<'a> Request<'a> {
         debug!("{}", self.request);
         let unique = self.request.unique();
 
-        let response = match self.dispatch_req(se) {
-            Ok(Some(resp)) => resp,
+        let res = match self.dispatch_req(se) {
+            Ok(Some(resp)) => ll::reply::send_with_iovec(&resp, unique, |iov| self.ch.send(iov)),
             Ok(None) => return,
-            Err(errno) => self.request.reply_err(errno),
+            Err(errno) => ll::reply::send_with_iovec(&errno, unique, |iov| self.ch.send(iov)),
         };
-        let res = ll::reply::send_with_iovec(&response, unique, |iov| self.ch.send(iov));
 
         if let Err(err) = res {
             warn!("Request {:?}: Failed to send reply: {}", unique, err)

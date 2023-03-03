@@ -86,7 +86,7 @@ impl ReplyRaw {
     /// Reply to a request with the given error code
     pub fn error(self, err: c_int) {
         assert_ne!(err, 0);
-        self.send_ll(&ll::Response::new_error(ll::Errno::from_i32(err)));
+        self.send_ll(&ll::Errno::from_i32(err));
     }
 }
 
@@ -97,7 +97,7 @@ impl Drop for ReplyRaw {
                 "Reply not sent for operation {}, replying with I/O error",
                 self.unique.0
             );
-            self.send_ll_mut(&ll::Response::new_error(ll::Errno::EIO));
+            self.send_ll_mut(&ll::Errno::EIO);
         }
     }
 }
