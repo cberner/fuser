@@ -236,11 +236,6 @@ impl Response {
         Self::Data(v)
     }
 
-    fn new_directory(list: EntListBuf) -> Self {
-        assert!(list.buf.len() <= list.max_size);
-        Self::Data(list.buf)
-    }
-
     pub(crate) fn new_xattr_size(size: u32) -> abi::fuse_getxattr_out {
         abi::fuse_getxattr_out { size, padding: 0 }
     }
@@ -393,10 +388,10 @@ impl<T: AsRef<Path>> DirEntry<T> {
 /// Used to respond to [ReadDirPlus] requests.
 #[derive(Debug)]
 pub struct DirEntList(EntListBuf);
-impl From<DirEntList> for Response {
-    fn from(l: DirEntList) -> Self {
-        assert!(l.0.buf.len() <= l.0.max_size);
-        Response::new_directory(l.0)
+impl ResponseTrait for DirEntList {
+    fn get(&self) -> ResponseData {
+        assert!(self.0.buf.len() <= self.0.max_size);
+        ResponseData::Data(&self.0.buf)
     }
 }
 
@@ -456,10 +451,10 @@ impl<T: AsRef<Path>> DirEntryPlus<T> {
 /// Used to respond to [ReadDir] requests.
 #[derive(Debug)]
 pub struct DirEntPlusList(EntListBuf);
-impl From<DirEntPlusList> for Response {
-    fn from(l: DirEntPlusList) -> Self {
-        assert!(l.0.buf.len() <= l.0.max_size);
-        Response::new_directory(l.0)
+impl ResponseTrait for DirEntPlusList {
+    fn get(&self) -> ResponseData {
+        assert!(self.0.buf.len() <= self.0.max_size);
+        ResponseData::Data(&self.0.buf)
     }
 }
 
@@ -866,9 +861,8 @@ mod test {
             FileType::RegularFile,
             "world.rs"
         )));
-        let r: Response = buf.into();
         assert_eq!(
-            send_with_iovec(&r, RequestId(0xdeadbeef), ioslice_to_vec),
+            send_with_iovec(&buf, RequestId(0xdeadbeef), ioslice_to_vec),
             expected
         );
     }

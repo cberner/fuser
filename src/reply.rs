@@ -508,7 +508,7 @@ impl ReplyDirectory {
 
     /// Reply to a request with the filled directory buffer
     pub fn ok(self) {
-        self.reply.send_ll::<ll::Response>(&self.data.into());
+        self.reply.send_ll(&self.data);
     }
 
     /// Reply to a request with the given error code
@@ -561,7 +561,7 @@ impl ReplyDirectoryPlus {
 
     /// Reply to a request with the filled directory buffer
     pub fn ok(self) {
-        self.reply.send_ll::<ll::Response>(&self.buf.into());
+        self.reply.send_ll(&self.buf);
     }
 
     /// Reply to a request with the given error code
