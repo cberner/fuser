@@ -17,18 +17,28 @@ use zerocopy::AsBytes;
 const INLINE_DATA_THRESHOLD: usize = size_of::<u64>() * 4;
 pub(crate) type ResponseBuf = SmallVec<[u8; INLINE_DATA_THRESHOLD]>;
 
-pub(crate) fn send_with_iovec<F: FnOnce(&[IoSlice<'_>]) -> T, T>(
-    response: &Response,
+pub(crate) enum ResponseData<'a> {
+    Error(i32),
+    Data(&'a [u8])
+}
+
+pub(crate) trait ResponseTrait {
+    fn get<'a>(&'a self) -> ResponseData<'a>;
+}
+
+pub(crate) fn send_with_iovec<R: ResponseTrait, F: FnOnce(&[IoSlice<'_>]) -> T, T>(
+    response: &R,
     unique: RequestId,
     f: F,
 ) -> T {
-    let datalen = match response {
-        Response::Error(_) => 0,
-        Response::Data(v) => v.len(),
+    let response_data = response.get();
+    let datalen = match response_data {
+        ResponseData::Error(_) => 0,
+        ResponseData::Data(v) => v.len(),
     };
     let header = abi::fuse_out_header {
         unique: unique.0,
-        error: if let Response::Error(errno) = response {
+        error: if let ResponseData::Error(errno) = response_data {
             -errno
         } else {
             0
@@ -38,9 +48,9 @@ pub(crate) fn send_with_iovec<F: FnOnce(&[IoSlice<'_>]) -> T, T>(
             .expect("Too much data"),
     };
     let mut v: SmallVec<[IoSlice<'_>; 3]> = smallvec![IoSlice::new(header.as_bytes())];
-    match &response {
-        Response::Error(_) => {}
-        Response::Data(d) => v.push(IoSlice::new(d.as_ref())),
+    match &response_data {
+        ResponseData::Error(_) => {}
+        ResponseData::Data(d) => v.push(IoSlice::new(d)),
     }
     f(&v)
 }
@@ -49,6 +59,15 @@ pub(crate) fn send_with_iovec<F: FnOnce(&[IoSlice<'_>]) -> T, T>(
 pub enum Response {
     Error(i32),
     Data(ResponseBuf),
+}
+
+impl ResponseTrait for Response {
+    fn get<'a>(&'a self) -> ResponseData<'a> {
+        match self {
+            Response::Error(e) => ResponseData::Error(*e),
+            Response::Data(d) => ResponseData::Data(d.as_ref())
+        }
+    }
 }
 
 #[must_use]
