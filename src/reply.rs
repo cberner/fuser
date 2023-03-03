@@ -12,7 +12,7 @@ use crate::ll::{
     Generation,
 };
 use crate::ll::{
-    reply::{DirEntList, DirEntOffset, DirEntry},
+    reply::{DirEntList, DirEntOffset, DirEntry, send_with_iovec},
     INodeNo,
 };
 use libc::c_int;
@@ -73,7 +73,7 @@ impl ReplyRaw {
     fn send_ll_mut(&mut self, response: &ll::Response) {
         assert!(self.sender.is_some());
         let sender = self.sender.take().unwrap();
-        let res = response.with_iovec(self.unique, |iov| sender.send(iov));
+        let res = send_with_iovec(response, self.unique, |iov| sender.send(iov));
         if let Err(err) = res {
             error!("Failed to send FUSE reply: {}", err);
         }
