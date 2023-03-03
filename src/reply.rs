@@ -12,7 +12,7 @@ use crate::ll::{
     Generation,
 };
 use crate::ll::{
-    reply::{DirEntList, DirEntOffset, DirEntry, send_with_iovec},
+    reply::{DirEntList, DirEntOffset, DirEntry, ResponseTrait, send_with_iovec},
     INodeNo,
 };
 use libc::c_int;
@@ -70,7 +70,7 @@ impl Reply for ReplyRaw {
 impl ReplyRaw {
     /// Reply to a request with the given error code and data. Must be called
     /// only once (the `ok` and `error` methods ensure this by consuming `self`)
-    fn send_ll_mut(&mut self, response: &ll::Response) {
+    fn send_ll_mut<R: ResponseTrait + ?Sized>(&mut self, response: &R) {
         assert!(self.sender.is_some());
         let sender = self.sender.take().unwrap();
         let res = send_with_iovec(response, self.unique, |iov| sender.send(iov));
@@ -78,7 +78,7 @@ impl ReplyRaw {
             error!("Failed to send FUSE reply: {}", err);
         }
     }
-    fn send_ll(mut self, response: &ll::Response) {
+    fn send_ll<R: ResponseTrait + ?Sized>(mut self, response: &R) {
         self.send_ll_mut(response)
     }
 
@@ -507,7 +507,7 @@ impl ReplyDirectory {
 
     /// Reply to a request with the filled directory buffer
     pub fn ok(self) {
-        self.reply.send_ll(&self.data.into());
+        self.reply.send_ll::<ll::Response>(&self.data.into());
     }
 
     /// Reply to a request with the given error code
@@ -560,7 +560,7 @@ impl ReplyDirectoryPlus {
 
     /// Reply to a request with the filled directory buffer
     pub fn ok(self) {
-        self.reply.send_ll(&self.buf.into());
+        self.reply.send_ll::<ll::Response>(&self.buf.into());
     }
 
     /// Reply to a request with the given error code

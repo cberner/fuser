@@ -26,7 +26,7 @@ pub(crate) trait ResponseTrait {
     fn get<'a>(&'a self) -> ResponseData<'a>;
 }
 
-pub(crate) fn send_with_iovec<R: ResponseTrait, F: FnOnce(&[IoSlice<'_>]) -> T, T>(
+pub(crate) fn send_with_iovec<R: ResponseTrait + ?Sized, F: FnOnce(&[IoSlice<'_>]) -> T, T>(
     response: &R,
     unique: RequestId,
     f: F,
