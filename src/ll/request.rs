@@ -989,7 +989,7 @@ mod op {
                 #[cfg(feature = "abi-7-28")]
                 reserved: [0; 8],
             };
-            Response::new_data(init.as_bytes())
+            Response::Data(init.as_bytes().into())
         }
     }
 

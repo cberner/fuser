@@ -88,14 +88,6 @@ impl Response {
         Self::Error(error.into())
     }
 
-    pub(crate) fn new_data<T: AsRef<[u8]> + Into<Vec<u8>>>(data: T) -> Self {
-        Self::Data(if data.as_ref().len() <= INLINE_DATA_THRESHOLD {
-            data.as_ref().into()
-        } else {
-            data.into().into()
-        })
-    }
-
     pub(crate) fn new_entry(
         ino: INodeNo,
         generation: Generation,
@@ -521,9 +513,9 @@ mod test {
 
     #[test]
     fn reply_data() {
-        let r = Response::new_data([0xde, 0xad, 0xbe, 0xef].as_ref());
+        let r = [0xde, 0xad, 0xbe, 0xef];
         assert_eq!(
-            send_with_iovec(&r, RequestId(0xdeadbeef), ioslice_to_vec),
+            send_with_iovec(&r[..], RequestId(0xdeadbeef), ioslice_to_vec),
             vec![
                 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xef, 0xbe, 0xad, 0xde, 0x00, 0x00,
                 0x00, 0x00, 0xde, 0xad, 0xbe, 0xef,
@@ -831,9 +823,9 @@ mod test {
             0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xEF, 0xBE, 0xAD, 0xDE, 0x00, 0x00,
             0x00, 0x00, 0x11, 0x22, 0x33, 0x44,
         ];
-        let r = Response::new_data([0x11, 0x22, 0x33, 0x44].as_ref());
+        let r = [0x11, 0x22, 0x33, 0x44];
         assert_eq!(
-            send_with_iovec(&r, RequestId(0xdeadbeef), ioslice_to_vec),
+            send_with_iovec(&r[..], RequestId(0xdeadbeef), ioslice_to_vec),
             expected
         );
     }

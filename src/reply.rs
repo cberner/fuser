@@ -149,7 +149,7 @@ impl Reply for ReplyData {
 impl ReplyData {
     /// Reply to a request with the given data
     pub fn data(self, data: &[u8]) {
-        self.reply.send_ll(&ll::Response::new_data(data));
+        self.reply.send_ll(data);
     }
 
     /// Reply to a request with the given error code
@@ -594,7 +594,7 @@ impl ReplyXattr {
 
     /// Reply to a request with the data in the xattr.
     pub fn data(self, data: &[u8]) {
-        self.reply.send_ll(&ll::Response::new_data(data))
+        self.reply.send_ll(data)
     }
 
     /// Reply to a request with the given error code.
@@ -699,7 +699,7 @@ mod test {
             ],
         };
         let reply: ReplyRaw = Reply::new(0xdeadbeef, sender);
-        reply.send_ll(&ll::Response::new_data(data.as_bytes()));
+        reply.send_ll(data.as_bytes());
     }
 
     #[test]
