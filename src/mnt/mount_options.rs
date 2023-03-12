@@ -28,6 +28,9 @@ pub enum MountOption {
     /// Enable permission checking in the kernel
     DefaultPermissions,
 
+    /// Enable deferred permission checking in the kernel
+    DeferPermissions,
+
     /* Flags */
     /// Enable special character and block devices
     Dev,
@@ -66,6 +69,7 @@ impl MountOption {
             "allow_other" => MountOption::AllowOther,
             "allow_root" => MountOption::AllowRoot,
             "default_permissions" => MountOption::DefaultPermissions,
+            "defer_permissions" => MountOption::DeferPermissions,
             "dev" => MountOption::Dev,
             "nodev" => MountOption::NoDev,
             "suid" => MountOption::Suid,
@@ -110,6 +114,7 @@ fn conflicts_with(option: &MountOption) -> Vec<MountOption> {
         MountOption::AllowRoot => vec![MountOption::AllowOther],
         MountOption::AutoUnmount => vec![],
         MountOption::DefaultPermissions => vec![],
+        MountOption::DeferPermissions => vec![],
         MountOption::Dev => vec![MountOption::NoDev],
         MountOption::NoDev => vec![MountOption::Dev],
         MountOption::Suid => vec![MountOption::NoSuid],
@@ -138,6 +143,7 @@ pub fn option_to_string(option: &MountOption) -> String {
         // root + owner within fuser
         MountOption::AllowRoot => "allow_other".to_string(),
         MountOption::DefaultPermissions => "default_permissions".to_string(),
+        MountOption::DeferPermissions => "defer_permissions".to_string(),
         MountOption::Dev => "dev".to_string(),
         MountOption::NoDev => "nodev".to_string(),
         MountOption::Suid => "suid".to_string(),
@@ -201,6 +207,7 @@ mod test {
             AllowOther,
             AutoUnmount,
             DefaultPermissions,
+            DeferPermissions,
             Dev,
             NoDev,
             Suid,
