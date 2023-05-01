@@ -13,8 +13,9 @@ jobs:
           brew update > /dev/null && brew tap macos-fuse-t/homebrew-cask && brew install fuse-t
       - uses: actions-rs/toolchain@v1
         with:
-          toolchain: stable
+          toolchain: 1.67
           components: rustfmt, clippy
+          default: true
       - name: Cache cargo registry
         uses: actions/cache@v1
         with:
@@ -54,8 +55,9 @@ jobs:
           /Library/Filesystems/macfuse.fs/Contents/Resources/load_macfuse
       - uses: actions-rs/toolchain@v1
         with:
-          toolchain: stable
+          toolchain: 1.67
           components: rustfmt, clippy
+          default: true
       - name: Cache cargo registry
         uses: actions/cache@v1
         with:

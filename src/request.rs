@@ -27,6 +27,7 @@ pub struct Request<'a> {
     /// Channel sender for sending the reply
     ch: ChannelSender,
     /// Request raw data
+    #[allow(unused)]
     data: &'a [u8],
     /// Parsed request
     request: ll::AnyRequest<'a>,
@@ -68,7 +69,7 @@ impl<'a> Request<'a> {
     fn dispatch_req<FS: Filesystem>(
         &self,
         se: &mut Session<FS>,
-    ) -> Result<Option<Response>, Errno> {
+    ) -> Result<Option<Response<'_>>, Errno> {
         let op = self.request.operation().map_err(|_| Errno::ENOSYS)?;
         // Implement allow_root & access check for auto_unmount
         if (se.allowed == SessionACL::RootAndOwner
