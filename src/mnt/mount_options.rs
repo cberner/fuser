@@ -59,8 +59,8 @@ pub enum MountOption {
     to libfuse, and not part of the kernel ABI */
 }
 
-impl MountOption {
-    pub(crate) fn from_str(s: &str) -> MountOption {
+impl<'a> From<&'a str> for MountOption {
+    fn from(s: &'a str) -> MountOption {
         match s {
             "auto_unmount" => MountOption::AutoUnmount,
             "allow_other" => MountOption::AllowOther,
@@ -126,32 +126,38 @@ fn conflicts_with(option: &MountOption) -> Vec<MountOption> {
     }
 }
 
+impl std::fmt::Display for MountOption {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MountOption::FSName(name) => f.write_fmt(format_args!("fsname={}", name)),
+            MountOption::Subtype(subtype) => f.write_fmt(format_args!("subtype={}", subtype)),
+            MountOption::CUSTOM(value) => f.write_str(value),
+            MountOption::AutoUnmount => f.write_str("auto_unmount"),
+            MountOption::AllowOther => f.write_str("allow_other"),
+            // AllowRoot is implemented by allowing everyone access and then restricting to
+            // root + owner within fuser
+            MountOption::AllowRoot => f.write_str("allow_other"),
+            MountOption::DefaultPermissions => f.write_str("default_permissions"),
+            MountOption::Dev => f.write_str("dev"),
+            MountOption::NoDev => f.write_str("nodev"),
+            MountOption::Suid => f.write_str("suid"),
+            MountOption::NoSuid => f.write_str("nosuid"),
+            MountOption::RO => f.write_str("ro"),
+            MountOption::RW => f.write_str("rw"),
+            MountOption::Exec => f.write_str("exec"),
+            MountOption::NoExec => f.write_str("noexec"),
+            MountOption::Atime => f.write_str("atime"),
+            MountOption::NoAtime => f.write_str("noatime"),
+            MountOption::DirSync => f.write_str("dirsync"),
+            MountOption::Sync => f.write_str("sync"),
+            MountOption::Async => f.write_str("async"),
+        }
+    }
+}
+
 // Format option to be passed to libfuse or kernel
 pub fn option_to_string(option: &MountOption) -> String {
-    match option {
-        MountOption::FSName(name) => format!("fsname={}", name),
-        MountOption::Subtype(subtype) => format!("subtype={}", subtype),
-        MountOption::CUSTOM(value) => value.to_string(),
-        MountOption::AutoUnmount => "auto_unmount".to_string(),
-        MountOption::AllowOther => "allow_other".to_string(),
-        // AllowRoot is implemented by allowing everyone access and then restricting to
-        // root + owner within fuser
-        MountOption::AllowRoot => "allow_other".to_string(),
-        MountOption::DefaultPermissions => "default_permissions".to_string(),
-        MountOption::Dev => "dev".to_string(),
-        MountOption::NoDev => "nodev".to_string(),
-        MountOption::Suid => "suid".to_string(),
-        MountOption::NoSuid => "nosuid".to_string(),
-        MountOption::RO => "ro".to_string(),
-        MountOption::RW => "rw".to_string(),
-        MountOption::Exec => "exec".to_string(),
-        MountOption::NoExec => "noexec".to_string(),
-        MountOption::Atime => "atime".to_string(),
-        MountOption::NoAtime => "noatime".to_string(),
-        MountOption::DirSync => "dirsync".to_string(),
-        MountOption::Sync => "sync".to_string(),
-        MountOption::Async => "async".to_string(),
-    }
+    option.to_string()
 }
 
 /// Parses mount command args.
@@ -174,7 +180,7 @@ pub(crate) fn parse_options_from_args(args: &[&OsStr]) -> io::Result<Vec<MountOp
             Some(x) => return Err(err(format!("Error parsing args: expected -o, got {}", x))),
         };
         for x in opt.split(',') {
-            out.push(MountOption::from_str(x))
+            out.push(MountOption::from(x))
         }
     }
     Ok(out)
@@ -217,7 +223,7 @@ mod test {
         ]
         .iter()
         {
-            assert_eq!(*x, MountOption::from_str(option_to_string(x).as_ref()))
+            assert_eq!(*x, MountOption::from(option_to_string(x).as_ref()))
         }
     }
 

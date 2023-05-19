@@ -1005,7 +1005,7 @@ pub fn spawn_mount<'a, FS: Filesystem + Send + 'static + 'a, P: AsRef<Path>>(
 ) -> io::Result<BackgroundSession> {
     let options: Option<Vec<_>> = options
         .iter()
-        .map(|x| Some(MountOption::from_str(x.to_str()?)))
+        .map(|x| Some(MountOption::from(x.to_str()?)))
         .collect();
     let options = options.ok_or(ErrorKind::InvalidData)?;
     Session::new(filesystem, mountpoint.as_ref(), options.as_ref()).and_then(|se| se.spawn())
