@@ -89,7 +89,7 @@ impl MountOption {
 pub fn check_option_conflicts(options: &[MountOption]) -> Result<(), io::Error> {
     let mut options_set = HashSet::new();
     options_set.extend(options.iter().cloned());
-    let conflicting: HashSet<MountOption> = options.iter().map(conflicts_with).flatten().collect();
+    let conflicting: HashSet<MountOption> = options.iter().flat_map(conflicts_with).collect();
     let intersection: Vec<MountOption> = conflicting.intersection(&options_set).cloned().collect();
     if !intersection.is_empty() {
         Err(io::Error::new(

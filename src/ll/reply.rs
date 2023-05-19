@@ -50,7 +50,7 @@ impl<'a> Response<'a> {
         match &self {
             Response::Error(_) => {}
             Response::Data(d) => v.push(IoSlice::new(d.as_ref())),
-            Response::Slice(d) => v.push(IoSlice::new(d.as_ref())),
+            Response::Slice(d) => v.push(IoSlice::new(d)),
         }
         f(&v)
     }

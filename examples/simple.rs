@@ -334,7 +334,7 @@ impl SimpleFS {
         let path = Path::new(&self.data_dir)
             .join("contents")
             .join(inode.to_string());
-        if let Ok(file) = File::open(&path) {
+        if let Ok(file) = File::open(path) {
             Ok(bincode::deserialize_from(file).unwrap())
         } else {
             Err(libc::ENOENT)
@@ -349,7 +349,7 @@ impl SimpleFS {
             .write(true)
             .create(true)
             .truncate(true)
-            .open(&path)
+            .open(path)
             .unwrap();
         bincode::serialize_into(file, &entries).unwrap();
     }
@@ -358,7 +358,7 @@ impl SimpleFS {
         let path = Path::new(&self.data_dir)
             .join("inodes")
             .join(inode.to_string());
-        if let Ok(file) = File::open(&path) {
+        if let Ok(file) = File::open(path) {
             Ok(bincode::deserialize_from(file).unwrap())
         } else {
             Err(libc::ENOENT)
@@ -373,7 +373,7 @@ impl SimpleFS {
             .write(true)
             .create(true)
             .truncate(true)
-            .open(&path)
+            .open(path)
             .unwrap();
         bincode::serialize_into(file, inode).unwrap();
     }
@@ -415,7 +415,7 @@ impl SimpleFS {
         }
 
         let path = self.content_path(inode);
-        let file = OpenOptions::new().write(true).open(&path).unwrap();
+        let file = OpenOptions::new().write(true).open(path).unwrap();
         file.set_len(new_length).unwrap();
 
         attrs.size = new_length;
@@ -728,7 +728,7 @@ impl Filesystem for SimpleFS {
     fn readlink(&mut self, _req: &Request, inode: u64, reply: ReplyData) {
         debug!("readlink() called on {:?}", inode);
         let path = self.content_path(inode);
-        if let Ok(mut file) = File::open(&path) {
+        if let Ok(mut file) = File::open(path) {
             let file_size = file.metadata().unwrap().len();
             let mut buffer = vec![0; file_size as usize];
             file.read_exact(&mut buffer).unwrap();
@@ -1076,7 +1076,7 @@ impl Filesystem for SimpleFS {
             .write(true)
             .create(true)
             .truncate(true)
-            .open(&path)
+            .open(path)
             .unwrap();
         file.write_all(link.as_os_str().as_bytes()).unwrap();
 
@@ -1389,7 +1389,7 @@ impl Filesystem for SimpleFS {
         }
 
         let path = self.content_path(inode);
-        if let Ok(file) = File::open(&path) {
+        if let Ok(file) = File::open(path) {
             let file_size = file.metadata().unwrap().len();
             // Could underflow if file length is less than local_start
             let read_size = min(size, file_size.saturating_sub(offset as u64) as u32);
@@ -1422,7 +1422,7 @@ impl Filesystem for SimpleFS {
         }
 
         let path = self.content_path(inode);
-        if let Ok(mut file) = OpenOptions::new().write(true).open(&path) {
+        if let Ok(mut file) = OpenOptions::new().write(true).open(path) {
             file.seek(SeekFrom::Start(offset as u64)).unwrap();
             file.write_all(data).unwrap();
 
@@ -1790,7 +1790,7 @@ impl Filesystem for SimpleFS {
         reply: ReplyEmpty,
     ) {
         let path = self.content_path(inode);
-        if let Ok(file) = OpenOptions::new().write(true).open(&path) {
+        if let Ok(file) = OpenOptions::new().write(true).open(path) {
             unsafe {
                 libc::fallocate64(file.into_raw_fd(), mode, offset, length);
             }
@@ -1836,7 +1836,7 @@ impl Filesystem for SimpleFS {
         }
 
         let src_path = self.content_path(src_inode);
-        if let Ok(file) = File::open(&src_path) {
+        if let Ok(file) = File::open(src_path) {
             let file_size = file.metadata().unwrap().len();
             // Could underflow if file length is less than local_start
             let read_size = min(size, file_size.saturating_sub(src_offset as u64));
@@ -1845,7 +1845,7 @@ impl Filesystem for SimpleFS {
             file.read_exact_at(&mut data, src_offset as u64).unwrap();
 
             let dest_path = self.content_path(dest_inode);
-            if let Ok(mut file) = OpenOptions::new().write(true).open(&dest_path) {
+            if let Ok(mut file) = OpenOptions::new().write(true).open(dest_path) {
                 file.seek(SeekFrom::Start(dest_offset as u64)).unwrap();
                 file.write_all(&data).unwrap();
 
