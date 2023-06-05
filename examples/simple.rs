@@ -750,10 +750,7 @@ impl Filesystem for SimpleFS {
     ) {
         let file_type = mode & libc::S_IFMT;
 
-        if file_type != libc::S_IFREG as u32
-            && file_type != libc::S_IFLNK as u32
-            && file_type != libc::S_IFDIR as u32
-        {
+        if file_type != libc::S_IFREG && file_type != libc::S_IFLNK && file_type != libc::S_IFDIR {
             // TODO
             warn!("mknod() implementation is incomplete. Only supports regular files, symlinks, and directories. Got {:o}", mode);
             reply.error(libc::ENOSYS);
