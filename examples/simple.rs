@@ -432,11 +432,11 @@ impl SimpleFS {
 
     fn lookup_name(&self, parent: u64, name: &OsStr) -> Result<InodeAttributes, c_int> {
         let entries = self.get_directory_content(parent)?;
-        if let Some((inode, _)) = entries.get(name.as_bytes()) {
-            return self.get_inode(*inode);
+        return if let Some((inode, _)) = entries.get(name.as_bytes()) {
+            self.get_inode(*inode)
         } else {
-            return Err(libc::ENOENT);
-        }
+            Err(libc::ENOENT)
+        };
     }
 
     fn insert_link(
