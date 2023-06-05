@@ -1,0 +1,19 @@
+[package]
+name = "simplefs"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "simple"
+path = "src/simple.rs"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+fuser = { path = "../../."}
+log = "0"
+env_logger = "0"
+bincode = "1"
+libc = "0"
+serde = { version = "1", features = ["derive"] }
+clap = { version = "3", features = ["cargo"] }
