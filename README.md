@@ -106,7 +106,10 @@ Put this in your `Cargo.toml`:
 fuser = "0.7"
 ```
 
-To create a new filesystem, implement the trait `fuser::Filesystem`. See the [documentation] for details or the `examples` directory for some basic examples.
+To create a new filesystem, implement the trait `fuser::Filesystem`. See the [documentation] for details or the `examples` directory for some basic examples.  To build an example from the `examples` directory:
+```sh
+cargo build --example simple --no-default-features
+```
 
 ## To Do
 
