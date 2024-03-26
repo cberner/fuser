@@ -331,10 +331,10 @@ pub trait Filesystem {
     }
 
     /// Get file attributes.
-    fn getattr(&mut self, _req: &Request<'_>, ino: u64, fh: Option<u64>, reply: ReplyAttr) {
+    fn getattr(&mut self, _req: &Request<'_>, ino: u64, fd: Option<u64>, reply: ReplyAttr) {
         warn!(
-            "[Not Implemented] getattr(ino: {:#x?}, fh: {:#x?})",
-            ino, fh
+            "[Not Implemented] getattr(ino: {:#x?}, fd: {:#x?})",
+            ino, fd
         );
         reply.error(ENOSYS);
     }
