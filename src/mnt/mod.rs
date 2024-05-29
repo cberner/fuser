@@ -17,7 +17,7 @@ pub mod mount_options;
 
 #[cfg(any(feature = "libfuse", test))]
 use fuse2_sys::fuse_args;
-#[cfg(any(test, not(feature = "libfuse")))]
+#[cfg(any(all(test, not(target_os = "macos")), not(feature = "libfuse")))]
 use std::fs::File;
 #[cfg(any(test, not(feature = "libfuse"), not(feature = "libfuse3")))]
 use std::io;
@@ -87,7 +87,7 @@ fn libc_umount(mnt: &CStr) -> io::Result<()> {
 
 /// Warning: This will return true if the filesystem has been detached (lazy unmounted), but not
 /// yet destroyed by the kernel.
-#[cfg(any(test, not(feature = "libfuse")))]
+#[cfg(any(all(test, not(target_os = "macos")), not(feature = "libfuse")))]
 fn is_mounted(fuse_device: &File) -> bool {
     use libc::{poll, pollfd};
     use std::os::unix::prelude::AsRawFd;
@@ -121,7 +121,7 @@ fn is_mounted(fuse_device: &File) -> bool {
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::{ffi::CStr, mem::ManuallyDrop};
+    use std::ffi::CStr;
 
     #[test]
     fn fuse_args() {
@@ -142,6 +142,8 @@ mod test {
             },
         );
     }
+
+    #[cfg(not(target_os = "macos"))]
     fn cmd_mount() -> String {
         std::str::from_utf8(
             std::process::Command::new("sh")
@@ -156,8 +158,12 @@ mod test {
         .to_owned()
     }
 
+    // Mountpoint are not directly available on MacOS.
+    #[cfg(not(target_os = "macos"))]
     #[test]
     fn mount_unmount() {
+        use std::mem::ManuallyDrop;
+
         // We use ManuallyDrop here to leak the directory on test failure.  We don't
         // want to try and clean up the directory if it's a mountpoint otherwise we'll
         // deadlock.

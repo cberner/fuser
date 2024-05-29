@@ -63,3 +63,23 @@ jobs:
 
       - name: Run tests
         run: INTERACTIVE="" make ${{ matrix.test_group }}
+
+  test-mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Note that this is a partial install of macFUSE, for a complete installation that would require to install the kernel extension
+      # But that currently not possible without restarting the machine
+      - name: Install macFUSE
+        run: brew install --cask macfuse
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Run tests
+        # The macFuse kernel extension is not installed so we need to skip the unmount_no_send test
+        run: cargo test --features=libfuse -- --skip unmount_no_send
+        env:
+          RUST_LOG: DEBUG
+        timeout-minutes: 5
+
