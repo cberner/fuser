@@ -5,7 +5,7 @@ use std::time::Duration;
 use tempfile::TempDir;
 
 #[test]
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn unmount_no_send() {
     // Rc to make this !Send
     struct NoSendFS(Rc<()>);
