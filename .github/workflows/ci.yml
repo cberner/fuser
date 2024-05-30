@@ -76,4 +76,8 @@ jobs:
 
       - name: Run tests
         run: cargo test
-        timeout-minutes: 5 # The test `mnt::test::mount_unmount` don't seems to finish on macos
+        timeout-minutes: 5
+
+      - name: Run mount test
+        run: ./osx_mount_test.sh
+        timeout-minutes: 5
