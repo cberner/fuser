@@ -87,7 +87,7 @@ fn libc_umount(mnt: &CStr) -> io::Result<()> {
 
 /// Warning: This will return true if the filesystem has been detached (lazy unmounted), but not
 /// yet destroyed by the kernel.
-#[cfg(any(test, not(feature = "libfuse")))]
+#[cfg(any(all(test, not(target_os = "macos")), not(feature = "libfuse")))]
 fn is_mounted(fuse_device: &File) -> bool {
     use libc::{poll, pollfd};
     use std::os::unix::prelude::AsRawFd;
@@ -142,6 +142,8 @@ mod test {
             },
         );
     }
+
+    #[cfg(not(target_os = "macos"))]
     fn cmd_mount() -> String {
         std::str::from_utf8(
             std::process::Command::new("sh")
@@ -155,6 +157,7 @@ mod test {
         .unwrap()
         .to_owned()
     }
+
     // Mountpoint are not directly available on MacOS.
     #[cfg(not(target_os = "macos"))]
     #[test]
