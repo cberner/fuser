@@ -155,7 +155,8 @@ mod test {
         .unwrap()
         .to_owned()
     }
-
+    // Mountpoint are not directly visible on MacOS.
+    #[cfg(not(target_os = "macos"))]
     #[test]
     fn mount_unmount() {
         // We use ManuallyDrop here to leak the directory on test failure.  We don't
