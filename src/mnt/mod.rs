@@ -121,7 +121,7 @@ fn is_mounted(fuse_device: &File) -> bool {
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::{ffi::CStr, mem::ManuallyDrop};
+    use std::ffi::CStr;
 
     #[test]
     fn fuse_args() {
@@ -155,10 +155,12 @@ mod test {
         .unwrap()
         .to_owned()
     }
-    // Mountpoint are not directly visible on MacOS.
+    // Mountpoint are not directly available on MacOS.
     #[cfg(not(target_os = "macos"))]
     #[test]
     fn mount_unmount() {
+        use std::mem::ManuallyDrop;
+
         // We use ManuallyDrop here to leak the directory on test failure.  We don't
         // want to try and clean up the directory if it's a mountpoint otherwise we'll
         // deadlock.
