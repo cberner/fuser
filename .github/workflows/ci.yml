@@ -75,7 +75,7 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
 
       - name: Run tests
-        run: cargo test
+        run: cargo test --features=libfuse
         timeout-minutes: 5
 
       - name: Run mount test
