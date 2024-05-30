@@ -17,7 +17,7 @@ pub mod mount_options;
 
 #[cfg(any(feature = "libfuse", test))]
 use fuse2_sys::fuse_args;
-#[cfg(any(test, not(feature = "libfuse")))]
+#[cfg(any(all(test, not(target_os = "macos")), not(feature = "libfuse")))]
 use std::fs::File;
 #[cfg(any(test, not(feature = "libfuse"), not(feature = "libfuse3")))]
 use std::io;
