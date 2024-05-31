@@ -74,12 +74,15 @@ jobs:
 
       - uses: actions-rust-lang/setup-rust-toolchain@v1
 
+      - name: Run mount test
+        run: ./osx_mount_test.sh
+        env:
+          RUST_LOG: DEBUG
+        timeout-minutes: 5
+
       - name: Run tests
         run: cargo test --features=libfuse
         env:
           RUST_LOG: DEBUG
         timeout-minutes: 5
 
-      - name: Run mount test
-        run: ./osx_mount_test.sh
-        timeout-minutes: 5
