@@ -72,6 +72,7 @@ jobs:
       - name: Install macfuse
         run: |
           set -x
+          csrutil disable # Disable system integrity protection to install macfuse headless
           brew install --cask macfuse
           LASTEST_EXTENSION_VERSION=$(ls /Library/Filesystems/macfuse.fs/Contents/Extensions/ | sort -n | tail -n 1)
           sudo kextload /Library/Filesystems/macfuse.fs/Contents/Extensions/$LASTEST_EXTENSION_VERSION/macfuse.kext
