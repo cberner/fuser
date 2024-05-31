@@ -75,7 +75,7 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
 
       - name: Run mount test
-        run: ./osx_mount_test.sh
+        run: ./osx_mount_tests.sh
         env:
           RUST_LOG: DEBUG
         timeout-minutes: 5
