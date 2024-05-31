@@ -76,6 +76,8 @@ jobs:
 
       - name: Run tests
         run: cargo test --features=libfuse
+        env:
+          RUST_LOG: DEBUG
         timeout-minutes: 5
 
       - name: Run mount test
