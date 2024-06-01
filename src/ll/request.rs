@@ -427,9 +427,8 @@ mod op {
             #[cfg(target_os = "macos")]
             match self.arg.valid & FATTR_CRTIME {
                 0 => None,
-                _ => Some(
-                    SystemTime::UNIX_EPOCH + Duration::new(self.arg.crtime, self.arg.crtimensec),
-                ),
+                _ => SystemTime::UNIX_EPOCH
+                    .checked_add(Duration::new(self.arg.crtime, self.arg.crtimensec)),
             }
             #[cfg(not(target_os = "macos"))]
             None
@@ -438,9 +437,8 @@ mod op {
             #[cfg(target_os = "macos")]
             match self.arg.valid & FATTR_CHGTIME {
                 0 => None,
-                _ => Some(
-                    SystemTime::UNIX_EPOCH + Duration::new(self.arg.chgtime, self.arg.chgtimensec),
-                ),
+                _ => SystemTime::UNIX_EPOCH
+                    .checked_add(Duration::new(self.arg.chgtime, self.arg.chgtimensec)),
             }
             #[cfg(not(target_os = "macos"))]
             None
@@ -449,10 +447,8 @@ mod op {
             #[cfg(target_os = "macos")]
             match self.arg.valid & FATTR_BKUPTIME {
                 0 => None,
-                _ => Some(
-                    SystemTime::UNIX_EPOCH
-                        + Duration::new(self.arg.bkuptime, self.arg.bkuptimensec),
-                ),
+                _ => SystemTime::UNIX_EPOCH
+                    .checked_add(Duration::new(self.arg.bkuptime, self.arg.bkuptimensec)),
             }
             #[cfg(not(target_os = "macos"))]
             None
