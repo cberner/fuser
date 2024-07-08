@@ -112,10 +112,7 @@ mod clap {
             _arg: Option<&Arg>,
             value: &std::ffi::OsStr,
         ) -> Result<Self::Value, Error> {
-            value
-                .to_string_lossy()
-                .parse()
-                .map_err(|e| clap::Error::raw(ErrorKind::ValueValidation, e))
+            Ok(MountOption::from_str(&value.to_string_lossy()))
         }
     }
 
