@@ -1,5 +1,7 @@
+use std::convert::Infallible;
 use std::io;
 use std::io::ErrorKind;
+use std::str::FromStr;
 use std::{collections::HashSet, ffi::OsStr};
 
 /// Mount options accepted by the FUSE filesystem type
@@ -82,6 +84,45 @@ impl MountOption {
             x if x.starts_with("fsname=") => MountOption::FSName(x[7..].into()),
             x if x.starts_with("subtype=") => MountOption::Subtype(x[8..].into()),
             x => MountOption::CUSTOM(x.into()),
+        }
+    }
+}
+
+impl FromStr for MountOption {
+    type Err = Infallible;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self::from_str(s))
+    }
+}
+
+#[cfg(feature = "clap")]
+mod clap {
+    use ::clap::builder::{TypedValueParser, ValueParserFactory};
+    use ::clap::error::ErrorKind;
+    use ::clap::{Arg, Command, Error};
+
+    use super::*;
+    #[derive(Clone, Copy, Debug)]
+    pub struct MountOptionParser;
+    impl TypedValueParser for MountOptionParser {
+        type Value = MountOption;
+        fn parse_ref(
+            &self,
+            _cmd: &Command,
+            _arg: Option<&Arg>,
+            value: &std::ffi::OsStr,
+        ) -> Result<Self::Value, Error> {
+            value
+                .to_string_lossy()
+                .parse()
+                .map_err(|e| clap::Error::raw(ErrorKind::ValueValidation, e))
+        }
+    }
+
+    impl ValueParserFactory for MountOption {
+        type Parser = MountOptionParser;
+        fn value_parser() -> Self::Parser {
+            MountOptionParser
         }
     }
 }
