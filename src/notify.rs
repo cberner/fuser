@@ -5,13 +5,14 @@ use std::{convert::TryInto, ffi::OsStr};
 
 use crate::{
     channel::ChannelSender,
-    ll::{fuse_abi::*, notify::Notification},
+    ll::notify::Notification,
 
     // What we're sending here aren't really replies, but they
     // move in the same direction (userspace->kernel), so we can
     // reuse ReplySender for it.
     reply::ReplySender,
 };
+use fuse_abi::os::*;
 
 /// A handle by which the application can send notifications to the server
 #[derive(Debug)]
@@ -26,7 +27,7 @@ impl Notifier {
     #[cfg(feature = "abi-7-11")]
     pub fn poll(&self, kh: u64) -> io::Result<()> {
         let notif = Notification::new_poll(kh);
-        self.send(fuse_notify_code::FUSE_POLL, &notif)
+        self.send(fuse_notify_code::FUSE_NOTIFY_POLL, &notif)
     }
 
     /// Invalidate the kernel cache for a given directory entry

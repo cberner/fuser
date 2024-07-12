@@ -14,6 +14,7 @@ categories = ["external-ffi-bindings", "api-bindings", "filesystem", "os::unix-a
 build = "build.rs"
 
 [dependencies]
+fuse-abi = { version = "0.1", features = ["num_enum", "zerocopy"] }
 libc = "0.2.51"
 log = "0.4.6"
 memchr = "2.7.2"
@@ -77,3 +78,6 @@ required-features = ["abi-7-12"]
 [[example]]
 name = "notify_inval_inode"
 required-features = ["abi-7-12"]
+
+[patch.crates-io]
+fuse-abi = { git = "https://github.com/rust-osdev/fuse-abi.git" }

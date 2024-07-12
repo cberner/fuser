@@ -21,9 +21,10 @@ use libc::{EACCES, EINVAL, EISDIR, ENOBUFS, ENOENT, ENOTDIR};
 
 use clap::Parser;
 
+use fuse_abi::os::*;
 use fuser::{
-    consts::*, FileAttr, FileType, Filesystem, MountOption, ReplyAttr, ReplyData, ReplyDirectory,
-    ReplyEntry, ReplyOpen, Request, FUSE_ROOT_ID,
+    FileAttr, FileType, Filesystem, MountOption, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry,
+    ReplyOpen, Request,
 };
 
 struct ClockFS<'a> {

@@ -3,9 +3,8 @@
 //! A request represents information about a filesystem operation the kernel driver wants us to
 //! perform.
 
-use super::fuse_abi::*;
-
 use super::{Errno, Response};
+use fuse_abi::os::*;
 #[cfg(feature = "serializable")]
 use serde::{Deserialize, Serialize};
 use std::{convert::TryFrom, fmt::Display, path::Path};
@@ -154,7 +153,8 @@ impl Lock {
     fn from_abi(x: &fuse_file_lock) -> Lock {
         Lock {
             range: (x.start, x.end),
-            typ: x.typ,
+            // FIXME: use u32
+            typ: x.type_ as i32,
             pid: x.pid,
         }
     }
@@ -271,9 +271,8 @@ mod op {
         super::{argument::ArgumentIterator, TimeOrNow},
         FilenameInDir, Request,
     };
-    use super::{
-        abi::consts::*, abi::*, FileHandle, INodeNo, Lock, LockOwner, Operation, RequestId,
-    };
+    use super::{FileHandle, INodeNo, Lock, LockOwner, Operation, RequestId};
+    use fuse_abi::os::*;
     use std::{
         convert::TryInto,
         ffi::OsStr,
@@ -381,11 +380,12 @@ mod op {
         pub fn atime(&self) -> Option<TimeOrNow> {
             match self.arg.valid & FATTR_ATIME {
                 0 => None,
-                _ => Some(if self.arg.atime_now() {
+                _ => Some(if self.arg.valid & FATTR_ATIME_NOW != 0 {
                     TimeOrNow::Now
                 } else {
                     TimeOrNow::SpecificTime(system_time_from_time(
-                        self.arg.atime,
+                        // FIXME: use u64
+                        self.arg.atime as i64,
                         self.arg.atimensec,
                     ))
                 }),
@@ -394,11 +394,12 @@ mod op {
         pub fn mtime(&self) -> Option<TimeOrNow> {
             match self.arg.valid & FATTR_MTIME {
                 0 => None,
-                _ => Some(if self.arg.mtime_now() {
+                _ => Some(if self.arg.valid & FATTR_MTIME_NOW != 0 {
                     TimeOrNow::Now
                 } else {
                     TimeOrNow::SpecificTime(system_time_from_time(
-                        self.arg.mtime,
+                        // FIXME: use u64
+                        self.arg.mtime as i64,
                         self.arg.mtimensec,
                     ))
                 }),
@@ -408,7 +409,11 @@ mod op {
             #[cfg(feature = "abi-7-23")]
             match self.arg.valid & FATTR_CTIME {
                 0 => None,
-                _ => Some(system_time_from_time(self.arg.ctime, self.arg.ctimensec)),
+                _ => Some(system_time_from_time(
+                    // FIXME: use u64
+                    self.arg.ctime as i64,
+                    self.arg.ctimensec,
+                )),
             }
             #[cfg(not(feature = "abi-7-23"))]
             None
@@ -655,7 +660,8 @@ mod op {
     impl_request!(Open<'_>);
     impl<'a> Open<'a> {
         pub fn flags(&self) -> i32 {
-            self.arg.flags
+            // FIXME: use u32
+            self.arg.flags as i32
         }
     }
 
@@ -678,7 +684,8 @@ mod op {
             FileHandle(self.arg.fh)
         }
         pub fn offset(&self) -> i64 {
-            self.arg.offset
+            // FIXME: use u64
+            self.arg.offset as i64
         }
         pub fn size(&self) -> u32 {
             self.arg.size
@@ -699,7 +706,10 @@ mod op {
             #[cfg(not(feature = "abi-7-9"))]
             return 0;
             #[cfg(feature = "abi-7-9")]
-            self.arg.flags
+            {
+                // FIXME: use u32
+                self.arg.flags as i32
+            }
         }
     }
 
@@ -722,7 +732,8 @@ mod op {
             FileHandle(self.arg.fh)
         }
         pub fn offset(&self) -> i64 {
-            self.arg.offset
+            // FIXME: use u64
+            self.arg.offset as i64
         }
         pub fn data(&self) -> &'a [u8] {
             self.data
@@ -749,8 +760,9 @@ mod op {
         /// flags: these are the file flags, such as O_SYNC. Only supported with ABI >= 7.9
         /// TODO: Make a Flags type specifying valid values
         pub fn flags(&self) -> i32 {
+            // FIXME: use u32
             #[cfg(feature = "abi-7-9")]
-            return self.arg.flags;
+            return self.arg.flags as i32;
             #[cfg(not(feature = "abi-7-9"))]
             0
         }
@@ -787,7 +799,8 @@ mod op {
         /// The same flags as for open.
         /// TODO: Document what flags are valid, or remove this
         pub fn flags(&self) -> i32 {
-            self.arg.flags
+            // FIXME: use u32
+            self.arg.flags as i32
         }
         pub fn lock_owner(&self) -> Option<LockOwner> {
             #[cfg(not(feature = "abi-7-17"))]
@@ -837,7 +850,8 @@ mod op {
         }
         // TODO: Document what are valid flags
         pub fn flags(&self) -> i32 {
-            self.arg.flags
+            // FIXME: use u32
+            self.arg.flags as i32
         }
         /// This will always be 0 except on MacOS.  It's recommended that
         /// implementations return EINVAL if this is not 0.
@@ -986,7 +1000,7 @@ mod op {
                 max_readahead: config.max_readahead,
                 flags: self.capabilities() & config.requested, // use requested features and reported as capable
                 #[cfg(not(feature = "abi-7-13"))]
-                unused: 0,
+                unused: Default::default(),
                 #[cfg(feature = "abi-7-13")]
                 max_background: config.max_background,
                 #[cfg(feature = "abi-7-13")]
@@ -998,10 +1012,7 @@ mod op {
                 reserved: [0; 9],
                 #[cfg(feature = "abi-7-28")]
                 max_pages: config.max_pages(),
-                #[cfg(feature = "abi-7-28")]
-                unused2: 0,
-                #[cfg(feature = "abi-7-28")]
-                reserved: [0; 8],
+                ..Default::default()
             };
             Response::new_data(init.as_bytes())
         }
@@ -1026,7 +1037,8 @@ mod op {
     impl<'a> OpenDir<'a> {
         /// Flags as passed to open
         pub fn flags(&self) -> i32 {
-            self.arg.flags
+            // FIXME: use u32
+            self.arg.flags as i32
         }
     }
 
@@ -1043,7 +1055,8 @@ mod op {
             FileHandle(self.arg.fh)
         }
         pub fn offset(&self) -> i64 {
-            self.arg.offset
+            // FIXME: use u64
+            self.arg.offset as i64
         }
         pub fn size(&self) -> u32 {
             self.arg.size
@@ -1079,7 +1092,8 @@ mod op {
         }
         /// TODO: Document what values this may take
         pub fn flags(&self) -> i32 {
-            self.arg.flags
+            // FIXME: use u32
+            self.arg.flags as i32
         }
     }
 
@@ -1178,7 +1192,8 @@ mod op {
     impl_request!(Access<'a>);
     impl<'a> Access<'a> {
         pub fn mask(&self) -> i32 {
-            self.arg.mask
+            // FIXME: use u32
+            self.arg.mask as i32
         }
     }
 
@@ -1209,7 +1224,8 @@ mod op {
         }
         /// Flags as passed to the creat() call
         pub fn flags(&self) -> i32 {
-            self.arg.flags
+            // FIXME: use u32
+            self.arg.flags as i32
         }
         pub fn umask(&self) -> u32 {
             #[cfg(not(feature = "abi-7-12"))]
@@ -1415,14 +1431,17 @@ mod op {
             FileHandle(self.arg.fh)
         }
         pub fn offset(&self) -> i64 {
-            self.arg.offset
+            // FIXME: use u64
+            self.arg.offset as i64
         }
         pub fn len(&self) -> i64 {
-            self.arg.length
+            // FIXME: use u64
+            self.arg.length as i64
         }
         /// `mode` as passed to fallocate.  See `man 2 fallocate`
         pub fn mode(&self) -> i32 {
-            self.arg.mode
+            // FIXME: use u32
+            self.arg.mode as i32
         }
     }
 
@@ -1444,7 +1463,8 @@ mod op {
             FileHandle(self.arg.fh)
         }
         pub fn offset(&self) -> i64 {
-            self.arg.offset
+            // FIXME: use u64
+            self.arg.offset as i64
         }
         pub fn size(&self) -> u32 {
             self.arg.size
@@ -1508,15 +1528,18 @@ mod op {
             FileHandle(self.arg.fh)
         }
         pub fn offset(&self) -> i64 {
-            self.arg.offset
+            // FIXME: use u64
+            self.arg.offset as i64
         }
         /// TODO: Make this return an enum
         pub fn whence(&self) -> i32 {
-            self.arg.whence
+            // FIXME: use u32
+            self.arg.whence as i32
         }
     }
 
     /// Copy the specified range from the source inode to the destination inode
+    #[cfg(feature = "abi-7-28")]
     #[derive(Debug, Clone, Copy)]
     pub struct CopyFileRangeFile {
         pub inode: INodeNo,
@@ -1539,7 +1562,8 @@ mod op {
             CopyFileRangeFile {
                 inode: self.nodeid(),
                 file_handle: FileHandle(self.arg.fh_in),
-                offset: self.arg.off_in,
+                // TODO: make an u64
+                offset: self.arg.off_in as i64,
             }
         }
         /// File and offset to copy data to
@@ -1547,7 +1571,8 @@ mod op {
             CopyFileRangeFile {
                 inode: INodeNo(self.arg.nodeid_out),
                 file_handle: FileHandle(self.arg.fh_out),
-                offset: self.arg.off_out,
+                // TODO: make an u64
+                offset: self.arg.off_out as i64,
             }
         }
         /// Number of bytes to copy
@@ -1871,6 +1896,8 @@ mod op {
                 header,
                 arg: data.fetch()?,
             }),
+
+            _ => return None,
         })
     }
 }
@@ -2157,7 +2184,7 @@ impl<'a> AnyRequest<'a> {
     pub fn operation(&self) -> Result<Operation<'a>, RequestError> {
         // Parse/check opcode
         let opcode = fuse_opcode::try_from(self.header.opcode)
-            .map_err(|_: InvalidOpcodeError| RequestError::UnknownOperation(self.header.opcode))?;
+            .map_err(|_| RequestError::UnknownOperation(self.header.opcode))?;
         // Parse/check operation arguments
         op::parse(self.header, &opcode, self.data).ok_or(RequestError::InsufficientData)
     }
@@ -2222,14 +2249,20 @@ mod tests {
     ]);
 
     #[cfg(target_endian = "little")]
-    const INIT_REQUEST: AlignedData<[u8; 56]> = AlignedData([
-        0x38, 0x00, 0x00, 0x00, 0x1a, 0x00, 0x00, 0x00, // len, opcode
+    const INIT_REQUEST: AlignedData<[u8; 104]> = AlignedData([
+        0x68, 0x00, 0x00, 0x00, 0x1a, 0x00, 0x00, 0x00, // len, opcode
         0x0d, 0xf0, 0xad, 0xba, 0xef, 0xbe, 0xad, 0xde, // unique
         0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, // nodeid
         0x0d, 0xd0, 0x01, 0xc0, 0xfe, 0xca, 0x01, 0xc0, // uid, gid
         0x5e, 0xba, 0xde, 0xc0, 0x00, 0x00, 0x00, 0x00, // pid, padding
         0x07, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, // major, minor
         0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // max_readahead, flags
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // max_readahead, flags
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // max_readahead, flags
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // max_readahead, flags
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // max_readahead, flags
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // max_readahead, flags
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // max_readahead, flags
     ]);
 
     #[cfg(target_endian = "big")]
@@ -2244,13 +2277,14 @@ mod tests {
     ];
 
     #[cfg(all(target_endian = "little", not(feature = "abi-7-12")))]
-    const MKNOD_REQUEST: AlignedData<[u8; 56]> = AlignedData([
-        0x38, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, // len, opcode
+    const MKNOD_REQUEST: AlignedData<[u8; 64]> = AlignedData([
+        0x40, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, // len, opcode
         0x0d, 0xf0, 0xad, 0xba, 0xef, 0xbe, 0xad, 0xde, // unique
         0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, // nodeid
         0x0d, 0xd0, 0x01, 0xc0, 0xfe, 0xca, 0x01, 0xc0, // uid, gid
         0x5e, 0xba, 0xde, 0xc0, 0x00, 0x00, 0x00, 0x00, // pid, padding
         0xa4, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mode, rdev
+        0xed, 0x01, 0x00, 0x00, 0xe7, 0x03, 0x00, 0x00, // umask, padding
         0x66, 0x6f, 0x6f, 0x2e, 0x74, 0x78, 0x74, 0x00, // name
     ]);
 
@@ -2277,7 +2311,7 @@ mod tests {
     #[test]
     fn short_read() {
         match AnyRequest::try_from(&INIT_REQUEST[..48]) {
-            Err(RequestError::ShortRead(48, 56)) => (),
+            Err(RequestError::ShortRead(48, 104)) => (),
             _ => panic!("Unexpected request parsing result"),
         }
     }
@@ -2285,7 +2319,7 @@ mod tests {
     #[test]
     fn init() {
         let req = AnyRequest::try_from(&INIT_REQUEST[..]).unwrap();
-        assert_eq!(req.header.len, 56);
+        assert_eq!(req.header.len, 104);
         assert_eq!(req.header.opcode, 26);
         assert_eq!(req.unique(), RequestId(0xdead_beef_baad_f00d));
         assert_eq!(req.nodeid(), INodeNo(0x1122_3344_5566_7788));
@@ -2304,9 +2338,6 @@ mod tests {
     #[test]
     fn mknod() {
         let req = AnyRequest::try_from(&MKNOD_REQUEST[..]).unwrap();
-        #[cfg(not(feature = "abi-7-12"))]
-        assert_eq!(req.header.len, 56);
-        #[cfg(feature = "abi-7-12")]
         assert_eq!(req.header.len, 64);
         assert_eq!(req.header.opcode, 8);
         assert_eq!(req.unique(), RequestId(0xdead_beef_baad_f00d));

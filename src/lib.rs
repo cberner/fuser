@@ -19,13 +19,10 @@ use std::time::Duration;
 use std::time::SystemTime;
 use std::{convert::AsRef, io::ErrorKind};
 
-use crate::ll::fuse_abi::consts::*;
-pub use crate::ll::fuse_abi::FUSE_ROOT_ID;
-pub use crate::ll::{fuse_abi::consts, TimeOrNow};
+pub use crate::ll::TimeOrNow;
 use crate::mnt::mount_options::check_option_conflicts;
 use crate::session::MAX_WRITE_SIZE;
-#[cfg(feature = "abi-7-16")]
-pub use ll::fuse_abi::fuse_forget_one;
+use fuse_abi::os::*;
 pub use mnt::mount_options::MountOption;
 #[cfg(feature = "abi-7-11")]
 pub use notify::Notifier;

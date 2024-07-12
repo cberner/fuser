@@ -14,13 +14,13 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::{io, ops::DerefMut};
 
-use crate::ll::fuse_abi::*;
 use crate::request::Request;
 use crate::Filesystem;
 use crate::MountOption;
 use crate::{channel::Channel, mnt::Mount};
 #[cfg(feature = "abi-7-11")]
 use crate::{channel::ChannelSender, notify::Notifier};
+use fuse_abi::os::*;
 
 /// The max size of write requests from the kernel. The absolute minimum is 4k,
 /// FUSE recommends at least 128k, max 16M. The FUSE default is 16M on macOS

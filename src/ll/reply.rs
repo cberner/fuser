@@ -9,8 +9,9 @@ use std::{
 
 use crate::FileType;
 
-use super::{fuse_abi::*, Errno, FileHandle, Generation, INodeNo};
+use super::{Errno, FileHandle, Generation, INodeNo};
 use super::{Lock, RequestId};
+use fuse_abi::os::*;
 use smallvec::{smallvec, SmallVec};
 use zerocopy::AsBytes;
 
@@ -123,7 +124,7 @@ impl<'a> Response<'a> {
         let r = fuse_open_out {
             fh: fh.into(),
             open_flags: flags,
-            padding: 0,
+            ..Default::default()
         };
         Self::from_struct(&r)
     }
@@ -133,7 +134,8 @@ impl<'a> Response<'a> {
             lk: fuse_file_lock {
                 start: lock.range.0,
                 end: lock.range.1,
-                typ: lock.typ,
+                // FIXME: use u32
+                type_: lock.typ as u32,
                 pid: lock.pid,
             },
         };
@@ -189,6 +191,10 @@ impl<'a> Response<'a> {
         fh: FileHandle,
         flags: u32,
     ) -> Self {
+        #[repr(C)]
+        #[derive(Debug, AsBytes)]
+        pub struct fuse_create_out(pub fuse_entry_out, pub fuse_open_out);
+
         let r = fuse_create_out(
             fuse_entry_out {
                 nodeid: attr.attr.ino,
@@ -202,7 +208,7 @@ impl<'a> Response<'a> {
             fuse_open_out {
                 fh: fh.into(),
                 open_flags: flags,
-                padding: 0,
+                ..Default::default()
             },
         );
         Self::from_struct(&r)
@@ -245,7 +251,10 @@ impl<'a> Response<'a> {
     }
 
     pub(crate) fn new_lseek(offset: i64) -> Self {
-        let r = fuse_lseek_out { offset };
+        // FIXME: use u64
+        let r = fuse_lseek_out {
+            offset: offset as u64,
+        };
         Self::from_struct(&r)
     }
 
@@ -293,9 +302,12 @@ pub(crate) fn fuse_attr_from_attr(attr: &crate::FileAttr) -> fuse_attr {
         ino: attr.ino,
         size: attr.size,
         blocks: attr.blocks,
-        atime: atime_secs,
-        mtime: mtime_secs,
-        ctime: ctime_secs,
+        // FIXME: use u64
+        atime: atime_secs as u64,
+        // FIXME: use u64
+        mtime: mtime_secs as u64,
+        // FIXME: use u64
+        ctime: ctime_secs as u64,
         #[cfg(target_os = "macos")]
         crtime: crtime_secs as u64,
         atimensec: atime_nanos,
@@ -312,8 +324,7 @@ pub(crate) fn fuse_attr_from_attr(attr: &crate::FileAttr) -> fuse_attr {
         flags: attr.flags,
         #[cfg(feature = "abi-7-9")]
         blksize: attr.blksize,
-        #[cfg(feature = "abi-7-9")]
-        padding: 0,
+        ..Default::default()
     }
 }
 
@@ -417,9 +428,11 @@ impl DirEntList {
         let name = ent.name.as_ref().as_os_str().as_bytes();
         let header = fuse_dirent {
             ino: ent.ino.into(),
-            off: ent.offset.0,
+            // FIXME: use u64
+            off: ent.offset.0 as u64,
             namelen: name.len().try_into().expect("Name too long"),
-            typ: mode_from_kind_and_perm(ent.kind, 0) >> 12,
+            type_: mode_from_kind_and_perm(ent.kind, 0) >> 12,
+            name: Default::default(),
         };
         self.0.push([header.as_bytes(), name])
     }
@@ -491,9 +504,11 @@ impl DirEntPlusList {
             },
             dirent: fuse_dirent {
                 ino: x.attr.attr.ino,
-                off: x.offset.into(),
+                // FIXME: use u64
+                off: i64::from(x.offset) as u64,
                 namelen: name.len().try_into().expect("Name too long"),
-                typ: x.attr.attr.mode >> 12,
+                type_: x.attr.attr.mode >> 12,
+                name: Default::default(),
             },
         };
         self.0.push([header.as_bytes(), name])
@@ -570,7 +585,8 @@ mod test {
                 0x00, 0x00, 0x00, 0x00, 0x34, 0x12, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x34, 0x12,
                 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x78, 0x56, 0x00, 0x00, 0x78, 0x56, 0x00, 0x00,
                 0x78, 0x56, 0x00, 0x00, 0xa4, 0x81, 0x00, 0x00, 0x55, 0x00, 0x00, 0x00, 0x66, 0x00,
-                0x00, 0x00, 0x77, 0x00, 0x00, 0x00, 0x88, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x77, 0x00, 0x00, 0x00, 0x88, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00,
             ]
         };
 
@@ -630,6 +646,7 @@ mod test {
                 0x00, 0x00, 0x34, 0x12, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x78, 0x56, 0x00, 0x00,
                 0x78, 0x56, 0x00, 0x00, 0x78, 0x56, 0x00, 0x00, 0xa4, 0x81, 0x00, 0x00, 0x55, 0x00,
                 0x00, 0x00, 0x66, 0x00, 0x00, 0x00, 0x77, 0x00, 0x00, 0x00, 0x88, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             ]
         };
 
@@ -753,8 +770,9 @@ mod test {
                 0x00, 0x00, 0x00, 0x00, 0x34, 0x12, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x34, 0x12,
                 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x78, 0x56, 0x00, 0x00, 0x78, 0x56, 0x00, 0x00,
                 0x78, 0x56, 0x00, 0x00, 0xa4, 0x81, 0x00, 0x00, 0x55, 0x00, 0x00, 0x00, 0x66, 0x00,
-                0x00, 0x00, 0x77, 0x00, 0x00, 0x00, 0x88, 0x00, 0x00, 0x00, 0xbb, 0x00, 0x00, 0x00,
-                0x00, 0x00, 0x00, 0x00, 0xcc, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x77, 0x00, 0x00, 0x00, 0x88, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0xbb, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xcc, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             ]
         };
 

@@ -21,9 +21,9 @@ use libc::{ENOBUFS, ENOENT, ENOTDIR};
 
 use clap::Parser;
 
+use fuse_abi::os::*;
 use fuser::{
     FileAttr, FileType, Filesystem, MountOption, ReplyAttr, ReplyDirectory, ReplyEntry, Request,
-    FUSE_ROOT_ID,
 };
 
 struct ClockFS<'a> {

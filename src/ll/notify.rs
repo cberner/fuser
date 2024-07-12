@@ -6,7 +6,7 @@ use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
 use smallvec::{smallvec, SmallVec};
 use zerocopy::AsBytes;
 
-use super::fuse_abi::*;
+use fuse_abi::os::*;
 
 const INLINE_DATA_THRESHOLD: usize = size_of::<u64>() * 4;
 type NotificationBuf = SmallVec<[u8; INLINE_DATA_THRESHOLD]>;
@@ -62,7 +62,7 @@ impl<'a> Notification<'a> {
         let r = fuse_notify_inval_entry_out {
             parent,
             namelen: name.len().try_into()?,
-            padding: 0,
+            ..Default::default()
         };
         Ok(Self::from_struct_with_name(&r, name.as_bytes()))
     }
@@ -196,7 +196,7 @@ mod test {
     #[cfg(feature = "abi-7-11")]
     fn poll() {
         let n = Notification::new_poll(0x4321)
-            .with_iovec(fuse_notify_code::FUSE_POLL, ioslice_to_vec)
+            .with_iovec(fuse_notify_code::FUSE_NOTIFY_POLL, ioslice_to_vec)
             .unwrap();
         let expected = vec![
             0x18, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,

@@ -2,12 +2,11 @@
 #![allow(clippy::unnecessary_cast)] // libc::S_* are u16 or u32 depending on the platform
 
 use clap::{crate_version, Arg, ArgAction, Command};
-use fuser::consts::*;
+use fuse_abi::os::*;
 use fuser::TimeOrNow::Now;
 use fuser::{
     Filesystem, KernelConfig, MountOption, ReplyAttr, ReplyCreate, ReplyData, ReplyDirectory,
     ReplyEmpty, ReplyEntry, ReplyOpen, ReplyStatfs, ReplyWrite, ReplyXattr, Request, TimeOrNow,
-    FUSE_ROOT_ID,
 };
 #[cfg(feature = "abi-7-26")]
 use log::info;

@@ -21,7 +21,8 @@ use std::{
 
 use libc::{EACCES, EBADF, EBUSY, EINVAL, ENOENT, ENOTDIR};
 
-use fuser::{consts::*, FileAttr, FileType, MountOption, Request, FUSE_ROOT_ID};
+use fuse_abi::os::*;
+use fuser::{FileAttr, FileType, MountOption, Request};
 
 const NUMFILES: u8 = 16;
 const MAXBYTES: u64 = 10;
