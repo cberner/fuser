@@ -22,7 +22,7 @@ use libc::{EACCES, EINVAL, EISDIR, ENOBUFS, ENOENT, ENOTDIR};
 use clap::Parser;
 
 use fuser::{
-    consts, FileAttr, FileType, Filesystem, MountOption, ReplyAttr, ReplyData, ReplyDirectory,
+    consts::*, FileAttr, FileType, Filesystem, MountOption, ReplyAttr, ReplyData, ReplyDirectory,
     ReplyEntry, ReplyOpen, Request, FUSE_ROOT_ID,
 };
 
@@ -129,7 +129,7 @@ impl<'a> Filesystem for ClockFS<'a> {
             eprintln!("Got open for nonexistent inode {}", ino);
             reply.error(ENOENT);
         } else {
-            reply.opened(ino, consts::FOPEN_KEEP_CACHE);
+            reply.opened(ino, FOPEN_KEEP_CACHE);
         }
     }
 

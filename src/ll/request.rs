@@ -3,9 +3,9 @@
 //! A request represents information about a filesystem operation the kernel driver wants us to
 //! perform.
 
-use super::fuse_abi::{fuse_in_header, fuse_opcode, InvalidOpcodeError};
+use super::fuse_abi::*;
 
-use super::{fuse_abi as abi, Errno, Response};
+use super::{Errno, Response};
 #[cfg(feature = "serializable")]
 use serde::{Deserialize, Serialize};
 use std::{convert::TryFrom, fmt::Display, path::Path};
@@ -151,7 +151,7 @@ pub struct Lock {
     pub pid: u32,
 }
 impl Lock {
-    fn from_abi(x: &abi::fuse_file_lock) -> Lock {
+    fn from_abi(x: &fuse_file_lock) -> Lock {
         Lock {
             range: (x.start, x.end),
             typ: x.typ,
@@ -815,7 +815,7 @@ mod op {
         }
         /// If set only the user data should be flushed, not the meta data.
         pub fn fdatasync(&self) -> bool {
-            self.arg.fsync_flags & consts::FUSE_FSYNC_FDATASYNC != 0
+            self.arg.fsync_flags & FUSE_FSYNC_FDATASYNC != 0
         }
     }
 
@@ -1065,7 +1065,7 @@ mod op {
             FileHandle(self.arg.fh)
         }
         pub fn flush(&self) -> bool {
-            self.arg.release_flags & consts::FUSE_RELEASE_FLUSH != 0
+            self.arg.release_flags & FUSE_RELEASE_FLUSH != 0
         }
         pub fn lock_owner(&self) -> Option<LockOwner> {
             #[cfg(not(feature = "abi-7-17"))]
@@ -1097,7 +1097,7 @@ mod op {
         }
         /// If set, then only the directory contents should be flushed, not the meta data.
         pub fn fdatasync(&self) -> bool {
-            self.arg.fsync_flags & consts::FUSE_FSYNC_FDATASYNC != 0
+            self.arg.fsync_flags & FUSE_FSYNC_FDATASYNC != 0
         }
     }
 
@@ -1313,7 +1313,7 @@ mod op {
             &self.data[..self.arg.in_size as usize]
         }
         pub fn unrestricted(&self) -> bool {
-            self.arg.flags & consts::FUSE_IOCTL_UNRESTRICTED != 0
+            self.arg.flags & FUSE_IOCTL_UNRESTRICTED != 0
         }
         /// The value set by the [Open] method. See [FileHandle].
         pub fn file_handle(&self) -> FileHandle {

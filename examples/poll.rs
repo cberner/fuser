@@ -21,10 +21,7 @@ use std::{
 
 use libc::{EACCES, EBADF, EBUSY, EINVAL, ENOENT, ENOTDIR};
 
-use fuser::{
-    consts::{FOPEN_DIRECT_IO, FOPEN_NONSEEKABLE, FUSE_POLL_SCHEDULE_NOTIFY},
-    FileAttr, FileType, MountOption, Request, FUSE_ROOT_ID,
-};
+use fuser::{consts::*, FileAttr, FileType, MountOption, Request, FUSE_ROOT_ID};
 
 const NUMFILES: u8 = 16;
 const MAXBYTES: u64 = 10;

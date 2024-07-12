@@ -22,7 +22,7 @@
 #![allow(missing_docs)]
 
 #[cfg(feature = "abi-7-9")]
-use crate::consts::{FATTR_ATIME_NOW, FATTR_MTIME_NOW};
+use crate::consts::*;
 use std::convert::TryFrom;
 use zerocopy::{AsBytes, FromBytes, FromZeroes};
 

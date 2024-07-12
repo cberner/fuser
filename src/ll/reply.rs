@@ -9,7 +9,7 @@ use std::{
 
 use crate::FileType;
 
-use super::{fuse_abi as abi, Errno, FileHandle, Generation, INodeNo};
+use super::{fuse_abi::*, Errno, FileHandle, Generation, INodeNo};
 use super::{Lock, RequestId};
 use smallvec::{smallvec, SmallVec};
 use zerocopy::AsBytes;
@@ -35,14 +35,14 @@ impl<'a> Response<'a> {
             Response::Data(v) => v.len(),
             Response::Slice(d) => d.len(),
         };
-        let header = abi::fuse_out_header {
+        let header = fuse_out_header {
             unique: unique.0,
             error: if let Response::Error(errno) = self {
                 -errno
             } else {
                 0
             },
-            len: (size_of::<abi::fuse_out_header>() + datalen)
+            len: (size_of::<fuse_out_header>() + datalen)
                 .try_into()
                 .expect("Too much data"),
         };
@@ -83,7 +83,7 @@ impl<'a> Response<'a> {
         attr_ttl: Duration,
         entry_ttl: Duration,
     ) -> Self {
-        let d = abi::fuse_entry_out {
+        let d = fuse_entry_out {
             nodeid: ino.into(),
             generation: generation.into(),
             entry_valid: entry_ttl.as_secs(),
@@ -96,7 +96,7 @@ impl<'a> Response<'a> {
     }
 
     pub(crate) fn new_attr(ttl: &Duration, attr: &Attr) -> Self {
-        let r = abi::fuse_attr_out {
+        let r = fuse_attr_out {
             attr_valid: ttl.as_secs(),
             attr_valid_nsec: ttl.subsec_nanos(),
             dummy: 0,
@@ -109,7 +109,7 @@ impl<'a> Response<'a> {
     pub(crate) fn new_xtimes(bkuptime: SystemTime, crtime: SystemTime) -> Self {
         let (bkuptime_secs, bkuptime_nanos) = time_from_system_time(&bkuptime);
         let (crtime_secs, crtime_nanos) = time_from_system_time(&crtime);
-        let r = abi::fuse_getxtimes_out {
+        let r = fuse_getxtimes_out {
             bkuptime: bkuptime_secs as u64,
             crtime: crtime_secs as u64,
             bkuptimensec: bkuptime_nanos,
@@ -120,7 +120,7 @@ impl<'a> Response<'a> {
 
     // TODO: Could flags be more strongly typed?
     pub(crate) fn new_open(fh: FileHandle, flags: u32) -> Self {
-        let r = abi::fuse_open_out {
+        let r = fuse_open_out {
             fh: fh.into(),
             open_flags: flags,
             padding: 0,
@@ -129,8 +129,8 @@ impl<'a> Response<'a> {
     }
 
     pub(crate) fn new_lock(lock: &Lock) -> Self {
-        let r = abi::fuse_lk_out {
-            lk: abi::fuse_file_lock {
+        let r = fuse_lk_out {
+            lk: fuse_file_lock {
                 start: lock.range.0,
                 end: lock.range.1,
                 typ: lock.typ,
@@ -141,12 +141,12 @@ impl<'a> Response<'a> {
     }
 
     pub(crate) fn new_bmap(block: u64) -> Self {
-        let r = abi::fuse_bmap_out { block };
+        let r = fuse_bmap_out { block };
         Self::from_struct(&r)
     }
 
     pub(crate) fn new_write(written: u32) -> Self {
-        let r = abi::fuse_write_out {
+        let r = fuse_write_out {
             size: written,
             padding: 0,
         };
@@ -164,8 +164,8 @@ impl<'a> Response<'a> {
         namelen: u32,
         frsize: u32,
     ) -> Self {
-        let r = abi::fuse_statfs_out {
-            st: abi::fuse_kstatfs {
+        let r = fuse_statfs_out {
+            st: fuse_kstatfs {
                 blocks,
                 bfree,
                 bavail,
@@ -189,8 +189,8 @@ impl<'a> Response<'a> {
         fh: FileHandle,
         flags: u32,
     ) -> Self {
-        let r = abi::fuse_create_out(
-            abi::fuse_entry_out {
+        let r = fuse_create_out(
+            fuse_entry_out {
                 nodeid: attr.attr.ino,
                 generation: generation.into(),
                 entry_valid: ttl.as_secs(),
@@ -199,7 +199,7 @@ impl<'a> Response<'a> {
                 attr_valid_nsec: ttl.subsec_nanos(),
                 attr: attr.attr,
             },
-            abi::fuse_open_out {
+            fuse_open_out {
                 fh: fh.into(),
                 open_flags: flags,
                 padding: 0,
@@ -210,7 +210,7 @@ impl<'a> Response<'a> {
 
     // TODO: Are you allowed to send data while result != 0?
     pub(crate) fn new_ioctl(result: i32, data: &[IoSlice<'_>]) -> Self {
-        let r = abi::fuse_ioctl_out {
+        let r = fuse_ioctl_out {
             result,
             // these fields are only needed for unrestricted ioctls
             flags: 0,
@@ -227,7 +227,7 @@ impl<'a> Response<'a> {
 
     #[cfg(feature = "abi-7-11")]
     pub(crate) fn new_poll(revents: u32) -> Self {
-        let r = abi::fuse_poll_out {
+        let r = fuse_poll_out {
             revents,
             padding: 0,
         };
@@ -240,12 +240,12 @@ impl<'a> Response<'a> {
     }
 
     pub(crate) fn new_xattr_size(size: u32) -> Self {
-        let r = abi::fuse_getxattr_out { size, padding: 0 };
+        let r = fuse_getxattr_out { size, padding: 0 };
         Self::from_struct(&r)
     }
 
     pub(crate) fn new_lseek(offset: i64) -> Self {
-        let r = abi::fuse_lseek_out { offset };
+        let r = fuse_lseek_out { offset };
         Self::from_struct(&r)
     }
 
@@ -282,14 +282,14 @@ pub(crate) fn mode_from_kind_and_perm(kind: FileType, perm: u16) -> u32 {
         | perm as u32
 }
 /// Returns a fuse_attr from FileAttr
-pub(crate) fn fuse_attr_from_attr(attr: &crate::FileAttr) -> abi::fuse_attr {
+pub(crate) fn fuse_attr_from_attr(attr: &crate::FileAttr) -> fuse_attr {
     let (atime_secs, atime_nanos) = time_from_system_time(&attr.atime);
     let (mtime_secs, mtime_nanos) = time_from_system_time(&attr.mtime);
     let (ctime_secs, ctime_nanos) = time_from_system_time(&attr.ctime);
     #[cfg(target_os = "macos")]
     let (crtime_secs, crtime_nanos) = time_from_system_time(&attr.crtime);
 
-    abi::fuse_attr {
+    fuse_attr {
         ino: attr.ino,
         size: attr.size,
         blocks: attr.blocks,
@@ -320,7 +320,7 @@ pub(crate) fn fuse_attr_from_attr(attr: &crate::FileAttr) -> abi::fuse_attr {
 // TODO: Add methods for creating this without making a `FileAttr` first.
 #[derive(Debug, Clone, Copy)]
 pub struct Attr {
-    pub(crate) attr: abi::fuse_attr,
+    pub(crate) attr: fuse_attr,
 }
 impl From<&crate::FileAttr> for Attr {
     fn from(attr: &crate::FileAttr) -> Self {
@@ -415,7 +415,7 @@ impl DirEntList {
     #[must_use]
     pub fn push<T: AsRef<Path>>(&mut self, ent: &DirEntry<T>) -> bool {
         let name = ent.name.as_ref().as_os_str().as_bytes();
-        let header = abi::fuse_dirent {
+        let header = fuse_dirent {
             ino: ent.ino.into(),
             off: ent.offset.0,
             namelen: name.len().try_into().expect("Name too long"),
@@ -479,8 +479,8 @@ impl DirEntPlusList {
     #[must_use]
     pub fn push<T: AsRef<Path>>(&mut self, x: &DirEntryPlus<T>) -> bool {
         let name = x.name.as_ref().as_os_str().as_bytes();
-        let header = abi::fuse_direntplus {
-            entry_out: abi::fuse_entry_out {
+        let header = fuse_direntplus {
+            entry_out: fuse_entry_out {
                 nodeid: x.attr.attr.ino,
                 generation: x.generation.into(),
                 entry_valid: x.entry_valid.as_secs(),
@@ -489,7 +489,7 @@ impl DirEntPlusList {
                 attr_valid_nsec: x.attr_valid.subsec_nanos(),
                 attr: x.attr.attr,
             },
-            dirent: abi::fuse_dirent {
+            dirent: fuse_dirent {
                 ino: x.attr.attr.ino,
                 off: x.offset.into(),
                 namelen: name.len().try_into().expect("Name too long"),

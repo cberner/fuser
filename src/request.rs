@@ -5,7 +5,7 @@
 //!
 //! TODO: This module is meant to go away soon in favor of `ll::Request`.
 
-use crate::ll::{fuse_abi as abi, Errno, Response};
+use crate::ll::{fuse_abi::*, Errno, Response};
 use log::{debug, error, warn};
 use std::convert::TryFrom;
 #[cfg(feature = "abi-7-28")]
@@ -162,8 +162,8 @@ impl<'a> Request<'a> {
                 // supports only lower major versions, we replied with an error above.
                 debug!(
                     "INIT response: ABI {}.{}, flags {:#x}, max readahead {}, max write {}",
-                    abi::FUSE_KERNEL_VERSION,
-                    abi::FUSE_KERNEL_MINOR_VERSION,
+                    FUSE_KERNEL_VERSION,
+                    FUSE_KERNEL_MINOR_VERSION,
                     x.capabilities() & config.requested,
                     config.max_readahead,
                     config.max_write

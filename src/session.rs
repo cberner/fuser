@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::{io, ops::DerefMut};
 
-use crate::ll::fuse_abi as abi;
+use crate::ll::fuse_abi::*;
 use crate::request::Request;
 use crate::Filesystem;
 use crate::MountOption;
@@ -124,10 +124,7 @@ impl<FS: Filesystem> Session<FS> {
         // Buffer for receiving requests from the kernel. Only one is allocated and
         // it is reused immediately after dispatching to conserve memory and allocations.
         let mut buffer = vec![0; BUFFER_SIZE];
-        let buf = aligned_sub_buf(
-            buffer.deref_mut(),
-            std::mem::align_of::<abi::fuse_in_header>(),
-        );
+        let buf = aligned_sub_buf(buffer.deref_mut(), std::mem::align_of::<fuse_in_header>());
         loop {
             // Read the next request from the given channel to kernel driver
             // The kernel driver makes sure that we get exactly one request per read

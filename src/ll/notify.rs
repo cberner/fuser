@@ -6,7 +6,7 @@ use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
 use smallvec::{smallvec, SmallVec};
 use zerocopy::AsBytes;
 
-use super::fuse_abi as abi;
+use super::fuse_abi::*;
 
 const INLINE_DATA_THRESHOLD: usize = size_of::<u64>() * 4;
 type NotificationBuf = SmallVec<[u8; INLINE_DATA_THRESHOLD]>;
@@ -28,7 +28,7 @@ pub(crate) enum Notification<'a> {
 impl<'a> Notification<'a> {
     pub(crate) fn with_iovec<F: FnOnce(&[IoSlice<'_>]) -> T, T>(
         &self,
-        code: abi::fuse_notify_code,
+        code: fuse_notify_code,
         f: F,
     ) -> Result<T, TryFromIntError> {
         let datalen = match &self {
@@ -36,10 +36,10 @@ impl<'a> Notification<'a> {
             Notification::WithData(b, d) => b.len() + d.len(),
             Notification::WithName(b, n) => b.len() + n.len() + 1, // +1 because we need to NUL-terminate the name
         };
-        let header = abi::fuse_out_header {
+        let header = fuse_out_header {
             unique: 0,
             error: code as i32,
-            len: (size_of::<abi::fuse_out_header>() + datalen).try_into()?,
+            len: (size_of::<fuse_out_header>() + datalen).try_into()?,
         };
         let mut v: SmallVec<[IoSlice<'_>; 4]> = smallvec![IoSlice::new(header.as_bytes())];
         match &self {
@@ -59,7 +59,7 @@ impl<'a> Notification<'a> {
 
     #[cfg(feature = "abi-7-12")]
     pub(crate) fn new_inval_entry(parent: u64, name: &'a OsStr) -> Result<Self, TryFromIntError> {
-        let r = abi::fuse_notify_inval_entry_out {
+        let r = fuse_notify_inval_entry_out {
             parent,
             namelen: name.len().try_into()?,
             padding: 0,
@@ -69,7 +69,7 @@ impl<'a> Notification<'a> {
 
     #[cfg(feature = "abi-7-12")]
     pub(crate) fn new_inval_inode(ino: u64, offset: i64, len: i64) -> Self {
-        let r = abi::fuse_notify_inval_inode_out {
+        let r = fuse_notify_inval_inode_out {
             ino,
             off: offset,
             len,
@@ -83,7 +83,7 @@ impl<'a> Notification<'a> {
         offset: u64,
         data: &'a [u8],
     ) -> Result<Self, TryFromIntError> {
-        let r = abi::fuse_notify_store_out {
+        let r = fuse_notify_store_out {
             nodeid: ino,
             offset,
             size: data.len().try_into()?,
@@ -98,7 +98,7 @@ impl<'a> Notification<'a> {
         child: u64,
         name: &'a OsStr,
     ) -> Result<Self, TryFromIntError> {
-        let r = abi::fuse_notify_delete_out {
+        let r = fuse_notify_delete_out {
             parent,
             child,
             namelen: name.len().try_into()?,
@@ -109,7 +109,7 @@ impl<'a> Notification<'a> {
 
     #[cfg(feature = "abi-7-11")]
     pub(crate) fn new_poll(kh: u64) -> Self {
-        let r = abi::fuse_notify_poll_wakeup_out { kh };
+        let r = fuse_notify_poll_wakeup_out { kh };
         Self::from_struct(&r)
     }
 
@@ -137,10 +137,7 @@ mod test {
     fn inval_entry() {
         let n = Notification::new_inval_entry(0x42, OsStr::new("abc"))
             .unwrap()
-            .with_iovec(
-                abi::fuse_notify_code::FUSE_NOTIFY_INVAL_ENTRY,
-                ioslice_to_vec,
-            )
+            .with_iovec(fuse_notify_code::FUSE_NOTIFY_INVAL_ENTRY, ioslice_to_vec)
             .unwrap();
         let expected = vec![
             0x24, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -154,10 +151,7 @@ mod test {
     #[cfg(feature = "abi-7-12")]
     fn inval_inode() {
         let n = Notification::new_inval_inode(0x42, 100, 200)
-            .with_iovec(
-                abi::fuse_notify_code::FUSE_NOTIFY_INVAL_INODE,
-                ioslice_to_vec,
-            )
+            .with_iovec(fuse_notify_code::FUSE_NOTIFY_INVAL_INODE, ioslice_to_vec)
             .unwrap();
         let expected = vec![
             0x28, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -172,7 +166,7 @@ mod test {
     fn store() {
         let n = Notification::new_store(0x42, 50, &[0xde, 0xad, 0xbe, 0xef])
             .unwrap()
-            .with_iovec(abi::fuse_notify_code::FUSE_NOTIFY_STORE, ioslice_to_vec)
+            .with_iovec(fuse_notify_code::FUSE_NOTIFY_STORE, ioslice_to_vec)
             .unwrap();
         let expected = vec![
             0x2c, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -188,7 +182,7 @@ mod test {
     fn delete() {
         let n = Notification::new_inval_entry(0x42, OsStr::new("abc"))
             .unwrap()
-            .with_iovec(abi::fuse_notify_code::FUSE_NOTIFY_DELETE, ioslice_to_vec)
+            .with_iovec(fuse_notify_code::FUSE_NOTIFY_DELETE, ioslice_to_vec)
             .unwrap();
         let expected = vec![
             0x24, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -202,7 +196,7 @@ mod test {
     #[cfg(feature = "abi-7-11")]
     fn poll() {
         let n = Notification::new_poll(0x4321)
-            .with_iovec(abi::fuse_notify_code::FUSE_POLL, ioslice_to_vec)
+            .with_iovec(fuse_notify_code::FUSE_POLL, ioslice_to_vec)
             .unwrap();
         let expected = vec![
             0x18, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,

@@ -2,11 +2,7 @@
 #![allow(clippy::unnecessary_cast)] // libc::S_* are u16 or u32 depending on the platform
 
 use clap::{crate_version, Arg, ArgAction, Command};
-use fuser::consts::FOPEN_DIRECT_IO;
-#[cfg(feature = "abi-7-26")]
-use fuser::consts::FUSE_HANDLE_KILLPRIV;
-// #[cfg(feature = "abi-7-31")]
-// use fuser::consts::FUSE_WRITE_KILL_PRIV;
+use fuser::consts::*;
 use fuser::TimeOrNow::Now;
 use fuser::{
     Filesystem, KernelConfig, MountOption, ReplyAttr, ReplyCreate, ReplyData, ReplyDirectory,
@@ -289,7 +285,7 @@ impl SimpleFS {
         let current_inode = if let Ok(file) = File::open(&path) {
             bincode::deserialize_from(file).unwrap()
         } else {
-            fuser::FUSE_ROOT_ID
+            FUSE_ROOT_ID
         };
 
         let file = OpenOptions::new()
