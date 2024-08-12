@@ -1,6 +1,7 @@
 use fuser::{Filesystem, MountOption};
 use std::env;
 
+#[derive(Clone)]
 struct NullFS;
 
 impl Filesystem for NullFS {}

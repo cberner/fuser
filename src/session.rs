@@ -5,7 +5,7 @@
 //! filesystem is mounted, the session loop receives, dispatches and replies to kernel requests
 //! for filesystem operations under its mount point.
 
-use libc::{EAGAIN, EINTR, ENODEV, ENOENT};
+use libc::{c_int, EAGAIN, EINTR, ENODEV, ENOENT};
 use log::{info, warn};
 use nix::unistd::geteuid;
 use std::fmt;
@@ -13,7 +13,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::{io, ops::DerefMut};
-
+use std::fs::File;
+use std::sync::atomic::{AtomicBool, Ordering};
 use crate::ll::fuse_abi as abi;
 use crate::request::Request;
 use crate::Filesystem;
@@ -31,7 +32,7 @@ pub const MAX_WRITE_SIZE: usize = 16 * 1024 * 1024;
 /// up to MAX_WRITE_SIZE bytes in a write request, we use that value plus some extra space.
 const BUFFER_SIZE: usize = MAX_WRITE_SIZE + 4096;
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum SessionACL {
     All,
     RootAndOwner,
@@ -49,6 +50,7 @@ pub struct Session<FS: Filesystem> {
     mount: Arc<Mutex<Option<Mount>>>,
     /// Mount point
     mountpoint: PathBuf,
+    mount_file: Arc<File>,
     /// Whether to restrict access to owner, root + owner, or unrestricted
     /// Used to implement allow_root and auto_unmount
     pub(crate) allowed: SessionACL,
@@ -59,9 +61,12 @@ pub struct Session<FS: Filesystem> {
     /// FUSE protocol minor version
     pub(crate) proto_minor: u32,
     /// True if the filesystem is initialized (init operation done)
-    pub(crate) initialized: bool,
+    pub(crate) initialized: Arc<AtomicBool>,
     /// True if the filesystem was destroyed (destroy operation done)
-    pub(crate) destroyed: bool,
+    pub(crate) destroyed: Arc<AtomicBool>,
+
+    is_worker: bool,
+    fd: c_int
 }
 
 impl<FS: Filesystem> Session<FS> {
@@ -72,7 +77,7 @@ impl<FS: Filesystem> Session<FS> {
         options: &[MountOption],
     ) -> io::Result<Session<FS>> {
         let mountpoint = mountpoint.as_ref();
-        info!("Mounting {}", mountpoint.display());
+        println!("Creating new session on mountpoint {}", mountpoint.display());
         // If AutoUnmount is requested, but not AllowRoot or AllowOther we enforce the ACL
         // ourself and implicitly set AllowOther because fusermount needs allow_root or allow_other
         // to handle the auto_unmount option
@@ -88,7 +93,7 @@ impl<FS: Filesystem> Session<FS> {
             Mount::new(mountpoint, options)?
         };
 
-        let ch = Channel::new(file);
+        let ch = Channel::new(file.clone());
         let allowed = if options.contains(&MountOption::AllowRoot) {
             SessionACL::RootAndOwner
         } else if options.contains(&MountOption::AllowOther) {
@@ -100,15 +105,47 @@ impl<FS: Filesystem> Session<FS> {
         Ok(Session {
             filesystem,
             ch,
+            fd: mount.session_fd(),
             mount: Arc::new(Mutex::new(Some(mount))),
             mountpoint: mountpoint.to_owned(),
             allowed,
+            mount_file: file,
             session_owner: geteuid().as_raw(),
             proto_major: 0,
             proto_minor: 0,
-            initialized: false,
-            destroyed: false,
+            initialized: Arc::new(AtomicBool::new(false)),
+            destroyed: Arc::new(AtomicBool::new(false)),
+            is_worker: false
         })
+    }
+
+    pub fn worker(&self) -> io::Result<Session<FS>>{
+        // let fd = self.mount_file.as_raw_fd();
+        // let dup_fd = nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(0))?;
+
+        let mount_lock = self.mount.lock().unwrap();
+        let mount = mount_lock.as_ref().unwrap();
+        let session_fd = mount.session_fd();
+        drop(mount_lock);
+
+        let (ch, wfd) = Channel::new_worker(&session_fd);
+
+        Ok(Session {
+            is_worker: true,
+            fd: wfd,
+            filesystem: self.filesystem.clone(),
+            ch,
+            mount: self.mount.clone(),
+            mountpoint: self.mountpoint.clone(),
+            mount_file: self.mount_file.clone(),
+            allowed: self.allowed.clone(),
+            session_owner: self.session_owner.clone(),
+            proto_major: self.proto_major.clone(),
+            proto_minor: self.proto_minor.clone(),
+            initialized: self.initialized.clone(),
+            destroyed: self.destroyed.clone(),
+        })
+
     }
 
     /// Return path of the mounted filesystem
@@ -206,9 +243,9 @@ impl<FS: 'static + Filesystem + Send> Session<FS> {
 
 impl<FS: Filesystem> Drop for Session<FS> {
     fn drop(&mut self) {
-        if !self.destroyed {
+        if !self.destroyed.load(Ordering::Relaxed) {
             self.filesystem.destroy();
-            self.destroyed = true;
+            self.destroyed.store(true, Ordering::Relaxed);
         }
         info!("Unmounted {}", self.mountpoint().display());
     }
@@ -235,13 +272,25 @@ impl BackgroundSession {
         let mountpoint = se.mountpoint().to_path_buf();
         #[cfg(feature = "abi-7-11")]
         let sender = se.ch.sender();
+
+        let total_threads = 4;
+        let mut guard;
+        for _ in 0..(total_threads - 2) {
+            let mut wrk = se.worker()?;
+            guard = thread::spawn(move || {
+                wrk.run()
+            });
+        }
+
         // Take the fuse_session, so that we can unmount it
         let mount = std::mem::take(&mut *se.mount.lock().unwrap());
         let mount = mount.ok_or_else(|| io::Error::from_raw_os_error(libc::ENODEV))?;
-        let guard = thread::spawn(move || {
+
+        guard = thread::spawn(move || {
             let mut se = se;
             se.run()
         });
+
         Ok(BackgroundSession {
             mountpoint,
             guard,

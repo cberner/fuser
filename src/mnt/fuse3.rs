@@ -12,6 +12,7 @@ use std::{
     ptr,
     sync::Arc,
 };
+use libc::c_int;
 
 /// Ensures that an os error is never 0/Success
 fn ensure_last_os_error() -> io::Error {
@@ -49,6 +50,10 @@ impl Mount {
             let file = unsafe { File::from_raw_fd(fd) };
             Ok((Arc::new(file), mount))
         })
+    }
+
+    pub fn session_fd(&self) -> c_int {
+        unsafe { fuse_session_fd(self.fuse_session) }
     }
 }
 impl Drop for Mount {

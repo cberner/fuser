@@ -32,6 +32,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{env, fs, io};
+use std::sync::Arc;
 
 const BLOCK_SIZE: u64 = 512;
 const MAX_NAME_LENGTH: u32 = 255;
@@ -243,9 +244,10 @@ impl From<InodeAttributes> for fuser::FileAttr {
 
 // Stores inode metadata data in "$data_dir/inodes" and file contents in "$data_dir/contents"
 // Directory data is stored in the file's contents, as a serialized DirectoryDescriptor
+#[derive(Clone)]
 struct SimpleFS {
     data_dir: String,
-    next_file_handle: AtomicU64,
+    next_file_handle: Arc<AtomicU64>,
     direct_io: bool,
     suid_support: bool,
 }
@@ -260,7 +262,7 @@ impl SimpleFS {
         {
             SimpleFS {
                 data_dir,
-                next_file_handle: AtomicU64::new(1),
+                next_file_handle: Arc::new(AtomicU64::new(1)),
                 direct_io,
                 suid_support,
             }
@@ -269,7 +271,7 @@ impl SimpleFS {
         {
             SimpleFS {
                 data_dir,
-                next_file_handle: AtomicU64::new(1),
+                next_file_handle: Arc::new(AtomicU64::new(1)),
                 direct_io,
                 suid_support: false,
             }

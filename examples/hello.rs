@@ -47,6 +47,7 @@ const HELLO_TXT_ATTR: FileAttr = FileAttr {
     blksize: 512,
 };
 
+#[derive(Clone)]
 struct HelloFS;
 
 impl Filesystem for HelloFS {
@@ -145,5 +146,8 @@ fn main() {
     if matches.get_flag("allow-root") {
         options.push(MountOption::AllowRoot);
     }
-    fuser::mount2(HelloFS, mountpoint, &options).unwrap();
+    let s = fuser::spawn_mount2(HelloFS, mountpoint, &options).unwrap();
+
+    println!("ready");
+    s.guard.join();
 }
