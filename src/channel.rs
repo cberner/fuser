@@ -3,13 +3,12 @@ use std::os::fd::FromRawFd;
 use libc::{c_int, c_void, size_t};
 use crate::reply::ReplySender;
 
-/// The implementation of fuse fd clone.
+/// The implementation of fuse fd clone. Taken from (Datenlord)[https://github.com/datenlord/datenlord/blob/master/src/async_fuse/fuse/session.rs#L73 under the MIT License.
 /// This module is just for avoiding the `missing_docs` of `ioctl_read` macro.
 #[allow(missing_docs)] // Raised by `ioctl_read!`
 mod _fuse_fd_clone {
     use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
 
-    // use clippy_utilities::Cast;
     use nix::fcntl::{self, FcntlArg, FdFlag, OFlag};
     use nix::ioctl_read;
     use nix::sys::stat::Mode;
@@ -53,6 +52,7 @@ impl Channel {
     }
 
     pub(crate) fn new_worker(session_fd: &c_int) -> (Self, c_int) {
+        // TODO SAFETY: `session_fd` is ensured to be valid
         let fd = unsafe { _fuse_fd_clone::fuse_fd_clone(*session_fd) };
 
         let fd = match fd {
@@ -62,6 +62,7 @@ impl Channel {
             }
         };
 
+        // SAFETY: `fd` is ensured to be valid at the start of function
         let device = unsafe { File::from_raw_fd(fd) };
 
         (Self(Arc::new(device)), fd)

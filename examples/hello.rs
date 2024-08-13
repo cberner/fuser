@@ -146,7 +146,7 @@ fn main() {
     if matches.get_flag("allow-root") {
         options.push(MountOption::AllowRoot);
     }
-    let s = fuser::spawn_mount2(HelloFS, mountpoint, &options).unwrap();
+    let s = fuser::spawn_mount2(HelloFS, mountpoint, &options, 2).unwrap();
 
     println!("ready");
     s.guard.join();

@@ -6,7 +6,7 @@
 //! for filesystem operations under its mount point.
 
 use libc::{c_int, EAGAIN, EINTR, ENODEV, ENOENT};
-use log::{info, warn};
+use log::{debug, info, trace, warn};
 use nix::unistd::geteuid;
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -66,6 +66,7 @@ pub struct Session<FS: Filesystem> {
     pub(crate) destroyed: Arc<AtomicBool>,
 
     is_worker: bool,
+    worker_id: u8,
     fd: c_int
 }
 
@@ -77,7 +78,6 @@ impl<FS: Filesystem> Session<FS> {
         options: &[MountOption],
     ) -> io::Result<Session<FS>> {
         let mountpoint = mountpoint.as_ref();
-        println!("Creating new session on mountpoint {}", mountpoint.display());
         // If AutoUnmount is requested, but not AllowRoot or AllowOther we enforce the ACL
         // ourself and implicitly set AllowOther because fusermount needs allow_root or allow_other
         // to handle the auto_unmount option
@@ -115,7 +115,8 @@ impl<FS: Filesystem> Session<FS> {
             proto_minor: 0,
             initialized: Arc::new(AtomicBool::new(false)),
             destroyed: Arc::new(AtomicBool::new(false)),
-            is_worker: false
+            is_worker: false,
+            worker_id: 0
         })
     }
 
@@ -139,11 +140,12 @@ impl<FS: Filesystem> Session<FS> {
             mountpoint: self.mountpoint.clone(),
             mount_file: self.mount_file.clone(),
             allowed: self.allowed.clone(),
-            session_owner: self.session_owner.clone(),
-            proto_major: self.proto_major.clone(),
-            proto_minor: self.proto_minor.clone(),
+            session_owner: self.session_owner,
+            proto_major: self.proto_major,
+            proto_minor: self.proto_minor,
             initialized: self.initialized.clone(),
             destroyed: self.destroyed.clone(),
+            worker_id: 0
         })
 
     }
@@ -171,7 +173,10 @@ impl<FS: Filesystem> Session<FS> {
             match self.ch.receive(buf) {
                 Ok(size) => match Request::new(self.ch.sender(), &buf[..size]) {
                     // Dispatch request
-                    Some(req) => req.dispatch(self),
+                    Some(req) => {
+                        trace!("dispatching request on worker '{}'", self.worker_id);
+                        req.dispatch(self)
+                    },
                     // Quit loop on illegal request
                     None => break,
                 },
@@ -236,8 +241,8 @@ fn aligned_sub_buf(buf: &mut [u8], alignment: usize) -> &mut [u8] {
 
 impl<FS: 'static + Filesystem + Send> Session<FS> {
     /// Run the session loop in a background thread
-    pub fn spawn(self) -> io::Result<BackgroundSession> {
-        BackgroundSession::new(self)
+    pub fn spawn(self, threads: u8) -> io::Result<BackgroundSession> {
+        BackgroundSession::new(self, threads)
     }
 }
 
@@ -268,25 +273,27 @@ impl BackgroundSession {
     /// Create a new background session for the given session by running its
     /// session loop in a background thread. If the returned handle is dropped,
     /// the filesystem is unmounted and the given session ends.
-    pub fn new<FS: Filesystem + Send + 'static>(se: Session<FS>) -> io::Result<BackgroundSession> {
+    pub fn new<FS: Filesystem + Send + 'static>(se: Session<FS>, threads: u8) -> io::Result<BackgroundSession> {
         let mountpoint = se.mountpoint().to_path_buf();
         #[cfg(feature = "abi-7-11")]
         let sender = se.ch.sender();
 
-        let total_threads = 4;
-        let mut guard;
-        for _ in 0..(total_threads - 2) {
-            let mut wrk = se.worker()?;
-            guard = thread::spawn(move || {
-                wrk.run()
-            });
+        if threads > 2 {
+            for i in 0..(threads - 1) {
+                let mut wrk = se.worker()?;
+                let _ = thread::spawn(move || {
+                    debug!("spawning worker thread {}", i);
+                    wrk.worker_id = i;
+                    wrk.run()
+                });
+            }
         }
 
         // Take the fuse_session, so that we can unmount it
         let mount = std::mem::take(&mut *se.mount.lock().unwrap());
         let mount = mount.ok_or_else(|| io::Error::from_raw_os_error(libc::ENODEV))?;
 
-        guard = thread::spawn(move || {
+        let guard = thread::spawn(move || {
             let mut se = se;
             se.run()
         });
