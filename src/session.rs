@@ -65,8 +65,7 @@ pub struct Session<FS: Filesystem> {
     /// True if the filesystem was destroyed (destroy operation done)
     pub(crate) destroyed: Arc<AtomicBool>,
 
-    is_worker: bool,
-    worker_id: u8,
+    /// File Descriptor number 
     fd: c_int
 }
 
@@ -114,9 +113,7 @@ impl<FS: Filesystem> Session<FS> {
             proto_major: 0,
             proto_minor: 0,
             initialized: Arc::new(AtomicBool::new(false)),
-            destroyed: Arc::new(AtomicBool::new(false)),
-            is_worker: false,
-            worker_id: 0
+            destroyed: Arc::new(AtomicBool::new(false))
         })
     }
 
@@ -132,7 +129,6 @@ impl<FS: Filesystem> Session<FS> {
         let (ch, wfd) = Channel::new_worker(&session_fd);
 
         Ok(Session {
-            is_worker: true,
             fd: wfd,
             filesystem: self.filesystem.clone(),
             ch,
@@ -144,8 +140,7 @@ impl<FS: Filesystem> Session<FS> {
             proto_major: self.proto_major,
             proto_minor: self.proto_minor,
             initialized: self.initialized.clone(),
-            destroyed: self.destroyed.clone(),
-            worker_id: 0
+            destroyed: self.destroyed.clone()
         })
 
     }
@@ -171,10 +166,9 @@ impl<FS: Filesystem> Session<FS> {
             // Read the next request from the given channel to kernel driver
             // The kernel driver makes sure that we get exactly one request per read
             match self.ch.receive(buf) {
-                Ok(size) => match Request::new(self.ch.sender(), &buf[..size]) {
+                Ok(size) => match Request::new(self.ch.sender(), &buf[..size], self.fd) {
                     // Dispatch request
                     Some(req) => {
-                        trace!("dispatching request on worker '{}'", self.worker_id);
                         req.dispatch(self)
                     },
                     // Quit loop on illegal request
@@ -278,12 +272,12 @@ impl BackgroundSession {
         #[cfg(feature = "abi-7-11")]
         let sender = se.ch.sender();
 
+        // Only spawn workers if 2 or more threads are requested.
         if threads > 2 {
             for i in 0..(threads - 1) {
                 let mut wrk = se.worker()?;
                 let _ = thread::spawn(move || {
-                    debug!("spawning worker thread {}", i);
-                    wrk.worker_id = i;
+                    debug!("spawning worker thread on worker fd {}", wrk.fd);
                     wrk.run()
                 });
             }

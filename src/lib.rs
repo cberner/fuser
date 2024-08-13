@@ -1055,7 +1055,9 @@ pub fn spawn_mount2<'a, FS: Filesystem + Send + 'static + 'a, P: AsRef<Path>>(
     Session::new(filesystem, mountpoint.as_ref(), options).and_then(|se| se.spawn(1))
 }
 
-/// Mount the given filesystem to the given mountpoint; spawning n number of worker threads.
+/// Mount the given filesystem to the given mountpoint; spawning n number of worker threads. 
+/// There is an assumption that the [`Filesystem`] given is thread-safe, and has proper internal 
+/// synchronization to prevent deadlocks. 
 #[cfg(feature = "multithreading")]
 pub fn spawn_mount2_threaded<'a, FS: Filesystem + Send + 'static + 'a, P: AsRef<Path>>(
     filesystem: FS,
