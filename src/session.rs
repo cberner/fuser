@@ -117,17 +117,14 @@ impl<FS: Filesystem> Session<FS> {
         })
     }
 
+    #[cfg(all(feature = "multithreading", feature = "libfuse3"))]
     pub fn worker(&self) -> io::Result<Session<FS>>{
-        // let fd = self.mount_file.as_raw_fd();
-        // let dup_fd = nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(0))?;
-
         let mount_lock = self.mount.lock().unwrap();
         let mount = mount_lock.as_ref().unwrap();
-        let session_fd = mount.session_fd();
+
+        let (ch, wfd) = Channel::worker(&mount);
+        
         drop(mount_lock);
-
-        let (ch, wfd) = Channel::new_worker(&session_fd);
-
         Ok(Session {
             fd: wfd,
             filesystem: self.filesystem.clone(),
@@ -273,6 +270,7 @@ impl BackgroundSession {
         let sender = se.ch.sender();
 
         // Only spawn workers if 2 or more threads are requested.
+        #[cfg(feature = "multithreading")]
         if threads > 2 {
             for i in 0..(threads - 1) {
                 let mut wrk = se.worker()?;

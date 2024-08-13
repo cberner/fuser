@@ -51,8 +51,14 @@ impl Channel {
         Self(device)
     }
 
-    pub(crate) fn new_worker(session_fd: &c_int) -> (Self, c_int) {
-        // TODO SAFETY: `session_fd` is ensured to be valid
+    /// Create a new communication channel to the kernel driver by calling ['_fuse_fd_clone::fuse_fd_clone']
+    /// with the Session FD. This will create a new communication channel to 
+    /// the kernel driver attached to the parent session.
+    #[cfg(all(feature = "multithreading", feature = "libfuse3"))]
+    pub(crate) fn worker(mount: &Mount) -> (Self, c_int) {
+        let session_fd = mount.session_fd(); 
+
+        // SAFETY: `session_fd` is ensured to be valid
         let fd = unsafe { _fuse_fd_clone::fuse_fd_clone(*session_fd) };
 
         let fd = match fd {

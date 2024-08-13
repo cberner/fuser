@@ -52,6 +52,7 @@ impl Mount {
         })
     }
 
+    #[cfg(feature = "multithreading")]
     pub fn session_fd(&self) -> c_int {
         unsafe { fuse_session_fd(self.fuse_session) }
     }

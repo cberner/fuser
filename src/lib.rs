@@ -1058,7 +1058,7 @@ pub fn spawn_mount2<'a, FS: Filesystem + Send + 'static + 'a, P: AsRef<Path>>(
 /// Mount the given filesystem to the given mountpoint; spawning n number of worker threads. 
 /// There is an assumption that the [`Filesystem`] given is thread-safe, and has proper internal 
 /// synchronization to prevent deadlocks. 
-#[cfg(feature = "multithreading")]
+#[cfg(all(feature = "multithreading", feature = "libfuse3"))]
 pub fn spawn_mount2_threaded<'a, FS: Filesystem + Send + 'static + 'a, P: AsRef<Path>>(
     filesystem: FS,
     mountpoint: P,
