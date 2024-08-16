@@ -5,16 +5,6 @@
 //! filesystem is mounted, the session loop receives, dispatches and replies to kernel requests
 //! for filesystem operations under its mount point.
 
-use libc::{c_int, EAGAIN, EINTR, ENODEV, ENOENT};
-use log::{debug, info, trace, warn};
-use nix::unistd::geteuid;
-use std::fmt;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
-use std::thread::{self, JoinHandle};
-use std::{io, ops::DerefMut};
-use std::fs::File;
-use std::sync::atomic::{AtomicBool, Ordering};
 use crate::ll::fuse_abi as abi;
 use crate::request::Request;
 use crate::Filesystem;
@@ -22,6 +12,16 @@ use crate::MountOption;
 use crate::{channel::Channel, mnt::Mount};
 #[cfg(feature = "abi-7-11")]
 use crate::{channel::ChannelSender, notify::Notifier};
+use libc::{c_int, EAGAIN, EINTR, ENODEV, ENOENT};
+use log::{debug, info, trace, warn};
+use nix::unistd::geteuid;
+use std::fmt;
+use std::fs::File;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
+use std::{io, ops::DerefMut};
 
 /// The max size of write requests from the kernel. The absolute minimum is 4k,
 /// FUSE recommends at least 128k, max 16M. The FUSE default is 16M on macOS
@@ -41,6 +41,7 @@ pub(crate) enum SessionACL {
 
 /// The session data structure
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct Session<FS: Filesystem> {
     /// Filesystem operation implementations
     pub(crate) filesystem: FS,
@@ -101,10 +102,16 @@ impl<FS: Filesystem> Session<FS> {
             SessionACL::Owner
         };
 
+        #[cfg(not(all(feature = "multithreading", feature = "libfuse3")))]
+        let fd = 0;
+
+        #[cfg(all(feature = "multithreading", feature = "libfuse3"))]
+        let fd = mount.session_fd();
+
         Ok(Session {
             filesystem,
             ch,
-            fd: mount.session_fd(),
+            fd,
             mount: Arc::new(Mutex::new(Some(mount))),
             mountpoint: mountpoint.to_owned(),
             allowed,
@@ -113,22 +120,24 @@ impl<FS: Filesystem> Session<FS> {
             proto_major: 0,
             proto_minor: 0,
             initialized: Arc::new(AtomicBool::new(false)),
-            destroyed: Arc::new(AtomicBool::new(false))
+            destroyed: Arc::new(AtomicBool::new(false)),
         })
     }
 
     #[cfg(all(feature = "multithreading", feature = "libfuse3"))]
-    pub fn worker(&self) -> io::Result<Session<FS>>{
+    pub fn worker(&self) -> io::Result<Session<FS>> {
+        // lock the mount while we clone the fd to build a worker
         let mount_lock = self.mount.lock().unwrap();
         let mount = mount_lock.as_ref().unwrap();
 
-        let (ch, wfd) = Channel::worker(&mount);
-        
+        let (ch, fd) = Channel::worker(mount);
+
         drop(mount_lock);
+
         Ok(Session {
-            fd: wfd,
-            filesystem: self.filesystem.clone(),
+            fd,
             ch,
+            filesystem: self.filesystem.clone(),
             mount: self.mount.clone(),
             mountpoint: self.mountpoint.clone(),
             mount_file: self.mount_file.clone(),
@@ -137,9 +146,8 @@ impl<FS: Filesystem> Session<FS> {
             proto_major: self.proto_major,
             proto_minor: self.proto_minor,
             initialized: self.initialized.clone(),
-            destroyed: self.destroyed.clone()
+            destroyed: self.destroyed.clone(),
         })
-
     }
 
     /// Return path of the mounted filesystem
@@ -163,16 +171,17 @@ impl<FS: Filesystem> Session<FS> {
             // Read the next request from the given channel to kernel driver
             // The kernel driver makes sure that we get exactly one request per read
             match self.ch.receive(buf) {
-                Ok(size) => match Request::new(self.ch.sender(), &buf[..size], self.fd) {
+                Ok(size) => match Request::new(self.ch.sender(), &buf[..size]) {
                     // Dispatch request
                     Some(req) => {
+                        trace!("dispatch from fd {}", self.fd);
                         req.dispatch(self)
                     },
                     // Quit loop on illegal request
                     None => break,
                 },
                 Err(err) => match err.raw_os_error() {
-                    // Operation interrupted. Accordingly to FUSE, this is safe to retry
+                    // Operation interrupted. FUSE docs say this is safe to retry
                     Some(ENOENT) => continue,
                     // Interrupted system call, retry
                     Some(EINTR) => continue,
@@ -264,18 +273,22 @@ impl BackgroundSession {
     /// Create a new background session for the given session by running its
     /// session loop in a background thread. If the returned handle is dropped,
     /// the filesystem is unmounted and the given session ends.
-    pub fn new<FS: Filesystem + Send + 'static>(se: Session<FS>, threads: u8) -> io::Result<BackgroundSession> {
+    pub fn new<FS: Filesystem + Send + 'static>(
+        se: Session<FS>,
+        #[allow(unused_variables)]
+        threads: u8,
+    ) -> io::Result<BackgroundSession> {
         let mountpoint = se.mountpoint().to_path_buf();
         #[cfg(feature = "abi-7-11")]
         let sender = se.ch.sender();
 
         // Only spawn workers if 2 or more threads are requested.
-        #[cfg(feature = "multithreading")]
+        #[cfg(all(feature = "multithreading", feature = "libfuse3"))]
         if threads > 2 {
-            for i in 0..(threads - 1) {
+            for _i in 0..(threads - 1) {
                 let mut wrk = se.worker()?;
                 let _ = thread::spawn(move || {
-                    debug!("spawning worker thread on worker fd {}", wrk.fd);
+                    trace!("thread {:?} spawned worker on fd {}", thread::current().id(), wrk.fd);
                     wrk.run()
                 });
             }

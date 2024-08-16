@@ -1,11 +1,14 @@
-use std::{fs::File, io, os::unix::prelude::AsRawFd, sync::Arc};
-use std::os::fd::FromRawFd;
-use libc::{c_int, c_void, size_t};
 use crate::reply::ReplySender;
+use libc::{c_int, c_void, size_t};
+use std::{fs::File, io, os::unix::prelude::AsRawFd, sync::Arc};
+use log::{debug, trace};
+use std::os::fd::FromRawFd;
+use crate::mnt::Mount;
 
 /// The implementation of fuse fd clone. Taken from (Datenlord)[https://github.com/datenlord/datenlord/blob/master/src/async_fuse/fuse/session.rs#L73 under the MIT License.
 /// This module is just for avoiding the `missing_docs` of `ioctl_read` macro.
 #[allow(missing_docs)] // Raised by `ioctl_read!`
+#[allow(dead_code)]
 mod _fuse_fd_clone {
     use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
 
@@ -35,7 +38,7 @@ mod _fuse_fd_clone {
         // pointer to a value on stack
         fuse_fd_clone_impl(cloned_fd.as_raw_fd(), &mut result_fd)?;
         Ok(cloned_fd.into_raw_fd()) // use `into_raw_fd` to transfer the
-        // ownership of the fd
+                                    // ownership of the fd
     }
 }
 
@@ -48,18 +51,19 @@ impl Channel {
     /// given path. The kernel driver will delegate filesystem operations of
     /// the given path to the channel.
     pub(crate) fn new(device: Arc<File>) -> Self {
+        trace!("established channel to kernel driver. device={:?}", device);
         Self(device)
     }
 
     /// Create a new communication channel to the kernel driver by calling ['_fuse_fd_clone::fuse_fd_clone']
-    /// with the Session FD. This will create a new communication channel to 
+    /// with the Session FD. This will create a new communication channel to
     /// the kernel driver attached to the parent session.
     #[cfg(all(feature = "multithreading", feature = "libfuse3"))]
     pub(crate) fn worker(mount: &Mount) -> (Self, c_int) {
-        let session_fd = mount.session_fd(); 
+        let session_fd = mount.session_fd();
 
-        // SAFETY: `session_fd` is ensured to be valid
-        let fd = unsafe { _fuse_fd_clone::fuse_fd_clone(*session_fd) };
+        // SAFETY: `session_fd` is ensured to be valid as it is returned from the Mount
+        let fd = unsafe { _fuse_fd_clone::fuse_fd_clone(session_fd) };
 
         let fd = match fd {
             Ok(fd) => fd,
@@ -67,6 +71,8 @@ impl Channel {
                 panic!("fuse: failed to clone device fd: {:?}", err);
             }
         };
+
+        debug!("established worker fd '{}' from session fd '{}'", fd, session_fd);
 
         // SAFETY: `fd` is ensured to be valid at the start of function
         let device = unsafe { File::from_raw_fd(fd) };
@@ -86,6 +92,7 @@ impl Channel {
         if rc < 0 {
             Err(io::Error::last_os_error())
         } else {
+            trace!("received {} bytes", rc);
             Ok(rc as usize)
         }
     }
@@ -116,6 +123,7 @@ impl ReplySender for ChannelSender {
             Err(io::Error::last_os_error())
         } else {
             debug_assert_eq!(bufs.iter().map(|b| b.len()).sum::<usize>(), rc as usize);
+            trace!("sent {} bytes", rc);
             Ok(())
         }
     }
