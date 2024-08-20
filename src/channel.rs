@@ -74,7 +74,7 @@ impl Channel {
 
         debug!("established worker fd '{}' from session fd '{}'", fd, session_fd);
 
-        // SAFETY: `fd` is ensured to be valid at the start of function
+        // SAFETY: `fd` is created above and is validated before this point
         let device = unsafe { File::from_raw_fd(fd) };
 
         (Self(Arc::new(device)), fd)

@@ -5,6 +5,14 @@
 //! filesystem is mounted, the session loop receives, dispatches and replies to kernel requests
 //! for filesystem operations under its mount point.
 
+use libc::{c_int, EAGAIN, EINTR, ENODEV, ENOENT};
+use log::{debug, info, trace, warn};
+use nix::unistd::geteuid;
+use std::fmt;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
+use std::{io, ops::DerefMut};
 use crate::ll::fuse_abi as abi;
 use crate::request::Request;
 use crate::Filesystem;
@@ -12,16 +20,8 @@ use crate::MountOption;
 use crate::{channel::Channel, mnt::Mount};
 #[cfg(feature = "abi-7-11")]
 use crate::{channel::ChannelSender, notify::Notifier};
-use libc::{c_int, EAGAIN, EINTR, ENODEV, ENOENT};
-use log::{debug, info, trace, warn};
-use nix::unistd::geteuid;
-use std::fmt;
 use std::fs::File;
-use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
-use std::thread::{self, JoinHandle};
-use std::{io, ops::DerefMut};
 
 /// The max size of write requests from the kernel. The absolute minimum is 4k,
 /// FUSE recommends at least 128k, max 16M. The FUSE default is 16M on macOS
@@ -124,6 +124,8 @@ impl<FS: Filesystem> Session<FS> {
         })
     }
 
+    /// Create a new Session for use in Worker threads. Requires an already existing Session in order
+    /// to create the Worker Sessions.
     #[cfg(all(feature = "multithreading", feature = "libfuse3"))]
     pub fn worker(&self) -> io::Result<Session<FS>> {
         // lock the mount while we clone the fd to build a worker
@@ -284,7 +286,7 @@ impl BackgroundSession {
 
         // Only spawn workers if 2 or more threads are requested.
         #[cfg(all(feature = "multithreading", feature = "libfuse3"))]
-        if threads > 2 {
+        if threads >= 2 {
             for _i in 0..(threads - 1) {
                 let mut wrk = se.worker()?;
                 let _ = thread::spawn(move || {
