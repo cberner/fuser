@@ -6,44 +6,75 @@
 #![warn(missing_debug_implementations)]
 #![allow(missing_docs)]
 
-use super::is_mounted;
-use super::mount_options::{option_to_string, MountOption};
+use crate::mount_options::{option_to_string, MountOption};
 use libc::c_int;
 use log::{debug, error};
 use std::ffi::{CStr, CString, OsStr};
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::io::{Error, ErrorKind, Read};
+use std::os::fd::{AsFd, OwnedFd};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::sync::Arc;
 use std::{mem, ptr};
 
 const FUSERMOUNT_BIN: &str = "fusermount";
 const FUSERMOUNT3_BIN: &str = "fusermount3";
 const FUSERMOUNT_COMM_ENV: &str = "_FUSE_COMMFD";
+const FUSE_DEV_NAME: &str = "/dev/fuse";
+
+/// Opens /dev/fuse.
+fn open_device() -> io::Result<OwnedFd> {
+    let file = match OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(FUSE_DEV_NAME)
+    {
+        Ok(file) => file,
+        Err(error) => {
+            if error.kind() == ErrorKind::NotFound {
+                error!("{} not found. Try 'modprobe fuse'", FUSE_DEV_NAME);
+            }
+            return Err(error);
+        }
+    };
+
+    assert!(
+        file.as_raw_fd() > 2,
+        "Conflict with stdin/stdout/stderr. fd={}",
+        file.as_raw_fd()
+    );
+
+    Ok(file.into())
+}
 
 #[derive(Debug)]
-pub struct Mount {
+/// A helper to unmount a filesystem on Drop.
+pub(crate) struct Mount {
     mountpoint: CString,
+    fuse_device: OwnedFd,
     auto_unmount_socket: Option<UnixStream>,
-    fuse_device: Arc<File>,
 }
+
 impl Mount {
-    pub fn new(mountpoint: &Path, options: &[MountOption]) -> io::Result<(Arc<File>, Mount)> {
+    pub fn new(mountpoint: &Path, options: &[MountOption]) -> io::Result<(OwnedFd, Self)> {
         let mountpoint = mountpoint.canonicalize()?;
-        let (file, sock) = fuse_mount_pure(mountpoint.as_os_str(), options)?;
-        let file = Arc::new(file);
+        let (fd, sock) = mount(mountpoint.as_os_str(), options)?;
+
+        // Make a dup of the fuse device FD, so we can poll if the filesystem
+        // is still mounted.
+        let fuse_device = fd.as_fd().try_clone_to_owned()?;
+
         Ok((
-            file.clone(),
-            Mount {
+            fd,
+            Self {
                 mountpoint: CString::new(mountpoint.as_os_str().as_bytes())?,
+                fuse_device,
                 auto_unmount_socket: sock,
-                fuse_device: file,
             },
         ))
     }
@@ -63,7 +94,7 @@ impl Drop for Mount {
             // fusermount in auto-unmount mode, no more work to do.
             return;
         }
-        if let Err(err) = super::libc_umount(&self.mountpoint) {
+        if let Err(err) = umount(&self.mountpoint) {
             if err.kind() == PermissionDenied {
                 // Linux always returns EPERM for non-root users.  We have to let the
                 // library go through the setuid-root "fusermount -u" to unmount.
@@ -75,21 +106,19 @@ impl Drop for Mount {
     }
 }
 
-fn fuse_mount_pure(
-    mountpoint: &OsStr,
-    options: &[MountOption],
-) -> Result<(File, Option<UnixStream>), io::Error> {
+fn mount(mountpoint: &OsStr, options: &[MountOption]) -> io::Result<(OwnedFd, Option<UnixStream>)> {
     if options.contains(&MountOption::AutoUnmount) {
         // Auto unmount is only supported via fusermount
-        return fuse_mount_fusermount(mountpoint, options);
+        return mount_fusermount(mountpoint, options);
     }
 
-    let res = fuse_mount_sys(mountpoint, options)?;
-    if let Some(file) = res {
-        Ok((file, None))
-    } else {
-        // Retry
-        fuse_mount_fusermount(mountpoint, options)
+    match mount_sys(mountpoint, options) {
+        Err(e) if e.kind() == io::ErrorKind::PermissionDenied => {
+            // Retry
+            mount_fusermount(mountpoint, options)
+        }
+        Err(e) => Err(e),
+        Ok(fd) => Ok((fd, None)),
     }
 }
 
@@ -228,10 +257,10 @@ fn receive_fusermount_message(socket: &UnixStream) -> Result<File, Error> {
     }
 }
 
-fn fuse_mount_fusermount(
+pub(crate) fn mount_fusermount(
     mountpoint: &OsStr,
     options: &[MountOption],
-) -> Result<(File, Option<UnixStream>), Error> {
+) -> io::Result<(OwnedFd, Option<UnixStream>)> {
     let (child_socket, receive_socket) = UnixStream::pair()?;
 
     unsafe {
@@ -308,40 +337,20 @@ fn fuse_mount_fusermount(
         libc::fcntl(file.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC);
     }
 
-    Ok((file, receive_socket))
+    Ok((file.into(), receive_socket))
 }
 
-// If returned option is none. Then fusermount binary should be tried
-fn fuse_mount_sys(mountpoint: &OsStr, options: &[MountOption]) -> Result<Option<File>, Error> {
-    let fuse_device_name = "/dev/fuse";
-
+// Performs the mount(2) syscall for the session.
+fn mount_sys(mountpoint: &OsStr, options: &[MountOption]) -> io::Result<OwnedFd> {
+    let fd = open_device()?;
     let mountpoint_mode = File::open(mountpoint)?.metadata()?.permissions().mode();
 
     // Auto unmount requests must be sent to fusermount binary
     assert!(!options.contains(&MountOption::AutoUnmount));
 
-    let file = match OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(fuse_device_name)
-    {
-        Ok(file) => file,
-        Err(error) => {
-            if error.kind() == ErrorKind::NotFound {
-                error!("{} not found. Try 'modprobe fuse'", fuse_device_name);
-            }
-            return Err(error);
-        }
-    };
-    assert!(
-        file.as_raw_fd() > 2,
-        "Conflict with stdin/stdout/stderr. fd={}",
-        file.as_raw_fd()
-    );
-
     let mut mount_options = format!(
         "fd={},rootmode={:o},user_id={},group_id={}",
-        file.as_raw_fd(),
+        fd.as_fd().as_raw_fd(),
         mountpoint_mode,
         nix::unistd::getuid(),
         nix::unistd::getgid()
@@ -386,7 +395,7 @@ fn fuse_mount_sys(mountpoint: &OsStr, options: &[MountOption]) -> Result<Option<
     }
 
     // Default name is "/dev/fuse", then use the subtype, and lastly prefer the name
-    let mut source = fuse_device_name;
+    let mut source = FUSE_DEV_NAME;
     if let Some(MountOption::Subtype(subtype)) = options
         .iter()
         .find(|x| matches!(**x, MountOption::Subtype(_)))
@@ -427,19 +436,16 @@ fn fuse_mount_sys(mountpoint: &OsStr, options: &[MountOption]) -> Result<Option<
             )
         }
     };
+
     if result == -1 {
         let err = Error::last_os_error();
-        if err.kind() == ErrorKind::PermissionDenied {
-            return Ok(None); // Retry with fusermount
-        } else {
-            return Err(Error::new(
-                err.kind(),
-                format!("Error calling mount() at {mountpoint:?}: {err}"),
-            ));
-        }
+        return Err(io::Error::new(
+            err.kind(),
+            format!("Error calling mount() at {mountpoint:?}: {err}"),
+        ));
     }
 
-    Ok(Some(file))
+    Ok(fd)
 }
 
 #[derive(PartialEq)]
@@ -510,5 +516,118 @@ pub fn option_to_flag(option: &MountOption) -> libc::c_int {
         MountOption::Async => 0,
         MountOption::Sync => libc::MNT_SYNCHRONOUS,
         _ => unreachable!(),
+    }
+}
+
+/// Warning: This will return true if the filesystem has been detached (lazy unmounted), but not
+/// yet destroyed by the kernel.
+fn is_mounted(fuse_device: impl AsFd) -> bool {
+    use libc::{poll, pollfd};
+
+    let mut poll_result = pollfd {
+        fd: fuse_device.as_fd().as_raw_fd(),
+        events: 0,
+        revents: 0,
+    };
+    loop {
+        let res = unsafe { poll(&mut poll_result, 1, 0) };
+        break match res {
+            0 => true,
+            1 => (poll_result.revents & libc::POLLERR) != 0,
+            -1 => {
+                let err = io::Error::last_os_error();
+                if err.kind() == io::ErrorKind::Interrupted {
+                    continue;
+                } else {
+                    // This should never happen. The fd is guaranteed good as `File` owns it.
+                    // According to man poll ENOMEM is the only error code unhandled, so we panic
+                    // consistent with rust's usual ENOMEM behaviour.
+                    panic!("Poll failed with error {}", err)
+                }
+            }
+            _ => unreachable!(),
+        };
+    }
+}
+
+#[inline]
+fn umount(mnt: &CStr) -> io::Result<()> {
+    #[cfg(any(
+        target_os = "macos",
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "openbsd",
+        target_os = "bitrig",
+        target_os = "netbsd"
+    ))]
+    let r = unsafe { libc::unmount(mnt.as_ptr(), 0) };
+
+    #[cfg(not(any(
+        target_os = "macos",
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "openbsd",
+        target_os = "bitrig",
+        target_os = "netbsd"
+    )))]
+    let r = unsafe { libc::umount(mnt.as_ptr()) };
+    if r < 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use std::mem::ManuallyDrop;
+
+    fn cmd_mount() -> String {
+        std::str::from_utf8(
+            std::process::Command::new("sh")
+                .arg("-c")
+                .arg("mount | grep fuse")
+                .output()
+                .unwrap()
+                .stdout
+                .as_ref(),
+        )
+        .unwrap()
+        .to_owned()
+    }
+
+    #[test]
+    fn mount_unmount() {
+        // We use ManuallyDrop here to leak the directory on test failure.  We don't
+        // want to try and clean up the directory if it's a mountpoint otherwise we'll
+        // deadlock.
+        let tmp = ManuallyDrop::new(tempfile::tempdir().unwrap());
+        let device_fd = open_device().unwrap();
+        let mount = Mount::new(tmp.path(), &[]).unwrap();
+
+        let mnt = cmd_mount();
+        eprintln!("Our mountpoint: {:?}\nfuse mounts:\n{}", tmp.path(), mnt,);
+        assert!(mnt.contains(&*tmp.path().to_string_lossy()));
+        assert!(is_mounted(&device_fd));
+
+        drop(mount);
+        let mnt = cmd_mount();
+        eprintln!("Our mountpoint: {:?}\nfuse mounts:\n{}", tmp.path(), mnt,);
+
+        let detached = !mnt.contains(&*tmp.path().to_string_lossy());
+        // Linux supports MNT_DETACH, so we expect unmount to succeed even if the FS
+        // is busy.  Other systems don't so the unmount may fail and we will still
+        // have the mount listed.  The mount will get cleaned up later.
+        #[cfg(target_os = "linux")]
+        assert!(detached);
+
+        if detached {
+            // We've detached successfully, it's safe to clean up:
+            std::mem::ManuallyDrop::<_>::into_inner(tmp);
+        }
+
+        // Filesystem may have been lazy unmounted, so we can't assert this:
+        // assert!(!is_mounted(&file));
     }
 }

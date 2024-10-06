@@ -86,7 +86,7 @@ impl MountOption {
     }
 }
 
-pub fn check_option_conflicts(options: &[MountOption]) -> Result<(), io::Error> {
+pub(crate) fn check_option_conflicts(options: &[MountOption]) -> Result<(), io::Error> {
     let mut options_set = HashSet::new();
     options_set.extend(options.iter().cloned());
     let conflicting: HashSet<MountOption> = options.iter().flat_map(conflicts_with).collect();
@@ -127,7 +127,7 @@ fn conflicts_with(option: &MountOption) -> Vec<MountOption> {
 }
 
 // Format option to be passed to libfuse or kernel
-pub fn option_to_string(option: &MountOption) -> String {
+pub(crate) fn option_to_string(option: &MountOption) -> String {
     match option {
         MountOption::FSName(name) => format!("fsname={name}"),
         MountOption::Subtype(subtype) => format!("subtype={subtype}"),

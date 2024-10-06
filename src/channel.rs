@@ -1,4 +1,11 @@
-use std::{fs::File, io, os::unix::prelude::AsRawFd, sync::Arc};
+use std::{
+    io,
+    os::{
+        fd::{AsFd, BorrowedFd, OwnedFd},
+        unix::prelude::AsRawFd,
+    },
+    sync::Arc,
+};
 
 use libc::{c_int, c_void, size_t};
 
@@ -6,13 +13,13 @@ use crate::reply::ReplySender;
 
 /// A raw communication channel to the FUSE kernel driver
 #[derive(Debug)]
-pub struct Channel(Arc<File>);
+pub struct Channel(Arc<OwnedFd>);
 
 impl Channel {
     /// Create a new communication channel to the kernel driver by mounting the
     /// given path. The kernel driver will delegate filesystem operations of
     /// the given path to the channel.
-    pub(crate) fn new(device: Arc<File>) -> Self {
+    pub(crate) fn new(device: Arc<OwnedFd>) -> Self {
         Self(device)
     }
 
@@ -42,8 +49,14 @@ impl Channel {
     }
 }
 
+impl AsFd for Channel {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.0.as_fd()
+    }
+}
+
 #[derive(Clone, Debug)]
-pub struct ChannelSender(Arc<File>);
+pub struct ChannelSender(Arc<OwnedFd>);
 
 impl ReplySender for ChannelSender {
     fn send(&self, bufs: &[io::IoSlice<'_>]) -> io::Result<()> {

@@ -14,11 +14,13 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::{io, ops::DerefMut};
 
+use crate::channel::Channel;
 use crate::ll::fuse_abi as abi;
 use crate::request::Request;
+use crate::sys;
 use crate::Filesystem;
 use crate::MountOption;
-use crate::{channel::Channel, mnt::Mount};
+
 #[cfg(feature = "abi-7-11")]
 use crate::{channel::ChannelSender, notify::Notifier};
 
@@ -46,7 +48,7 @@ pub struct Session<FS: Filesystem> {
     /// Communication channel to the kernel driver
     ch: Channel,
     /// Handle to the mount.  Dropping this unmounts.
-    mount: Arc<Mutex<Option<Mount>>>,
+    mount: Arc<Mutex<Option<sys::Mount>>>,
     /// Mount point
     mountpoint: PathBuf,
     /// Whether to restrict access to owner, root + owner, or unrestricted
@@ -73,22 +75,23 @@ impl<FS: Filesystem> Session<FS> {
     ) -> io::Result<Session<FS>> {
         let mountpoint = mountpoint.as_ref();
         info!("Mounting {}", mountpoint.display());
+
         // If AutoUnmount is requested, but not AllowRoot or AllowOther we enforce the ACL
         // ourself and implicitly set AllowOther because fusermount needs allow_root or allow_other
         // to handle the auto_unmount option
-        let (file, mount) = if options.contains(&MountOption::AutoUnmount)
+        let (device_fd, mount) = if options.contains(&MountOption::AutoUnmount)
             && !(options.contains(&MountOption::AllowRoot)
                 || options.contains(&MountOption::AllowOther))
         {
             warn!("Given auto_unmount without allow_root or allow_other; adding allow_other, with userspace permission handling");
             let mut modified_options = options.to_vec();
             modified_options.push(MountOption::AllowOther);
-            Mount::new(mountpoint, &modified_options)?
+            sys::Mount::new(mountpoint, &modified_options)?
         } else {
-            Mount::new(mountpoint, options)?
+            sys::Mount::new(mountpoint, options)?
         };
 
-        let ch = Channel::new(file);
+        let ch = Channel::new(Arc::new(device_fd));
         let allowed = if options.contains(&MountOption::AllowRoot) {
             SessionACL::RootAndOwner
         } else if options.contains(&MountOption::AllowOther) {
@@ -177,7 +180,7 @@ impl<FS: Filesystem> Session<FS> {
 #[derive(Debug)]
 /// A thread-safe object that can be used to unmount a Filesystem
 pub struct SessionUnmounter {
-    mount: Arc<Mutex<Option<Mount>>>,
+    mount: Arc<Mutex<Option<sys::Mount>>>,
 }
 
 impl SessionUnmounter {
@@ -224,7 +227,7 @@ pub struct BackgroundSession {
     #[cfg(feature = "abi-7-11")]
     sender: ChannelSender,
     /// Ensures the filesystem is unmounted when the session ends
-    _mount: Mount,
+    _mount: sys::Mount,
 }
 
 impl BackgroundSession {

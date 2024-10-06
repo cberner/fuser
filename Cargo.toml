@@ -11,7 +11,6 @@ readme = "README.md"
 authors = ["Christopher Berner <christopherberner@gmail.com>"]
 keywords = ["fuse", "filesystem", "system", "bindings"]
 categories = ["external-ffi-bindings", "api-bindings", "filesystem", "os::unix-apis"]
-build = "build.rs"
 
 [dependencies]
 libc = "0.2.51"
@@ -31,12 +30,7 @@ serde = { version = "1.0.102", features = ["std", "derive"] }
 tempfile = "3.10.1"
 nix = { version = "0.28.0", features = ["poll", "fs", "ioctl"] }
 
-[build-dependencies]
-pkg-config = { version = "0.3.14", optional = true }
-
 [features]
-default = ["libfuse"]
-libfuse = ["pkg-config"]
 serializable = ["serde"]
 abi-7-9 = []
 abi-7-10 = ["abi-7-9"]

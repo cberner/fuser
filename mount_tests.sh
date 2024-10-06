@@ -139,22 +139,6 @@ run_test --no-default-features 'without libfuse, with fusermount3'
 run_test --no-default-features 'without libfuse, with fusermount3' --auto_unmount
 test_no_user_allow_other --no-default-features 'without libfuse, with fusermount3'
 
-apt remove --purge -y fuse3
-apt autoremove -y
-apt install -y libfuse-dev pkg-config fuse
-echo 'user_allow_other' >> /etc/fuse.conf
-
-run_test --features=libfuse 'with libfuse'
-run_test --features=libfuse 'with libfuse' --auto_unmount
-
-apt remove --purge -y libfuse-dev fuse
-apt autoremove -y
-apt install -y libfuse3-dev fuse3
-echo 'user_allow_other' >> /etc/fuse.conf
-
-run_test --features=libfuse,abi-7-30 'with libfuse3'
-run_test --features=libfuse,abi-7-30 'with libfuse3' --auto_unmount
-
 run_allow_root_test
 
 export TEST_EXIT_STATUS=0
