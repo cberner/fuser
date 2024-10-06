@@ -86,11 +86,23 @@ impl MountOption {
     }
 }
 
-pub(crate) fn check_option_conflicts(options: &[MountOption]) -> Result<(), io::Error> {
+pub(crate) fn check_option_conflicts(
+    options: &[MountOption],
+    allow_auto_unmount: bool,
+) -> Result<(), io::Error> {
     let mut options_set = HashSet::new();
     options_set.extend(options.iter().cloned());
+
+    if !allow_auto_unmount && options_set.contains(&MountOption::AutoUnmount) {
+        return Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            "AutoUnmount requires the use of fusermount",
+        ));
+    }
+
     let conflicting: HashSet<MountOption> = options.iter().flat_map(conflicts_with).collect();
     let intersection: Vec<MountOption> = conflicting.intersection(&options_set).cloned().collect();
+
     if !intersection.is_empty() {
         Err(io::Error::new(
             ErrorKind::InvalidInput,
@@ -188,8 +200,9 @@ mod test {
 
     #[test]
     fn option_checking() {
-        assert!(check_option_conflicts(&[MountOption::Suid, MountOption::NoSuid]).is_err());
-        assert!(check_option_conflicts(&[MountOption::Suid, MountOption::NoExec]).is_ok());
+        assert!(check_option_conflicts(&[MountOption::Suid, MountOption::NoSuid], true).is_err());
+        assert!(check_option_conflicts(&[MountOption::Suid, MountOption::NoExec], false).is_ok());
+        assert!(check_option_conflicts(&[MountOption::AutoUnmount], true).is_ok());
     }
     #[test]
     fn option_round_trip() {

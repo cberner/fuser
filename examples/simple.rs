@@ -2039,21 +2039,26 @@ fn main() {
         .unwrap()
         .to_string();
 
-    let result = fuser::mount2(
-        SimpleFS::new(
-            data_dir,
-            matches.get_flag("direct-io"),
-            matches.get_flag("suid"),
-        ),
-        mountpoint,
-        &options,
+    let fs = SimpleFS::new(
+        data_dir,
+        matches.get_flag("direct-io"),
+        matches.get_flag("suid"),
     );
+    let result = if options.contains(&MountOption::AutoUnmount) {
+        fuser::fusermount(fs, mountpoint, &options)
+    } else {
+        fuser::mount2(fs, mountpoint, &options)
+    };
+
     if let Err(e) = result {
+        error!("{}", e.to_string());
+
         // Return a special error code for permission denied, which usually indicates that
         // "user_allow_other" is missing from /etc/fuse.conf
         if e.kind() == ErrorKind::PermissionDenied {
-            error!("{}", e.to_string());
             std::process::exit(2);
+        } else {
+            std::process::exit(1);
         }
     }
 }

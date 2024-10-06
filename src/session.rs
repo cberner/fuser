@@ -9,18 +9,17 @@ use libc::{EAGAIN, EINTR, ENODEV, ENOENT};
 use log::{info, warn};
 use nix::unistd::geteuid;
 use std::fmt;
+use std::os::fd::OwnedFd;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::{io, ops::DerefMut};
 
-use crate::channel::Channel;
 use crate::ll::fuse_abi as abi;
 use crate::request::Request;
-use crate::sys;
 use crate::Filesystem;
 use crate::MountOption;
-
+use crate::{channel::Channel, sys::Mount};
 #[cfg(feature = "abi-7-11")]
 use crate::{channel::ChannelSender, notify::Notifier};
 
@@ -48,7 +47,7 @@ pub struct Session<FS: Filesystem> {
     /// Communication channel to the kernel driver
     ch: Channel,
     /// Handle to the mount.  Dropping this unmounts.
-    mount: Arc<Mutex<Option<sys::Mount>>>,
+    mount: Arc<Mutex<Option<Mount>>>,
     /// Mount point
     mountpoint: PathBuf,
     /// Whether to restrict access to owner, root + owner, or unrestricted
@@ -67,15 +66,28 @@ pub struct Session<FS: Filesystem> {
 }
 
 impl<FS: Filesystem> Session<FS> {
-    /// Create a new session by mounting the given filesystem to the given mountpoint
-    pub fn new<P: AsRef<Path>>(
+    /// Create a new session by mounting the given filesystem to the given
+    /// mountpoint. Uses the mount syscall, which requires CAP_SYS_ADMIN.
+    pub fn new(
         filesystem: FS,
-        mountpoint: P,
+        mountpoint: impl AsRef<Path>,
+        options: &[MountOption],
+    ) -> io::Result<Self> {
+        let (device_fd, mount) = Mount::new_sys(mountpoint.as_ref(), options)?;
+
+        Ok(Self::new_inner(
+            filesystem, mountpoint, device_fd, mount, options,
+        ))
+    }
+
+    /// Create a new session by mounting the given filesystem to the given
+    /// mountpoint. Uses fusermount(1), which must exist on the system and be
+    /// setuid root, to circumvent the elevated privileges required by [Session::new].
+    pub fn new_fusermount(
+        filesystem: FS,
+        mountpoint: impl AsRef<Path>,
         options: &[MountOption],
     ) -> io::Result<Session<FS>> {
-        let mountpoint = mountpoint.as_ref();
-        info!("Mounting {}", mountpoint.display());
-
         // If AutoUnmount is requested, but not AllowRoot or AllowOther we enforce the ACL
         // ourself and implicitly set AllowOther because fusermount needs allow_root or allow_other
         // to handle the auto_unmount option
@@ -86,12 +98,25 @@ impl<FS: Filesystem> Session<FS> {
             warn!("Given auto_unmount without allow_root or allow_other; adding allow_other, with userspace permission handling");
             let mut modified_options = options.to_vec();
             modified_options.push(MountOption::AllowOther);
-            sys::Mount::new(mountpoint, &modified_options)?
+            Mount::new_fusermount(mountpoint.as_ref(), &modified_options)?
         } else {
-            sys::Mount::new(mountpoint, options)?
+            Mount::new_fusermount(mountpoint.as_ref(), options)?
         };
 
+        Ok(Self::new_inner(
+            filesystem, mountpoint, device_fd, mount, options,
+        ))
+    }
+
+    fn new_inner(
+        filesystem: FS,
+        mountpoint: impl AsRef<Path>,
+        device_fd: OwnedFd,
+        mount: Mount,
+        options: &[MountOption],
+    ) -> Self {
         let ch = Channel::new(Arc::new(device_fd));
+
         let allowed = if options.contains(&MountOption::AllowRoot) {
             SessionACL::RootAndOwner
         } else if options.contains(&MountOption::AllowOther) {
@@ -100,18 +125,18 @@ impl<FS: Filesystem> Session<FS> {
             SessionACL::Owner
         };
 
-        Ok(Session {
+        Session {
             filesystem,
             ch,
             mount: Arc::new(Mutex::new(Some(mount))),
-            mountpoint: mountpoint.to_owned(),
+            mountpoint: mountpoint.as_ref().to_owned(),
             allowed,
             session_owner: geteuid().as_raw(),
             proto_major: 0,
             proto_minor: 0,
             initialized: false,
             destroyed: false,
-        })
+        }
     }
 
     /// Return path of the mounted filesystem
@@ -180,7 +205,7 @@ impl<FS: Filesystem> Session<FS> {
 #[derive(Debug)]
 /// A thread-safe object that can be used to unmount a Filesystem
 pub struct SessionUnmounter {
-    mount: Arc<Mutex<Option<sys::Mount>>>,
+    mount: Arc<Mutex<Option<Mount>>>,
 }
 
 impl SessionUnmounter {
@@ -227,7 +252,7 @@ pub struct BackgroundSession {
     #[cfg(feature = "abi-7-11")]
     sender: ChannelSender,
     /// Ensures the filesystem is unmounted when the session ends
-    _mount: sys::Mount,
+    _mount: Mount,
 }
 
 impl BackgroundSession {

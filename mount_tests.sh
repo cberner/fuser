@@ -18,8 +18,8 @@ function run_allow_root_test {
   useradd fusertest1
   useradd fusertest2
   DIR=$(su fusertest1 -c "mktemp --directory")
-  cargo build --example hello --features libfuse,abi-7-30 > /dev/null 2>&1
-  su fusertest1 -c "target/debug/examples/hello $DIR --allow-root" &
+  cargo build --example hello --features abi-7-30 > /dev/null 2>&1
+  su fusertest1 -c "target/debug/examples/hello $DIR --allow-root --auto_unmount" &
   FUSE_PID=$!
   sleep 2
 
@@ -62,7 +62,7 @@ function test_no_user_allow_other {
   DIR=$(su fusertestnoallow -c "mktemp --directory")
   DATA_DIR=$(su fusertestnoallow -c "mktemp --directory")
   cargo build --example simple $1 > /dev/null 2>&1
-  su fusertestnoallow -c "target/debug/examples/simple -vvv --data-dir $DATA_DIR --mount-point $DIR"
+  su fusertestnoallow -c "target/debug/examples/simple -vvv --data-dir $DATA_DIR --mount-point $DIR --auto_unmount"
   exitCode=$?
   if [[ $exitCode -eq 2 ]]; then
       echo -e "$GREEN OK Detected lack of user_allow_other: $2 $NC"

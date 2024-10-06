@@ -61,9 +61,33 @@ pub(crate) struct Mount {
 }
 
 impl Mount {
-    pub fn new(mountpoint: &Path, options: &[MountOption]) -> io::Result<(OwnedFd, Self)> {
-        let mountpoint = mountpoint.canonicalize()?;
-        let (fd, sock) = mount(mountpoint.as_os_str(), options)?;
+    pub fn new_sys(
+        mountpoint: impl AsRef<Path>,
+        options: &[MountOption],
+    ) -> io::Result<(OwnedFd, Self)> {
+        let mountpoint = mountpoint.as_ref().canonicalize()?;
+        let fd = mount_sys(mountpoint.as_os_str(), options)?;
+
+        // Make a dup of the fuse device FD, so we can poll if the filesystem
+        // is still mounted.
+        let fuse_device = fd.as_fd().try_clone_to_owned()?;
+
+        Ok((
+            fd,
+            Self {
+                mountpoint: CString::new(mountpoint.as_os_str().as_bytes())?,
+                fuse_device,
+                auto_unmount_socket: None,
+            },
+        ))
+    }
+
+    pub fn new_fusermount(
+        mountpoint: impl AsRef<Path>,
+        options: &[MountOption],
+    ) -> io::Result<(OwnedFd, Self)> {
+        let mountpoint = mountpoint.as_ref().canonicalize()?;
+        let (fd, sock) = mount_fusermount(mountpoint.as_os_str(), options)?;
 
         // Make a dup of the fuse device FD, so we can poll if the filesystem
         // is still mounted.
@@ -103,22 +127,6 @@ impl Drop for Mount {
                 error!("Unmount failed: {}", err)
             }
         }
-    }
-}
-
-fn mount(mountpoint: &OsStr, options: &[MountOption]) -> io::Result<(OwnedFd, Option<UnixStream>)> {
-    if options.contains(&MountOption::AutoUnmount) {
-        // Auto unmount is only supported via fusermount
-        return mount_fusermount(mountpoint, options);
-    }
-
-    match mount_sys(mountpoint, options) {
-        Err(e) if e.kind() == io::ErrorKind::PermissionDenied => {
-            // Retry
-            mount_fusermount(mountpoint, options)
-        }
-        Err(e) => Err(e),
-        Ok(fd) => Ok((fd, None)),
     }
 }
 
@@ -604,7 +612,7 @@ mod test {
         // deadlock.
         let tmp = ManuallyDrop::new(tempfile::tempdir().unwrap());
         let device_fd = open_device().unwrap();
-        let mount = Mount::new(tmp.path(), &[]).unwrap();
+        let mount = Mount::new_fusermount(tmp.path(), &[]).unwrap();
 
         let mnt = cmd_mount();
         eprintln!("Our mountpoint: {:?}\nfuse mounts:\n{}", tmp.path(), mnt,);

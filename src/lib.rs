@@ -1016,8 +1016,19 @@ pub fn mount2<FS: Filesystem, P: AsRef<Path>>(
     mountpoint: P,
     options: &[MountOption],
 ) -> io::Result<()> {
-    check_option_conflicts(options)?;
+    check_option_conflicts(options, false)?;
     Session::new(filesystem, mountpoint.as_ref(), options).and_then(|mut se| se.run())
+}
+
+/// Mount the given filesystem using fusermount(1). The binary must exist on
+/// the system and be setuid root.
+pub fn fusermount(
+    filesystem: impl Filesystem,
+    mountpoint: impl AsRef<Path>,
+    options: &[MountOption],
+) -> io::Result<()> {
+    check_option_conflicts(options, true)?;
+    Session::new_fusermount(filesystem, mountpoint, options).and_then(|mut se| se.run())
 }
 
 /// Mount the given filesystem to the given mountpoint. This function spawns
@@ -1025,6 +1036,8 @@ pub fn mount2<FS: Filesystem, P: AsRef<Path>>(
 /// and therefore returns immediately. The returned handle should be stored
 /// to reference the mounted filesystem. If it's dropped, the filesystem will
 /// be unmounted.
+///
+/// This function requires CAP_SYS_ADMIN to run.
 #[deprecated(note = "use spawn_mount2() instead")]
 pub fn spawn_mount<'a, FS: Filesystem + Send + 'static + 'a, P: AsRef<Path>>(
     filesystem: FS,
@@ -1036,7 +1049,7 @@ pub fn spawn_mount<'a, FS: Filesystem + Send + 'static + 'a, P: AsRef<Path>>(
         .map(|x| Some(MountOption::from_str(x.to_str()?)))
         .collect();
     let options = options.ok_or(ErrorKind::InvalidData)?;
-    Session::new(filesystem, mountpoint.as_ref(), options.as_ref()).and_then(|se| se.spawn())
+    spawn_mount2(filesystem, mountpoint, &options)
 }
 
 /// Mount the given filesystem to the given mountpoint. This function spawns
@@ -1045,12 +1058,31 @@ pub fn spawn_mount<'a, FS: Filesystem + Send + 'static + 'a, P: AsRef<Path>>(
 /// to reference the mounted filesystem. If it's dropped, the filesystem will
 /// be unmounted.
 ///
-/// NOTE: This is the corresponding function to mount2.
+/// NOTE: This is the corresponding function to [mount2], and likewise requires
+/// CAP_SYS_ADMIN.
 pub fn spawn_mount2<'a, FS: Filesystem + Send + 'static + 'a, P: AsRef<Path>>(
     filesystem: FS,
     mountpoint: P,
     options: &[MountOption],
 ) -> io::Result<BackgroundSession> {
-    check_option_conflicts(options)?;
+    check_option_conflicts(options, false)?;
     Session::new(filesystem, mountpoint.as_ref(), options).and_then(|se| se.spawn())
+}
+
+/// Mount the given filesystem to the given mountpoint. This function spawns
+/// a background thread to handle filesystem operations while being mounted
+/// and therefore returns immediately. The returned handle should be stored
+/// to reference the mounted filesystem. If it's dropped, the filesystem will
+/// be unmounted.
+///
+/// NOTE: This is the corresponding function to [fusermount]. Unlike
+/// [spawn_mount], this uses fusermount(1), which must be present on the
+/// system and setuid root, to circumvent the need for elevated priveleges.
+pub fn spawn_fusermount<'a, FS: Filesystem + Send + 'static + 'a>(
+    filesystem: FS,
+    mountpoint: impl AsRef<Path>,
+    options: &[MountOption],
+) -> io::Result<BackgroundSession> {
+    check_option_conflicts(options, true)?;
+    Session::new_fusermount(filesystem, mountpoint, options).and_then(|se| se.spawn())
 }

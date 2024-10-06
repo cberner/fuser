@@ -145,5 +145,10 @@ fn main() {
     if matches.get_flag("allow-root") {
         options.push(MountOption::AllowRoot);
     }
-    fuser::mount2(HelloFS, mountpoint, &options).unwrap();
+
+    if options.contains(&MountOption::AutoUnmount) {
+        fuser::fusermount(HelloFS, mountpoint, &options).unwrap();
+    } else {
+        fuser::mount2(HelloFS, mountpoint, &options).unwrap();
+    }
 }
