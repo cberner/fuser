@@ -1,4 +1,4 @@
-use fuser::{Filesystem, Session};
+use fuser::{Filesystem, Mount, Session};
 use std::rc::Rc;
 use std::thread;
 use std::time::Duration;
@@ -13,11 +13,14 @@ fn unmount_no_send() {
     impl Filesystem for NoSendFS {}
 
     let tmpdir: TempDir = tempfile::tempdir().unwrap();
-    let mut session = Session::new_fusermount(NoSendFS(Rc::new(())), tmpdir.path(), &[]).unwrap();
-    let mut unmounter = session.unmount_callable();
+
+    let (device_fd, mount) = Mount::new_fusermount(tmpdir.path(), &[]).expect("failed to mount");
+    let mut session = Session::from_fd(device_fd, NoSendFS(Rc::new(())), fuser::SessionACL::Owner);
+
     thread::spawn(move || {
         thread::sleep(Duration::from_secs(1));
-        unmounter.unmount().unwrap();
+        drop(mount);
     });
+
     session.run().unwrap();
 }

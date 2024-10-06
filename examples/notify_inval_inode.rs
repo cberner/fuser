@@ -200,9 +200,8 @@ fn main() {
         lookup_cnt,
     };
 
-    let session = fuser::Session::new(fs, opts.mount_point, &options).unwrap();
+    let session = fuser::spawn_mount2(fs, opts.mount_point, &options).expect("failed to mount");
     let notifier = session.notifier();
-    let _bg = session.spawn().unwrap();
 
     loop {
         let mut s = fdata.lock().unwrap();

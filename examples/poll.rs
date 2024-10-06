@@ -337,8 +337,6 @@ fn main() {
     let fs = FSelFS { data: data.clone() };
 
     let mntpt = std::env::args().nth(1).unwrap();
-    let session = fuser::Session::new(fs, mntpt, &options).unwrap();
-    let bg = session.spawn().unwrap();
-
-    producer(&data, &bg.notifier());
+    let session = fuser::spawn_mount2(fs, mntpt, &options).expect("failed to mount");
+    producer(&data, &session.notifier());
 }

@@ -9,7 +9,7 @@
 use crate::mount_options::{option_to_string, MountOption};
 use libc::c_int;
 use log::{debug, error};
-use std::ffi::{CStr, CString, OsStr};
+use std::ffi::{CString, OsStr};
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::io::{Error, ErrorKind, Read};
@@ -28,7 +28,7 @@ const FUSERMOUNT_COMM_ENV: &str = "_FUSE_COMMFD";
 const FUSE_DEV_NAME: &str = "/dev/fuse";
 
 /// Opens /dev/fuse.
-fn open_device() -> io::Result<OwnedFd> {
+pub(crate) fn open_device() -> io::Result<OwnedFd> {
     let file = match OpenOptions::new()
         .read(true)
         .write(true)
@@ -52,100 +52,7 @@ fn open_device() -> io::Result<OwnedFd> {
     Ok(file.into())
 }
 
-#[derive(Debug)]
-/// A helper to unmount a filesystem on Drop.
-pub(crate) struct Mount {
-    mountpoint: CString,
-    fuse_device: OwnedFd,
-    auto_unmount_socket: Option<UnixStream>,
-}
-
-impl Mount {
-    pub fn new_sys(
-        mountpoint: impl AsRef<Path>,
-        options: &[MountOption],
-    ) -> io::Result<(OwnedFd, Self)> {
-        let mountpoint = mountpoint.as_ref().canonicalize()?;
-        let fd = mount_sys(mountpoint.as_os_str(), options)?;
-
-        // Make a dup of the fuse device FD, so we can poll if the filesystem
-        // is still mounted.
-        let fuse_device = fd.as_fd().try_clone_to_owned()?;
-
-        Ok((
-            fd,
-            Self {
-                mountpoint: CString::new(mountpoint.as_os_str().as_bytes())?,
-                fuse_device,
-                auto_unmount_socket: None,
-            },
-        ))
-    }
-
-    pub fn new_fusermount(
-        mountpoint: impl AsRef<Path>,
-        options: &[MountOption],
-    ) -> io::Result<(OwnedFd, Self)> {
-        let mountpoint = mountpoint.as_ref().canonicalize()?;
-        let (fd, sock) = mount_fusermount(mountpoint.as_os_str(), options)?;
-
-        // Make a dup of the fuse device FD, so we can poll if the filesystem
-        // is still mounted.
-        let fuse_device = fd.as_fd().try_clone_to_owned()?;
-
-        Ok((
-            fd,
-            Self {
-                mountpoint: CString::new(mountpoint.as_os_str().as_bytes())?,
-                fuse_device,
-                auto_unmount_socket: sock,
-            },
-        ))
-    }
-}
-
-impl Drop for Mount {
-    fn drop(&mut self) {
-        use std::io::ErrorKind::PermissionDenied;
-        if !is_mounted(&self.fuse_device) {
-            // If the filesystem has already been unmounted, avoid unmounting it again.
-            // Unmounting it a second time could cause a race with a newly mounted filesystem
-            // living at the same mountpoint
-            return;
-        }
-        if let Some(sock) = mem::take(&mut self.auto_unmount_socket) {
-            drop(sock);
-            // fusermount in auto-unmount mode, no more work to do.
-            return;
-        }
-        if let Err(err) = umount(&self.mountpoint) {
-            if err.kind() == PermissionDenied {
-                // Linux always returns EPERM for non-root users.  We have to let the
-                // library go through the setuid-root "fusermount -u" to unmount.
-                fuse_unmount_pure(&self.mountpoint)
-            } else {
-                error!("Unmount failed: {}", err)
-            }
-        }
-    }
-}
-
-fn fuse_unmount_pure(mountpoint: &CStr) {
-    #[cfg(target_os = "linux")]
-    unsafe {
-        let result = libc::umount2(mountpoint.as_ptr(), libc::MNT_DETACH);
-        if result == 0 {
-            return;
-        }
-    }
-    #[cfg(target_os = "macos")]
-    unsafe {
-        let result = libc::unmount(mountpoint.as_ptr(), libc::MNT_FORCE);
-        if result == 0 {
-            return;
-        }
-    }
-
+pub(crate) fn fusermount_umount(mountpoint: impl AsRef<Path>) {
     let mut builder = Command::new(detect_fusermount_bin());
     builder.stdout(Stdio::piped()).stderr(Stdio::piped());
     builder
@@ -153,7 +60,7 @@ fn fuse_unmount_pure(mountpoint: &CStr) {
         .arg("-q")
         .arg("-z")
         .arg("--")
-        .arg(OsStr::new(&mountpoint.to_string_lossy().into_owned()));
+        .arg(mountpoint.as_ref());
 
     if let Ok(output) = builder.output() {
         debug!("fusermount: {}", String::from_utf8_lossy(&output.stdout));
@@ -265,7 +172,7 @@ fn receive_fusermount_message(socket: &UnixStream) -> Result<File, Error> {
     }
 }
 
-pub(crate) fn mount_fusermount(
+pub(crate) fn fusermount(
     mountpoint: &OsStr,
     options: &[MountOption],
 ) -> io::Result<(OwnedFd, Option<UnixStream>)> {
@@ -349,8 +256,7 @@ pub(crate) fn mount_fusermount(
 }
 
 // Performs the mount(2) syscall for the session.
-fn mount_sys(mountpoint: &OsStr, options: &[MountOption]) -> io::Result<OwnedFd> {
-    let fd = open_device()?;
+pub(crate) fn mount(mountpoint: &OsStr, fd: impl AsFd, options: &[MountOption]) -> io::Result<()> {
     let mountpoint_mode = File::open(mountpoint)?.metadata()?.permissions().mode();
 
     // Auto unmount requests must be sent to fusermount binary
@@ -453,7 +359,7 @@ fn mount_sys(mountpoint: &OsStr, options: &[MountOption]) -> io::Result<OwnedFd>
         ));
     }
 
-    Ok(fd)
+    Ok(())
 }
 
 #[derive(PartialEq)]
@@ -529,7 +435,7 @@ pub fn option_to_flag(option: &MountOption) -> libc::c_int {
 
 /// Warning: This will return true if the filesystem has been detached (lazy unmounted), but not
 /// yet destroyed by the kernel.
-fn is_mounted(fuse_device: impl AsFd) -> bool {
+pub(crate) fn is_mounted(fuse_device: impl AsFd) -> bool {
     use libc::{poll, pollfd};
 
     let mut poll_result = pollfd {
@@ -559,7 +465,9 @@ fn is_mounted(fuse_device: impl AsFd) -> bool {
 }
 
 #[inline]
-fn umount(mnt: &CStr) -> io::Result<()> {
+pub(crate) fn umount(mnt: impl AsRef<Path>) -> io::Result<()> {
+    let mnt = CString::new(mnt.as_ref().as_os_str().as_bytes()).unwrap();
+
     #[cfg(any(
         target_os = "macos",
         target_os = "freebsd",
@@ -588,6 +496,8 @@ fn umount(mnt: &CStr) -> io::Result<()> {
 
 #[cfg(test)]
 mod test {
+    use crate::Mount;
+
     use super::*;
     use std::mem::ManuallyDrop;
 
@@ -611,8 +521,7 @@ mod test {
         // want to try and clean up the directory if it's a mountpoint otherwise we'll
         // deadlock.
         let tmp = ManuallyDrop::new(tempfile::tempdir().unwrap());
-        let device_fd = open_device().unwrap();
-        let mount = Mount::new_fusermount(tmp.path(), &[]).unwrap();
+        let (device_fd, mount) = Mount::new_fusermount(tmp.path(), &[]).unwrap();
 
         let mnt = cmd_mount();
         eprintln!("Our mountpoint: {:?}\nfuse mounts:\n{}", tmp.path(), mnt,);

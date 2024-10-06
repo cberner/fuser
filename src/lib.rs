@@ -13,6 +13,7 @@ use mount_options::{check_option_conflicts, parse_options_from_args};
 use serde::{Deserialize, Serialize};
 use std::ffi::OsStr;
 use std::io;
+use std::os::fd::AsFd;
 use std::path::Path;
 #[cfg(feature = "abi-7-23")]
 use std::time::Duration;
@@ -39,7 +40,7 @@ pub use reply::{
     ReplyStatfs, ReplyWrite,
 };
 pub use request::Request;
-pub use session::{BackgroundSession, Session, SessionUnmounter};
+pub use session::{BackgroundSession, Mount, Session, SessionACL, Unmounter};
 #[cfg(feature = "abi-7-28")]
 use std::cmp::max;
 #[cfg(feature = "abi-7-13")]
@@ -1008,7 +1009,8 @@ pub fn mount<FS: Filesystem, P: AsRef<Path>>(
 }
 
 /// Mount the given filesystem to the given mountpoint. This function will
-/// not return until the filesystem is unmounted.
+/// not return until the filesystem is unmounted. This function requires
+/// CAP_SYS_ADMIN to run.
 ///
 /// NOTE: This will eventually replace mount(), once the API is stable
 pub fn mount2<FS: Filesystem, P: AsRef<Path>>(
@@ -1017,7 +1019,10 @@ pub fn mount2<FS: Filesystem, P: AsRef<Path>>(
     options: &[MountOption],
 ) -> io::Result<()> {
     check_option_conflicts(options, false)?;
-    Session::new(filesystem, mountpoint.as_ref(), options).and_then(|mut se| se.run())
+    let mut session = Session::new(filesystem, SessionACL::from_mount_options(options))?;
+    let _mount = Mount::new(session.as_fd(), mountpoint, options)?;
+
+    session.run()
 }
 
 /// Mount the given filesystem using fusermount(1). The binary must exist on
@@ -1028,7 +1033,30 @@ pub fn fusermount(
     options: &[MountOption],
 ) -> io::Result<()> {
     check_option_conflicts(options, true)?;
-    Session::new_fusermount(filesystem, mountpoint, options).and_then(|mut se| se.run())
+
+    // AutoUnmount requires either AllowRoot or AllowOther; we can inject
+    // that option but still block requests at the library level.
+    let (device_fd, _mount) = if options.contains(&MountOption::AutoUnmount)
+        && !(options.contains(&MountOption::AllowRoot)
+            || options.contains(&MountOption::AllowOther))
+    {
+        warn!("Given auto_unmount without allow_root or allow_other; adding allow_other, with userspace permission handling");
+
+        let mut modified_options = options.to_vec();
+        modified_options.push(MountOption::AllowOther);
+
+        Mount::new_fusermount(mountpoint.as_ref(), &modified_options)?
+    } else {
+        Mount::new_fusermount(mountpoint.as_ref(), options)?
+    };
+
+    let mut session = Session::from_fd(
+        device_fd,
+        filesystem,
+        SessionACL::from_mount_options(options),
+    );
+
+    session.run()
 }
 
 /// Mount the given filesystem to the given mountpoint. This function spawns
@@ -1066,7 +1094,11 @@ pub fn spawn_mount2<'a, FS: Filesystem + Send + 'static + 'a, P: AsRef<Path>>(
     options: &[MountOption],
 ) -> io::Result<BackgroundSession> {
     check_option_conflicts(options, false)?;
-    Session::new(filesystem, mountpoint.as_ref(), options).and_then(|se| se.spawn())
+
+    let session = Session::new(filesystem, SessionACL::from_mount_options(options))?;
+    let mount = Mount::new(session.as_fd(), &mountpoint, options)?;
+
+    BackgroundSession::new(session, mount, mountpoint)
 }
 
 /// Mount the given filesystem to the given mountpoint. This function spawns
@@ -1084,5 +1116,28 @@ pub fn spawn_fusermount<'a, FS: Filesystem + Send + 'static + 'a>(
     options: &[MountOption],
 ) -> io::Result<BackgroundSession> {
     check_option_conflicts(options, true)?;
-    Session::new_fusermount(filesystem, mountpoint, options).and_then(|se| se.spawn())
+
+    // AutoUnmount requires either AllowRoot or AllowOther; we can inject
+    // that option but still block requests at the library level.
+    let (device_fd, mount) = if options.contains(&MountOption::AutoUnmount)
+        && !(options.contains(&MountOption::AllowRoot)
+            || options.contains(&MountOption::AllowOther))
+    {
+        warn!("Given auto_unmount without allow_root or allow_other; adding allow_other, with userspace permission handling");
+
+        let mut modified_options = options.to_vec();
+        modified_options.push(MountOption::AllowOther);
+
+        Mount::new_fusermount(mountpoint.as_ref(), &modified_options)?
+    } else {
+        Mount::new_fusermount(mountpoint.as_ref(), options)?
+    };
+
+    let session = Session::from_fd(
+        device_fd,
+        filesystem,
+        SessionACL::from_mount_options(options),
+    );
+
+    BackgroundSession::new(session, mount, mountpoint)
 }
