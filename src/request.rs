@@ -19,6 +19,8 @@ use crate::reply::ReplyDirectoryPlus;
 use crate::reply::{Reply, ReplyDirectory, ReplySender};
 use crate::session::{Session, SessionACL};
 use crate::Filesystem;
+#[cfg(feature = "abi-7-11")]
+use crate::Notifier;
 use crate::{ll, KernelConfig};
 
 /// Request data structure
@@ -641,6 +643,13 @@ impl<'a> Request<'a> {
     /// implementation and makes sure that a request is replied exactly once
     fn reply<T: Reply>(&self) -> T {
         Reply::new(self.request.unique().into(), self.ch.clone())
+    }
+
+    /// Create a [Notifier] that can be used to send notifications back to the
+    /// kernel.
+    #[cfg(feature = "abi-7-11")]
+    pub fn notifier(&self) -> Notifier {
+        Notifier::new(self.ch.clone())
     }
 
     /// Returns the unique identifier of this request
