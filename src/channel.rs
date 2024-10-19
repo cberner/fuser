@@ -1,8 +1,46 @@
-use std::{fs::File, io, os::unix::prelude::AsRawFd, sync::Arc};
-
-use libc::{c_int, c_void, size_t};
-
 use crate::reply::ReplySender;
+use libc::{c_int, c_void, size_t};
+use std::{fs::File, io, os::unix::prelude::AsRawFd, sync::Arc};
+use log::{debug, trace};
+use std::os::fd::FromRawFd;
+use crate::mnt::Mount;
+
+/// The implementation of fuse fd clone. Taken from (Datenlord)[https://github.com/datenlord/datenlord/blob/master/src/async_fuse/fuse/session.rs#L73 under the MIT License.
+/// This module is just for avoiding the `missing_docs` of `ioctl_read` macro.
+#[allow(missing_docs)] // Raised by `ioctl_read!`
+#[allow(dead_code)]
+mod _fuse_fd_clone {
+    use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
+
+    use nix::fcntl::{self, FcntlArg, FdFlag, OFlag};
+    use nix::ioctl_read;
+    use nix::sys::stat::Mode;
+    ioctl_read!(fuse_fd_clone_impl, 229, 0, u32);
+
+    /// Clones a FUSE session fd into a FUSE worker fd.
+    ///
+    /// # Safety
+    /// Behavior is undefined if any of the following conditions are violated:
+    ///
+    /// - `session_fd` must be a valid file descriptor to an open FUSE device.
+    #[allow(clippy::unnecessary_safety_comment)]
+    pub unsafe fn fuse_fd_clone(session_fd: RawFd) -> nix::Result<RawFd> {
+        let devname = "/dev/fuse";
+        let cloned_fd = fcntl::open(devname, OFlag::O_RDWR | OFlag::O_CLOEXEC, Mode::empty())?;
+        // use `OwnedFd` here is just to release the fd when error occurs
+        // SAFETY: the `cloned_fd` is just opened
+        let cloned_fd = OwnedFd::from_raw_fd(cloned_fd);
+
+        fcntl::fcntl(cloned_fd.as_raw_fd(), FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC))?;
+
+        let mut result_fd: u32 = session_fd.try_into().unwrap();
+        // SAFETY: `cloned_fd` is ensured to be valid, and `&mut result_fd` is a valid
+        // pointer to a value on stack
+        fuse_fd_clone_impl(cloned_fd.as_raw_fd(), &mut result_fd)?;
+        Ok(cloned_fd.into_raw_fd()) // use `into_raw_fd` to transfer the
+                                    // ownership of the fd
+    }
+}
 
 /// A raw communication channel to the FUSE kernel driver
 #[derive(Debug)]
@@ -13,7 +51,33 @@ impl Channel {
     /// given path. The kernel driver will delegate filesystem operations of
     /// the given path to the channel.
     pub(crate) fn new(device: Arc<File>) -> Self {
+        trace!("established channel to kernel driver. device={:?}", device);
         Self(device)
+    }
+
+    /// Create a new communication channel to the kernel driver by calling ['_fuse_fd_clone::fuse_fd_clone']
+    /// with the Session FD. This will create a new communication channel to
+    /// the kernel driver attached to the parent session.
+    #[cfg(all(feature = "multithreading", feature = "libfuse3"))]
+    pub(crate) fn worker(mount: &Mount) -> (Self, c_int) {
+        let session_fd = mount.session_fd();
+
+        // SAFETY: `session_fd` is ensured to be valid as it is returned from the Mount
+        let fd = unsafe { _fuse_fd_clone::fuse_fd_clone(session_fd) };
+
+        let fd = match fd {
+            Ok(fd) => fd,
+            Err(err) => {
+                panic!("fuse: failed to clone device fd: {:?}", err);
+            }
+        };
+
+        debug!("established worker fd '{}' from session fd '{}'", fd, session_fd);
+
+        // SAFETY: `fd` is created above and is validated before this point
+        let device = unsafe { File::from_raw_fd(fd) };
+
+        (Self(Arc::new(device)), fd)
     }
 
     /// Receives data up to the capacity of the given buffer (can block).
@@ -28,6 +92,7 @@ impl Channel {
         if rc < 0 {
             Err(io::Error::last_os_error())
         } else {
+            trace!("received {} bytes", rc);
             Ok(rc as usize)
         }
     }
@@ -58,6 +123,7 @@ impl ReplySender for ChannelSender {
             Err(io::Error::last_os_error())
         } else {
             debug_assert_eq!(bufs.iter().map(|b| b.len()).sum::<usize>(), rc as usize);
+            trace!("sent {} bytes", rc);
             Ok(())
         }
     }

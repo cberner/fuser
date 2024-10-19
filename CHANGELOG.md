@@ -1,5 +1,11 @@
 # FUSE for Rust - Changelog
 
+## 0.15 - 2024-08-20
+* **Major** `Filesystem` is bound by `Clone` to enable multithreading
+* Add `multithreading` feature dependent on `libfuse3`
+* Add `spawn_mount2_threaded` method
+* `BackgroundSession::new` accepts a thread count. Will throw an error if the Multithreading feature is not enabled and thread count is greater than one
+
 ## 0.14.0 - 2023-11-04
 * Add support for poll
 * Add support for notifications

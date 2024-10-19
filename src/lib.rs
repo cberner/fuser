@@ -291,7 +291,7 @@ impl KernelConfig {
 /// implementations are provided here to get a mountable filesystem that does
 /// nothing.
 #[allow(clippy::too_many_arguments)]
-pub trait Filesystem {
+pub trait Filesystem: Clone {
     /// Initialize filesystem.
     /// Called before any other filesystem method.
     /// The kernel module connection can be configured using the KernelConfig object
@@ -1036,7 +1036,7 @@ pub fn spawn_mount<'a, FS: Filesystem + Send + 'static + 'a, P: AsRef<Path>>(
         .map(|x| Some(MountOption::from_str(x.to_str()?)))
         .collect();
     let options = options.ok_or(ErrorKind::InvalidData)?;
-    Session::new(filesystem, mountpoint.as_ref(), options.as_ref()).and_then(|se| se.spawn())
+    Session::new(filesystem, mountpoint.as_ref(), options.as_ref()).and_then(|se| se.spawn(1))
 }
 
 /// Mount the given filesystem to the given mountpoint. This function spawns
@@ -1049,8 +1049,22 @@ pub fn spawn_mount<'a, FS: Filesystem + Send + 'static + 'a, P: AsRef<Path>>(
 pub fn spawn_mount2<'a, FS: Filesystem + Send + 'static + 'a, P: AsRef<Path>>(
     filesystem: FS,
     mountpoint: P,
-    options: &[MountOption],
+    options: &[MountOption]
 ) -> io::Result<BackgroundSession> {
     check_option_conflicts(options)?;
-    Session::new(filesystem, mountpoint.as_ref(), options).and_then(|se| se.spawn())
+    Session::new(filesystem, mountpoint.as_ref(), options).and_then(|se| se.spawn(1))
+}
+
+/// Mount the given filesystem to the given mountpoint; spawning n number of worker threads. 
+/// There is an assumption that the [`Filesystem`] given is thread-safe, and has proper internal 
+/// synchronization to prevent deadlocks. 
+#[cfg(all(feature = "multithreading", feature = "libfuse3"))]
+pub fn spawn_mount2_threaded<'a, FS: Filesystem + Send + 'static + 'a, P: AsRef<Path>>(
+    filesystem: FS,
+    mountpoint: P,
+    options: &[MountOption],
+    threads: u8
+) -> io::Result<BackgroundSession> {
+    check_option_conflicts(options)?;
+    Session::new(filesystem, mountpoint.as_ref(), options).and_then(|se| se.spawn(threads))
 }

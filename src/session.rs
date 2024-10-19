@@ -5,15 +5,14 @@
 //! filesystem is mounted, the session loop receives, dispatches and replies to kernel requests
 //! for filesystem operations under its mount point.
 
-use libc::{EAGAIN, EINTR, ENODEV, ENOENT};
-use log::{info, warn};
+use libc::{c_int, EAGAIN, EINTR, ENODEV, ENOENT};
+use log::{debug, info, trace, warn};
 use nix::unistd::geteuid;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::{io, ops::DerefMut};
-
 use crate::ll::fuse_abi as abi;
 use crate::request::Request;
 use crate::Filesystem;
@@ -21,6 +20,8 @@ use crate::MountOption;
 use crate::{channel::Channel, mnt::Mount};
 #[cfg(feature = "abi-7-11")]
 use crate::{channel::ChannelSender, notify::Notifier};
+use std::fs::File;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// The max size of write requests from the kernel. The absolute minimum is 4k,
 /// FUSE recommends at least 128k, max 16M. The FUSE default is 16M on macOS
@@ -31,7 +32,7 @@ pub const MAX_WRITE_SIZE: usize = 16 * 1024 * 1024;
 /// up to MAX_WRITE_SIZE bytes in a write request, we use that value plus some extra space.
 const BUFFER_SIZE: usize = MAX_WRITE_SIZE + 4096;
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum SessionACL {
     All,
     RootAndOwner,
@@ -40,6 +41,7 @@ pub(crate) enum SessionACL {
 
 /// The session data structure
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct Session<FS: Filesystem> {
     /// Filesystem operation implementations
     pub(crate) filesystem: FS,
@@ -49,6 +51,7 @@ pub struct Session<FS: Filesystem> {
     mount: Arc<Mutex<Option<Mount>>>,
     /// Mount point
     mountpoint: PathBuf,
+    mount_file: Arc<File>,
     /// Whether to restrict access to owner, root + owner, or unrestricted
     /// Used to implement allow_root and auto_unmount
     pub(crate) allowed: SessionACL,
@@ -59,9 +62,12 @@ pub struct Session<FS: Filesystem> {
     /// FUSE protocol minor version
     pub(crate) proto_minor: u32,
     /// True if the filesystem is initialized (init operation done)
-    pub(crate) initialized: bool,
+    pub(crate) initialized: Arc<AtomicBool>,
     /// True if the filesystem was destroyed (destroy operation done)
-    pub(crate) destroyed: bool,
+    pub(crate) destroyed: Arc<AtomicBool>,
+
+    /// File Descriptor number 
+    fd: c_int
 }
 
 impl<FS: Filesystem> Session<FS> {
@@ -72,7 +78,6 @@ impl<FS: Filesystem> Session<FS> {
         options: &[MountOption],
     ) -> io::Result<Session<FS>> {
         let mountpoint = mountpoint.as_ref();
-        info!("Mounting {}", mountpoint.display());
         // If AutoUnmount is requested, but not AllowRoot or AllowOther we enforce the ACL
         // ourself and implicitly set AllowOther because fusermount needs allow_root or allow_other
         // to handle the auto_unmount option
@@ -88,7 +93,7 @@ impl<FS: Filesystem> Session<FS> {
             Mount::new(mountpoint, options)?
         };
 
-        let ch = Channel::new(file);
+        let ch = Channel::new(file.clone());
         let allowed = if options.contains(&MountOption::AllowRoot) {
             SessionACL::RootAndOwner
         } else if options.contains(&MountOption::AllowOther) {
@@ -97,17 +102,53 @@ impl<FS: Filesystem> Session<FS> {
             SessionACL::Owner
         };
 
+        #[cfg(not(all(feature = "multithreading", feature = "libfuse3")))]
+        let fd = 0;
+
+        #[cfg(all(feature = "multithreading", feature = "libfuse3"))]
+        let fd = mount.session_fd();
+
         Ok(Session {
             filesystem,
             ch,
+            fd,
             mount: Arc::new(Mutex::new(Some(mount))),
             mountpoint: mountpoint.to_owned(),
             allowed,
+            mount_file: file,
             session_owner: geteuid().as_raw(),
             proto_major: 0,
             proto_minor: 0,
-            initialized: false,
-            destroyed: false,
+            initialized: Arc::new(AtomicBool::new(false)),
+            destroyed: Arc::new(AtomicBool::new(false)),
+        })
+    }
+
+    /// Create a new Session for use in Worker threads. Requires an already existing Session in order
+    /// to create the Worker Sessions.
+    #[cfg(all(feature = "multithreading", feature = "libfuse3"))]
+    pub fn worker(&self) -> io::Result<Session<FS>> {
+        // lock the mount while we clone the fd to build a worker
+        let mount_lock = self.mount.lock().unwrap();
+        let mount = mount_lock.as_ref().unwrap();
+
+        let (ch, fd) = Channel::worker(mount);
+
+        drop(mount_lock);
+
+        Ok(Session {
+            fd,
+            ch,
+            filesystem: self.filesystem.clone(),
+            mount: self.mount.clone(),
+            mountpoint: self.mountpoint.clone(),
+            mount_file: self.mount_file.clone(),
+            allowed: self.allowed.clone(),
+            session_owner: self.session_owner,
+            proto_major: self.proto_major,
+            proto_minor: self.proto_minor,
+            initialized: self.initialized.clone(),
+            destroyed: self.destroyed.clone(),
         })
     }
 
@@ -134,12 +175,15 @@ impl<FS: Filesystem> Session<FS> {
             match self.ch.receive(buf) {
                 Ok(size) => match Request::new(self.ch.sender(), &buf[..size]) {
                     // Dispatch request
-                    Some(req) => req.dispatch(self),
+                    Some(req) => {
+                        trace!("dispatch from fd {}", self.fd);
+                        req.dispatch(self)
+                    },
                     // Quit loop on illegal request
                     None => break,
                 },
                 Err(err) => match err.raw_os_error() {
-                    // Operation interrupted. Accordingly to FUSE, this is safe to retry
+                    // Operation interrupted. FUSE docs say this is safe to retry
                     Some(ENOENT) => continue,
                     // Interrupted system call, retry
                     Some(EINTR) => continue,
@@ -199,16 +243,16 @@ fn aligned_sub_buf(buf: &mut [u8], alignment: usize) -> &mut [u8] {
 
 impl<FS: 'static + Filesystem + Send> Session<FS> {
     /// Run the session loop in a background thread
-    pub fn spawn(self) -> io::Result<BackgroundSession> {
-        BackgroundSession::new(self)
+    pub fn spawn(self, threads: u8) -> io::Result<BackgroundSession> {
+        BackgroundSession::new(self, threads)
     }
 }
 
 impl<FS: Filesystem> Drop for Session<FS> {
     fn drop(&mut self) {
-        if !self.destroyed {
+        if !self.destroyed.load(Ordering::Relaxed) {
             self.filesystem.destroy();
-            self.destroyed = true;
+            self.destroyed.store(true, Ordering::Relaxed);
         }
         info!("Unmounted {}", self.mountpoint().display());
     }
@@ -231,17 +275,36 @@ impl BackgroundSession {
     /// Create a new background session for the given session by running its
     /// session loop in a background thread. If the returned handle is dropped,
     /// the filesystem is unmounted and the given session ends.
-    pub fn new<FS: Filesystem + Send + 'static>(se: Session<FS>) -> io::Result<BackgroundSession> {
+    pub fn new<FS: Filesystem + Send + 'static>(
+        se: Session<FS>,
+        #[allow(unused_variables)]
+        threads: u8,
+    ) -> io::Result<BackgroundSession> {
         let mountpoint = se.mountpoint().to_path_buf();
         #[cfg(feature = "abi-7-11")]
         let sender = se.ch.sender();
+
+        // Only spawn workers if 2 or more threads are requested.
+        #[cfg(all(feature = "multithreading", feature = "libfuse3"))]
+        if threads >= 2 {
+            for _i in 0..(threads - 1) {
+                let mut wrk = se.worker()?;
+                let _ = thread::spawn(move || {
+                    trace!("thread {:?} spawned worker on fd {}", thread::current().id(), wrk.fd);
+                    wrk.run()
+                });
+            }
+        }
+
         // Take the fuse_session, so that we can unmount it
         let mount = std::mem::take(&mut *se.mount.lock().unwrap());
         let mount = mount.ok_or_else(|| io::Error::from_raw_os_error(libc::ENODEV))?;
+
         let guard = thread::spawn(move || {
             let mut se = se;
             se.run()
         });
+
         Ok(BackgroundSession {
             mountpoint,
             guard,

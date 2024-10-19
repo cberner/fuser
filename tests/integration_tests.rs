@@ -8,6 +8,7 @@ use tempfile::TempDir;
 #[cfg(target_os = "linux")]
 fn unmount_no_send() {
     // Rc to make this !Send
+    #[derive(Clone)]
     struct NoSendFS(Rc<()>);
 
     impl Filesystem for NoSendFS {}
