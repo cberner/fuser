@@ -585,9 +585,9 @@ pub struct fuse_mkdir_in {
 #[derive(Debug, FromBytes, FromZeroes)]
 pub struct fuse_rename_in {
     pub newdir: u64,
-    #[cfg(target_os = "macos")]
+    #[cfg(feature = "macfuse-4-compat")]
     pub flags: u32,
-    #[cfg(target_os = "macos")]
+    #[cfg(feature = "macfuse-4-compat")]
     pub padding: u32,
 }
 
