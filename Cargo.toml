@@ -10,7 +10,12 @@ edition = "2021"
 readme = "README.md"
 authors = ["Christopher Berner <christopherberner@gmail.com>"]
 keywords = ["fuse", "filesystem", "system", "bindings"]
-categories = ["external-ffi-bindings", "api-bindings", "filesystem", "os::unix-apis"]
+categories = [
+    "external-ffi-bindings",
+    "api-bindings",
+    "filesystem",
+    "os::unix-apis",
+]
 build = "build.rs"
 
 [dependencies]
@@ -22,6 +27,7 @@ serde = { version = "1.0.102", features = ["std", "derive"], optional = true }
 smallvec = "1.6.1"
 zerocopy = { version = "0.7", features = ["derive"] }
 nix = { version = "0.28.0", features = ["fs", "user"] }
+clap = { version = "4.4", optional = true }
 
 [dev-dependencies]
 env_logger = "0.11.3"
