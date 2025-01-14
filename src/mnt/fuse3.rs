@@ -10,7 +10,10 @@ use std::{
     os::unix::{ffi::OsStrExt, io::FromRawFd},
     path::Path,
     ptr,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
 };
 
 /// Ensures that an os error is never 0/Success
@@ -25,16 +28,24 @@ fn ensure_last_os_error() -> io::Error {
 #[derive(Debug)]
 pub struct Mount {
     fuse_session: *mut c_void,
+    destroyed: Arc<AtomicBool>,
 }
 impl Mount {
-    pub fn new(mnt: &Path, options: &[MountOption]) -> io::Result<(Arc<File>, Mount)> {
+    pub fn new(
+        mnt: &Path,
+        options: &[MountOption],
+        destroyed: Arc<AtomicBool>,
+    ) -> io::Result<(Arc<File>, Mount)> {
         let mnt = CString::new(mnt.as_os_str().as_bytes()).unwrap();
         with_fuse_args(options, |args| {
             let fuse_session = unsafe { fuse_session_new(args, ptr::null(), 0, ptr::null_mut()) };
             if fuse_session.is_null() {
                 return Err(io::Error::last_os_error());
             }
-            let mount = Mount { fuse_session };
+            let mount = Mount {
+                fuse_session,
+                destroyed,
+            };
             let result = unsafe { fuse_session_mount(mount.fuse_session, mnt.as_ptr()) };
             if result != 0 {
                 return Err(ensure_last_os_error());
@@ -53,9 +64,11 @@ impl Mount {
 }
 impl Drop for Mount {
     fn drop(&mut self) {
-        unsafe {
-            fuse_session_unmount(self.fuse_session);
-            fuse_session_destroy(self.fuse_session);
+        if !self.destroyed.load(Ordering::Relaxed) {
+            unsafe {
+                fuse_session_unmount(self.fuse_session);
+                fuse_session_destroy(self.fuse_session);
+            }
         }
     }
 }

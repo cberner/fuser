@@ -11,6 +11,7 @@ use std::convert::TryFrom;
 #[cfg(feature = "abi-7-28")]
 use std::convert::TryInto;
 use std::path::Path;
+use std::sync::atomic::Ordering;
 
 use crate::channel::ChannelSender;
 use crate::ll::Request as _;
@@ -181,11 +182,11 @@ impl<'a> Request<'a> {
             // Filesystem destroyed
             ll::Operation::Destroy(x) => {
                 se.filesystem.destroy();
-                se.destroyed = true;
+                se.destroyed.store(true, Ordering::Relaxed);
                 return Ok(Some(x.reply()));
             }
             // Any operation is invalid after destroy
-            _ if se.destroyed => {
+            _ if se.destroyed() => {
                 warn!("Ignoring FUSE operation after destroy: {}", self.request);
                 return Err(Errno::EIO);
             }

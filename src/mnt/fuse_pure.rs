@@ -20,6 +20,7 @@ use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::{mem, ptr};
 
@@ -32,9 +33,14 @@ pub struct Mount {
     mountpoint: CString,
     auto_unmount_socket: Option<UnixStream>,
     fuse_device: Arc<File>,
+    destroyed: Arc<AtomicBool>,
 }
 impl Mount {
-    pub fn new(mountpoint: &Path, options: &[MountOption]) -> io::Result<(Arc<File>, Mount)> {
+    pub fn new(
+        mountpoint: &Path,
+        options: &[MountOption],
+        destroyed: Arc<AtomicBool>,
+    ) -> io::Result<(Arc<File>, Mount)> {
         let mountpoint = mountpoint.canonicalize()?;
         let (file, sock) = fuse_mount_pure(mountpoint.as_os_str(), options)?;
         let file = Arc::new(file);
@@ -44,6 +50,7 @@ impl Mount {
                 mountpoint: CString::new(mountpoint.as_os_str().as_bytes())?,
                 auto_unmount_socket: sock,
                 fuse_device: file,
+                destroyed,
             },
         ))
     }
@@ -52,24 +59,26 @@ impl Mount {
 impl Drop for Mount {
     fn drop(&mut self) {
         use std::io::ErrorKind::PermissionDenied;
-        if !is_mounted(&self.fuse_device) {
-            // If the filesystem has already been unmounted, avoid unmounting it again.
-            // Unmounting it a second time could cause a race with a newly mounted filesystem
-            // living at the same mountpoint
-            return;
-        }
-        if let Some(sock) = mem::take(&mut self.auto_unmount_socket) {
-            drop(sock);
-            // fusermount in auto-unmount mode, no more work to do.
-            return;
-        }
-        if let Err(err) = super::libc_umount(&self.mountpoint) {
-            if err.kind() == PermissionDenied {
-                // Linux always returns EPERM for non-root users.  We have to let the
-                // library go through the setuid-root "fusermount -u" to unmount.
-                fuse_unmount_pure(&self.mountpoint)
-            } else {
-                error!("Unmount failed: {}", err)
+        if !self.destroyed.load(Ordering::Relaxed) {
+            if !is_mounted(&self.fuse_device) {
+                // If the filesystem has already been unmounted, avoid unmounting it again.
+                // Unmounting it a second time could cause a race with a newly mounted filesystem
+                // living at the same mountpoint
+                return;
+            }
+            if let Some(sock) = mem::take(&mut self.auto_unmount_socket) {
+                drop(sock);
+                // fusermount in auto-unmount mode, no more work to do.
+                return;
+            }
+            if let Err(err) = super::libc_umount(&self.mountpoint) {
+                if err.kind() == PermissionDenied {
+                    // Linux always returns EPERM for non-root users.  We have to let the
+                    // library go through the setuid-root "fusermount -u" to unmount.
+                    fuse_unmount_pure(&self.mountpoint)
+                } else {
+                    error!("Unmount failed: {}", err)
+                }
             }
         }
     }
