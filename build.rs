@@ -20,7 +20,6 @@ fn main() {
                 .is_ok()
             {
                 println!("cargo:rustc-cfg=fuser_mount_impl=\"libfuse2\"");
-                println!("cargo:rustc-cfg=feature=\"macfuse-4-compat\"");
             } else {
                 pkg_config::Config::new()
                     .atleast_version("2.6.0")
