@@ -1,10 +1,9 @@
 use clap::{crate_version, Arg, ArgAction, Command};
 use fuser::{
-    FileAttr, FileType, Filesystem, MountOption, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry,
-    Request,
+    Filesystem, MountOption, Attr, DirEntry,
+    Entry, Errno, RequestMeta, FileType, FileAttr
 };
-use libc::ENOENT;
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::time::{Duration, UNIX_EPOCH};
 
 const TTL: Duration = Duration::from_secs(1); // 1 second
@@ -50,66 +49,68 @@ const HELLO_TXT_ATTR: FileAttr = FileAttr {
 struct HelloFS;
 
 impl Filesystem for HelloFS {
-    fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
-        if parent == 1 && name.to_str() == Some("hello.txt") {
-            reply.entry(&TTL, &HELLO_TXT_ATTR, 0);
+    fn lookup(&mut self, _req: RequestMeta, parent: u64, name: OsString) -> Result<Entry, Errno> {
+        if parent == 1 && name == OsStr::new("hello.txt") {
+            Ok(Entry{attr: HELLO_TXT_ATTR, ttl: TTL, generation: 0})
         } else {
-            reply.error(ENOENT);
+            Err(Errno::ENOENT)
         }
     }
 
-    fn getattr(&mut self, _req: &Request, ino: u64, _fh: Option<u64>, reply: ReplyAttr) {
+    fn getattr(
+        &mut self,
+        _req: RequestMeta,
+        ino: u64,
+        _fh: Option<u64>,
+    ) -> Result<Attr, Errno> {
         match ino {
-            1 => reply.attr(&TTL, &HELLO_DIR_ATTR),
-            2 => reply.attr(&TTL, &HELLO_TXT_ATTR),
-            _ => reply.error(ENOENT),
+            1 => Ok(Attr{attr: HELLO_DIR_ATTR, ttl: TTL,}),
+            2 => Ok(Attr{attr: HELLO_TXT_ATTR, ttl: TTL,}),
+            _ => Err(Errno::ENOENT),
         }
     }
 
     fn read(
         &mut self,
-        _req: &Request,
+        _req: RequestMeta,
         ino: u64,
         _fh: u64,
         offset: i64,
         _size: u32,
         _flags: i32,
         _lock: Option<u64>,
-        reply: ReplyData,
-    ) {
+    ) -> Result<Vec<u8>, Errno> {
         if ino == 2 {
-            reply.data(&HELLO_TXT_CONTENT.as_bytes()[offset as usize..]);
+            Ok(HELLO_TXT_CONTENT.as_bytes()[offset as usize..].to_vec())
         } else {
-            reply.error(ENOENT);
+            Err(Errno::ENOENT)
         }
     }
 
     fn readdir(
         &mut self,
-        _req: &Request,
+        _req: RequestMeta,
         ino: u64,
         _fh: u64,
         offset: i64,
-        mut reply: ReplyDirectory,
-    ) {
+        _max_bytes: u32,
+    ) -> Result<Vec<DirEntry>, Errno> {
         if ino != 1 {
-            reply.error(ENOENT);
-            return;
+            return Err(Errno::ENOENT);
         }
 
         let entries = vec![
-            (1, FileType::Directory, "."),
-            (1, FileType::Directory, ".."),
-            (2, FileType::RegularFile, "hello.txt"),
+            DirEntry { ino: 1, offset: 1, kind: FileType::Directory, name: OsString::from(".") },
+            DirEntry { ino: 1, offset: 2, kind: FileType::Directory, name: OsString::from("..") },
+            DirEntry { ino: 2, offset: 3, kind: FileType::RegularFile, name: OsString::from("hello.txt") },
         ];
 
-        for (i, entry) in entries.into_iter().enumerate().skip(offset as usize) {
-            // i + 1 means the index of the next entry
-            if reply.add(entry.0, (i + 1) as i64, entry.1, entry.2) {
-                break;
-            }
+        let mut result = Vec::new();
+        for entry in entries.into_iter().skip(offset as usize) {
+            // example loop where additional logic could be inserted
+            result.push(entry);
         }
-        reply.ok();
+        Ok(result)
     }
 }
 

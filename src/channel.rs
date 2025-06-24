@@ -16,7 +16,7 @@ use crate::reply::ReplySender;
 
 /// A raw communication channel to the FUSE kernel driver
 #[derive(Debug)]
-pub struct Channel(Arc<File>);
+pub(crate) struct Channel(Arc<File>);
 
 impl AsFd for Channel {
     fn as_fd(&self) -> BorrowedFd<'_> {
@@ -33,7 +33,7 @@ impl Channel {
     }
 
     /// Receives data up to the capacity of the given buffer (can block).
-    pub fn receive(&self, buffer: &mut [u8]) -> io::Result<usize> {
+    pub(crate) fn receive(&self, buffer: &mut [u8]) -> io::Result<usize> {
         let rc = unsafe {
             libc::read(
                 self.0.as_raw_fd(),
@@ -51,7 +51,7 @@ impl Channel {
     /// Returns a sender object for this channel. The sender object can be
     /// used to send to the channel. Multiple sender objects can be used
     /// and they can safely be sent to other threads.
-    pub fn sender(&self) -> ChannelSender {
+    pub(crate) fn sender(&self) -> ChannelSender {
         // Since write/writev syscalls are threadsafe, we can simply create
         // a sender by using the same file and use it in other threads.
         ChannelSender(self.0.clone())
@@ -59,7 +59,7 @@ impl Channel {
 }
 
 #[derive(Clone, Debug)]
-pub struct ChannelSender(Arc<File>);
+pub(crate) struct ChannelSender(Arc<File>);
 
 impl ReplySender for ChannelSender {
     fn send(&self, bufs: &[io::IoSlice<'_>]) -> io::Result<()> {

@@ -4,12 +4,10 @@
 
 use clap::{crate_version, Arg, ArgAction, Command};
 use fuser::{
-    FileAttr, FileType, Filesystem, MountOption, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry,
-    Request,
+    FileAttr, FileType, Filesystem, MountOption, RequestMeta, Entry, Attr, Ioctl, Errno, DirEntry,
 };
-use libc::{EINVAL, ENOENT};
 use log::debug;
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::time::{Duration, UNIX_EPOCH};
 
 const TTL: Duration = Duration::from_secs(1); // 1 second
@@ -70,82 +68,82 @@ impl FiocFS {
 }
 
 impl Filesystem for FiocFS {
-    fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
-        if parent == 1 && name.to_str() == Some("fioc") {
-            reply.entry(&TTL, &self.fioc_file_attr, 0);
+    fn lookup(&mut self, _req: RequestMeta, parent: u64, name: OsString) -> Result<Entry, Errno> {
+        if parent == 1 && name == OsStr::new("fioc") {
+            Ok(Entry {
+                attr: self.fioc_file_attr,
+                ttl: TTL,
+                generation: 0,
+            })
         } else {
-            reply.error(ENOENT);
+            Err(Errno::ENOENT)
         }
     }
 
-    fn getattr(&mut self, _req: &Request, ino: u64, _fh: Option<u64>, reply: ReplyAttr) {
+    fn getattr(&mut self, _req: RequestMeta, ino: u64, _fh: Option<u64>) -> Result<Attr, Errno> {
         match ino {
-            1 => reply.attr(&TTL, &self.root_attr),
-            2 => reply.attr(&TTL, &self.fioc_file_attr),
-            _ => reply.error(ENOENT),
+            1 => Ok(Attr { attr: self.root_attr, ttl: TTL,}),
+            2 => Ok(Attr { attr: self.fioc_file_attr, ttl: TTL,}),
+            _ => Err(Errno::ENOENT),
         }
     }
 
     fn read(
         &mut self,
-        _req: &Request,
+        _req: RequestMeta,
         ino: u64,
         _fh: u64,
         offset: i64,
         _size: u32,
         _flags: i32,
         _lock: Option<u64>,
-        reply: ReplyData,
-    ) {
+    ) -> Result<Vec<u8>, Errno> {
         if ino == 2 {
-            reply.data(&self.content[offset as usize..])
+            Ok(self.content[offset as usize..].to_vec())
         } else {
-            reply.error(ENOENT);
+            Err(Errno::ENOENT)
         }
     }
 
     fn readdir(
         &mut self,
-        _req: &Request,
+        _req: RequestMeta,
         ino: u64,
         _fh: u64,
         offset: i64,
-        mut reply: ReplyDirectory,
-    ) {
+        _max_bytes: u32,
+    ) -> Result<Vec<DirEntry>, Errno> {
         if ino != 1 {
-            reply.error(ENOENT);
-            return;
+            return Err(Errno::ENOENT);
         }
 
         let entries = vec![
-            (1, FileType::Directory, "."),
-            (1, FileType::Directory, ".."),
-            (2, FileType::RegularFile, "fioc"),
+            DirEntry { ino: 1, offset: 1, kind: FileType::Directory, name: OsString::from(".") },
+            DirEntry { ino: 1, offset: 2, kind: FileType::Directory, name: OsString::from("..") },
+            DirEntry { ino: 2, offset: 3, kind: FileType::RegularFile, name: OsString::from("fioc") },
         ];
 
-        for (i, entry) in entries.into_iter().enumerate().skip(offset as usize) {
-            // i + 1 means the index of the next entry
-            if reply.add(entry.0, (i + 1) as i64, entry.1, entry.2) {
-                break;
-            }
+        let mut result = Vec::new();
+        for entry in entries.into_iter().skip(offset as usize) {
+            // example loop where additional logic could be inserted
+            result.push(entry);
         }
-        reply.ok();
+        Ok(result)
     }
 
+    #[cfg(feature = "abi-7-11")]
     fn ioctl(
         &mut self,
-        _req: &Request<'_>,
+        _req: RequestMeta,
         ino: u64,
         _fh: u64,
         _flags: u32,
         cmd: u32,
-        in_data: &[u8],
+        in_data: Vec<u8>,
         _out_size: u32,
-        reply: fuser::ReplyIoctl,
-    ) {
+    ) -> Result<Ioctl, Errno> {
         if ino != 2 {
-            reply.error(EINVAL);
-            return;
+            return Err(Errno::EINVAL);
         }
 
         const FIOC_GET_SIZE: u64 = nix::request_code_read!('E', 0, std::mem::size_of::<usize>());
@@ -154,16 +152,22 @@ impl Filesystem for FiocFS {
         match cmd.into() {
             FIOC_GET_SIZE => {
                 let size_bytes = self.content.len().to_ne_bytes();
-                reply.ioctl(0, &size_bytes);
+                Ok(Ioctl {
+                    result: 0,
+                    data: size_bytes.to_vec(),
+                })
             }
             FIOC_SET_SIZE => {
-                let new_size = usize::from_ne_bytes(in_data.try_into().unwrap());
+                let new_size = usize::from_ne_bytes(in_data.as_slice().try_into().unwrap());
                 self.content = vec![0_u8; new_size];
-                reply.ioctl(0, &[]);
+                Ok(Ioctl {
+                    result: 0,
+                    data: vec![],
+                })
             }
             _ => {
                 debug!("unknown ioctl: {}", cmd);
-                reply.error(EINVAL);
+                Err(Errno::EINVAL)
             }
         }
     }
