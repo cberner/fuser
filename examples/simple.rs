@@ -2069,3 +2069,120 @@ fn main() {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use fuser::{Filesystem, RequestMeta, Errno, TimeOrNow};
+    use std::ffi::OsString;
+    use std::path::PathBuf;
+    use std::collections::BTreeMap;
+    use std::fs::File;
+    use std::io::Write;
+
+    fn dummy_meta() -> RequestMeta {
+        RequestMeta { unique: 0, uid: 1000, gid: 1000, pid: 2000 }
+    }
+
+    // Mock setup for SimpleFS to avoid real filesystem operations
+    fn setup_test_fs(name: &str) -> SimpleFS {
+        let dir_path = format!("/tmp/tests/{}", name);
+        let fs = SimpleFS::new(dir_path.clone(), false, false, true);
+        // Ensure the directory structure is created
+        std::fs::create_dir_all(format!("{}/inodes", dir_path)).unwrap();
+        std::fs::create_dir_all(format!("{}/contents", dir_path)).unwrap();
+        // Initialize root inode
+        let root_attrs = InodeAttributes {
+            inode: FUSE_ROOT_ID,
+            open_file_handles: 0,
+            size: 0,
+            last_accessed: time_now(),
+            last_modified: time_now(),
+            last_metadata_changed: time_now(),
+            kind: FileKind::Directory,
+            mode: 0o755,
+            hardlinks: 2,
+            uid: 1000,
+            gid: 1000,
+            xattrs: Default::default(),
+        };
+        fs.write_inode(&root_attrs);
+        let mut root_entries = BTreeMap::new();
+        root_entries.insert(b".".to_vec(), (FUSE_ROOT_ID, FileKind::Directory));
+        root_entries.insert(b"..".to_vec(), (FUSE_ROOT_ID, FileKind::Directory));
+        fs.write_directory_content(FUSE_ROOT_ID, root_entries);
+        // Create a test file inode
+        let file_attrs = InodeAttributes {
+            inode: 2,
+            open_file_handles: 0,
+            size: 0,
+            last_accessed: time_now(),
+            last_modified: time_now(),
+            last_metadata_changed: time_now(),
+            kind: FileKind::File,
+            mode: 0o644,
+            hardlinks: 1,
+            uid: 1000,
+            gid: 1000,
+            xattrs: Default::default(),
+        };
+        fs.write_inode(&file_attrs);
+        File::create(fs.content_path(2)).unwrap();
+        let mut root_entries = fs.get_directory_content(FUSE_ROOT_ID).unwrap();
+        root_entries.insert(b"testfile.txt".to_vec(), (2, FileKind::File));
+        fs.write_directory_content(FUSE_ROOT_ID, root_entries);
+        fs
+    }
+
+    #[test]
+    fn test_setattr_mode_change_success() {
+        let mut fs = setup_test_fs("setattr_success");
+        let req = dummy_meta();
+        let new_mode = 0o664;
+        let result = fs.setattr(req, 2, Some(new_mode), None, None, None, None, None, None, None, None, None, None, None);
+        assert!(result.is_ok(), "Setattr should succeed for mode change as owner");
+        if let Ok(attr) = result {
+            assert_eq!(attr.attr.perm, new_mode as u16, "Mode should be updated to 0o664");
+        }
+    }
+
+    #[test]
+    fn test_setattr_mode_change_fail_permission() {
+        let mut fs = setup_test_fs("setattr_fail");
+        let mut req = dummy_meta();
+        req.uid = 2000; // Different UID to simulate non-owner
+        let new_mode = 0o664;
+        let result = fs.setattr(req, 2, Some(new_mode), None, None, None, None, None, None, None, None, None, None, None);
+        assert!(result.is_err(), "Setattr should fail for mode change as non-owner");
+        if let Err(e) = result {
+            assert_eq!(e, Errno::EPERM, "Should return EPERM for permission denied");
+        }
+    }
+
+    #[test]
+    fn test_symlink_readlink_success() {
+        let mut fs = setup_test_fs("symlink_success");
+        let req = dummy_meta();
+        let target = PathBuf::from("test_target.txt");
+        let symlink_result = fs.symlink(req, FUSE_ROOT_ID, OsString::from("testlink"), target.clone());
+        assert!(symlink_result.is_ok(), "Symlink creation should succeed");
+        if let Ok(entry) = symlink_result {
+            let readlink_result = fs.readlink(req, entry.attr.ino);
+            assert!(readlink_result.is_ok(), "Readlink should succeed");
+            if let Ok(target_data) = readlink_result {
+                assert_eq!(target_data, target.as_os_str().as_bytes(), "Readlink should return the correct target");
+            }
+        }
+    }
+
+    #[test]
+    fn test_readlink_fail_invalid_inode() {
+        let mut fs = setup_test_fs("readlink_fail");
+        let req = dummy_meta();
+        let result = fs.readlink(req, 9999);
+        assert!(result.is_err(), "Readlink should fail for invalid inode");
+        if let Err(e) = result {
+            assert_eq!(e, Errno::ENOENT, "Should return ENOENT for non-existent inode");
+        }
+    }
+}

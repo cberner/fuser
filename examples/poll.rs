@@ -23,7 +23,7 @@ use std::{
 
 use fuser::{
     consts::{FOPEN_DIRECT_IO, FOPEN_NONSEEKABLE, FUSE_POLL_SCHEDULE_NOTIFY},
-    FileAttr, FileType, MountOption, PollHandle, RequestMeta, Entry, Attr, DirEntry, Open, Errno, FUSE_ROOT_ID,
+    FileAttr, FileType, MountOption, RequestMeta, Entry, Attr, DirEntry, Open, Errno, FUSE_ROOT_ID,
 };
 
 const NUMFILES: u8 = 16;
@@ -248,7 +248,7 @@ impl fuser::Filesystem for FSelFS {
         _req: RequestMeta,
         _ino: u64,
         fh: u64,
-        ph: PollHandle,
+        ph: u64,
         _events: u32,
         flags: u32,
     ) -> Result<u32, Errno> {
@@ -265,7 +265,7 @@ impl fuser::Filesystem for FSelFS {
 
             if flags & FUSE_POLL_SCHEDULE_NOTIFY != 0 {
                 d.notify_mask |= 1 << idx;
-                d.poll_handles[idx as usize] = ph.into();
+                d.poll_handles[idx as usize] = ph;
             }
 
             let nbytes = d.bytecnt[idx as usize];
@@ -334,4 +334,73 @@ fn main() {
     let bg = session.spawn().unwrap();
 
     producer(&data, &bg.notifier());
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use fuser::{Filesystem, RequestMeta, Errno};
+    use std::sync::{Arc, Mutex};
+
+    fn setup_test_fs() -> FSelFS {
+        let data = Arc::new(Mutex::new(FSelData {
+            bytecnt: [0; NUMFILES as usize],
+            open_mask: 0,
+            notify_mask: 0,
+            poll_handles: [0; NUMFILES as usize],
+        }));
+        FSelFS { data }
+    }
+
+    #[test]
+    fn test_poll_data_available() {
+        let mut fs = setup_test_fs();
+        let req = RequestMeta { unique: 0, uid: 0, gid: 0, pid: 0 };
+        let idx = 0;
+        let fh = idx as u64;
+        let ph = 1;
+        {
+            let mut data = fs.get_data();
+            data.bytecnt[idx as usize] = 5; // Simulate data available
+        }
+        let result = fs.poll(req, FSelData::idx_to_ino(idx), fh, ph, libc::POLLIN as u32, FUSE_POLL_SCHEDULE_NOTIFY);
+        assert!(result.is_ok(), "Poll should succeed when data is available");
+        if let Ok(revents) = result {
+            assert_eq!(revents, libc::POLLIN as u32, "Should return POLLIN when data is available");
+        }
+        let data = fs.get_data();
+        assert_eq!(data.notify_mask & (1 << idx), 1 << idx, "Notify mask should be set for this index");
+        assert_eq!(data.poll_handles[idx as usize], 1, "Poll handle should be stored");
+    }
+
+    #[test]
+    fn test_poll_no_data() {
+        let mut fs = setup_test_fs();
+        let req = RequestMeta { unique: 0, uid: 0, gid: 0, pid: 0 };
+        let idx = 0;
+        let fh = idx as u64;
+        let ph = 1;
+        {
+            let mut data = fs.get_data();
+            data.bytecnt[idx as usize] = 0; // No data available
+        }
+        let result = fs.poll(req, FSelData::idx_to_ino(idx), fh, ph, libc::POLLIN as u32, FUSE_POLL_SCHEDULE_NOTIFY);
+        assert!(result.is_ok(), "Poll should succeed even when no data is available");
+        if let Ok(revents) = result {
+            assert_eq!(revents, 0, "Should return 0 when no data is available");
+        }
+    }
+
+    #[test]
+    fn test_poll_invalid_handle() {
+        let mut fs = setup_test_fs();
+        let req = RequestMeta { unique: 0, uid: 0, gid: 0, pid: 0 };
+        let invalid_idx = NUMFILES as u64;
+        let ph = 1;
+        let result = fs.poll(req, FSelData::idx_to_ino(0), invalid_idx, ph, libc::POLLIN as u32, FUSE_POLL_SCHEDULE_NOTIFY);
+        assert!(result.is_err(), "Poll should fail for invalid file handle");
+        if let Err(e) = result {
+            assert_eq!(e, Errno::EBADF, "Should return EBADF for invalid handle");
+        }
+    }
 }

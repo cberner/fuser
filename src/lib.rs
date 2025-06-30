@@ -961,7 +961,7 @@ pub trait Filesystem {
         req: RequestMeta,
         ino: u64,
         fh: u64,
-        ph: PollHandle,
+        ph: u64,
         events: u32,
         flags: u32,
     ) -> Result<u32, Errno> {

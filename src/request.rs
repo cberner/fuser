@@ -777,7 +777,7 @@ impl<'a> Request<'a> {
                     self.meta,
                     self.request.nodeid().into(),
                     x.file_handle().into(),
-                    ph,
+                    ph.into(),
                     x.events(),
                     x.flags()
                 );
@@ -789,6 +789,9 @@ impl<'a> Request<'a> {
                         self.replyhandler.error(err)
                     }
                 }
+                // TODO: register the poll handler
+                // TODO: receive poll data from the application
+                // TODO: use the poll handler to send the data
             }
             #[cfg(feature = "abi-7-15")]
             ll::Operation::NotifyReply(_) => {

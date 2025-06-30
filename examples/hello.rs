@@ -148,3 +148,65 @@ fn main() {
     }
     fuser::mount2(HelloFS, mountpoint, &options).unwrap();
 }
+
+#[cfg(test)]
+mod test {
+    use fuser::{Filesystem, RequestMeta, Errno, FileType};
+    use std::ffi::OsString;
+
+    fn dummy_meta() -> RequestMeta {
+        RequestMeta { unique: 0, uid: 1000, gid: 1000, pid: 2000 }
+    }
+
+    #[test]
+    fn test_lookup_hello_txt() {
+        let mut hellofs = super::HelloFS {};
+        let req = dummy_meta();
+        let result = hellofs.lookup(req, 1, OsString::from("hello.txt"));
+        assert!(result.is_ok(), "Lookup for hello.txt should succeed");
+        if let Ok(entry) = result {
+            assert_eq!(entry.attr.ino, 2, "Lookup should return inode 2 for hello.txt");
+            assert_eq!(entry.attr.kind, FileType::RegularFile, "hello.txt should be a regular file");
+            assert_eq!(entry.attr.perm, 0o644, "hello.txt should have permissions 0o644");
+        }
+    }
+
+    #[test]
+    fn test_read_hello_txt() {
+        let mut hellofs = super::HelloFS {};
+        let req = dummy_meta();
+        let result = hellofs.read(req, 2, 0, 0, 13, 0, None);
+        assert!(result.is_ok(), "Read for hello.txt should succeed");
+        if let Ok(content) = result {
+            assert_eq!(String::from_utf8_lossy(&content), "Hello World!\n", "Content of hello.txt should be 'Hello World!\\n'");
+        }
+    }
+
+    #[test]
+    fn test_readdir_root() {
+        let mut hellofs = super::HelloFS {};
+        let req = dummy_meta();
+        let result = hellofs.readdir(req, 1, 0, 0, 4096);
+        assert!(result.is_ok(), "Readdir on root should succeed");
+        if let Ok(entries) = result {
+            assert_eq!(entries.len(), 3, "Root directory should contain exactly 3 entries");
+            assert_eq!(entries[0].name, OsString::from("."), "First entry should be '.'");
+            assert_eq!(entries[0].ino, 1, "Inode for '.' should be 1");
+            assert_eq!(entries[1].name, OsString::from(".."), "Second entry should be '..'");
+            assert_eq!(entries[1].ino, 1, "Inode for '..' should be 1");
+            assert_eq!(entries[2].name, OsString::from("hello.txt"), "Third entry should be 'hello.txt'");
+            assert_eq!(entries[2].ino, 2, "Inode for 'hello.txt' should be 2");
+        }
+    }
+
+    #[test]
+    fn test_create_fails_readonly() {
+        let mut hellofs = super::HelloFS {};
+        let req = dummy_meta();
+        let result = hellofs.create(req, 1, OsString::from("newfile.txt"), 0o644, 0, 0);
+        assert!(result.is_err(), "Create should fail for read-only filesystem");
+        if let Err(e) = result {
+            assert_eq!(e, Errno::ENOSYS, "Create should return ENOSYS for unsupported operation");
+        }
+    }
+}
