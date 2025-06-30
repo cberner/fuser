@@ -879,7 +879,7 @@ mod test {
                 name: OsString::from("world.rs"),
             }
         );
-        replyhandler.dir(entries, size_of::<u8>()*128);
+        replyhandler.dir(entries, std::mem::size_of::<u8>()*128);
     }
 
 
