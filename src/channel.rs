@@ -66,7 +66,7 @@ impl ReplySender for ChannelSender {
         let rc = unsafe {
             libc::writev(
                 self.0.as_raw_fd(),
-                bufs.as_ptr() as *const libc::iovec,
+                bufs.as_ptr().cast::<libc::iovec>(),
                 bufs.len() as c_int,
             )
         };

@@ -1,5 +1,6 @@
 // This file contains unit tests for the Container enum
 // and its trait implementations.
+#![allow(clippy::match_wild_err_arm)] // any error fails the test
 
 use crate::container::Container;
 use std::sync::Arc;
@@ -24,9 +25,8 @@ mod u8 {
         let borrowed_slice: &[u8] = &[4,5,6];
         let c_borrowed1 : Container<'_, u8> = Container::Ref(borrowed_slice);
         let c_borrowed2 = c_borrowed1.clone();
-        assert_eq!(&*c_borrowed1.borrow(), &*c_borrowed2.borrow());
-        assert_eq!((&*c_borrowed1.borrow()).as_ptr(), (&*c_borrowed2.borrow()).as_ptr());
-
+        assert_eq!(*c_borrowed1.borrow(), *c_borrowed2.borrow());
+        assert_eq!((*c_borrowed1.borrow()).as_ptr(), (*c_borrowed2.borrow()).as_ptr());
 
         let shared_slice_arc: Arc<[u8]> = Arc::new([7,8,9]);
         let c_shared1 : Container<'_, u8> = Container::Arc(shared_slice_arc.clone());
@@ -135,7 +135,7 @@ mod u8 {
         match container_rc_ref_cell_box.try_borrow() {
             Ok(guard) => assert_eq!(&*guard, data_box_orig.as_ref()),
             Err(_) => panic!("Expected Ok for RcRefCellBox get_slice"),
-        };
+        }
 
         // Container::RcRefCellVec
         let rc_ref_cell_vec = std::rc::Rc::new(std::cell::RefCell::new(data_vec_orig.clone()));
@@ -143,7 +143,7 @@ mod u8 {
         match container_rc_ref_cell_vec.try_borrow() {
             Ok(guard) => assert_eq!(&*guard, data_vec_orig.as_slice()),
             Err(_) => panic!("Expected Ok for RcRefCellVec get_slice"),
-        };
+        }
 
         // Container::ArcMutexBox
         let arc_mutex_box = Arc::new(std::sync::Mutex::new(data_box_orig.clone()));
@@ -151,7 +151,7 @@ mod u8 {
         match container_arc_mutex_box.try_borrow() {
             Ok(guard) => assert_eq!(&*guard, data_box_orig.as_ref()),
             Err(_) => panic!("Expected Ok for ArcMutexBox get_slice"),
-        };
+        }
 
         // Container::ArcMutexVec
         let arc_mutex_vec = Arc::new(std::sync::Mutex::new(data_vec_orig.clone()));
@@ -159,7 +159,7 @@ mod u8 {
         match container_arc_mutex_vec.try_borrow() {
             Ok(guard) => assert_eq!(&*guard, data_vec_orig.as_slice()),
             Err(_) => panic!("Expected Ok for ArcMutexVec get_slice"),
-        };
+        }
 
         // Container::ArcRwLockBox
         let arc_rw_lock_box = Arc::new(std::sync::RwLock::new(data_box_orig.clone()));
@@ -167,7 +167,7 @@ mod u8 {
         match container_arc_rw_lock_box.try_borrow() {
             Ok(guard) => assert_eq!(&*guard, data_box_orig.as_ref()),
             Err(_) => panic!("Expected Ok for ArcRwLockBox get_slice"),
-        };
+        }
 
         // Container::ArcRwLockVec
         let arc_rw_lock_vec = Arc::new(std::sync::RwLock::new(data_vec_orig.clone()));
@@ -277,7 +277,7 @@ mod string {
     }
 
     // --- Helper to create containers for testing ---
-    fn create_non_locking_containers<'a>(bytes: &'a [u8]) -> Vec<Container<'a, u8>> {
+    fn create_non_locking_containers(bytes: &[u8]) -> Vec<Container<'_, u8>> {
         vec![
             Container::Ref(bytes),
             Container::Vec(bytes.to_vec()),
@@ -289,7 +289,7 @@ mod string {
         ]
     }
 
-    fn create_locking_containers<'a>(bytes: &'a [u8]) -> Vec<Container<'a, u8>> {
+    fn create_locking_containers(bytes: &[u8]) -> Vec<Container<'_, u8>> {
         vec![
             Container::ArcMutexVec(Arc::new(Mutex::new(bytes.to_vec()))),
             Container::ArcRwLockVec(Arc::new(RwLock::new(bytes.to_vec()))),

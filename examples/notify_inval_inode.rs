@@ -139,7 +139,7 @@ impl Filesystem for ClockFS<'_> {
         } else if flags & libc::O_ACCMODE != libc::O_RDONLY {
             Err(Errno::EACCES)
         } else if ino != Self::FILE_INO {
-            eprintln!("Got open for nonexistent inode {}", ino);
+            eprintln!("Got open for nonexistent inode {ino}");
             Err(Errno::ENOENT)
         } else {
             Ok(Open {
@@ -209,7 +209,7 @@ struct Options {
     #[clap(short, long)]
     no_notify: bool,
 
-    /// Use notify_store() instead of notify_inval_inode()
+    /// Use `notify_store()` instead of `notify_inval_inode()`
     #[clap(short = 's', long)]
     notify_store: bool,
 }
@@ -237,12 +237,12 @@ fn main() {
                 if let Err(e) =
                     notifier.store(ClockFS::FILE_INO, 0, fdata.lock().unwrap().as_bytes())
                 {
-                    eprintln!("Warning: failed to update kernel cache: {}", e);
+                    eprintln!("Warning: failed to update kernel cache: {e}");
                 }
             } else if let Err(e) =
                 notifier.inval_inode(ClockFS::FILE_INO, 0, olddata.len().try_into().unwrap())
             {
-                eprintln!("Warning: failed to invalidate inode: {}", e);
+                eprintln!("Warning: failed to invalidate inode: {e}");
             }
         }
         thread::sleep(Duration::from_secs_f32(opts.update_interval));

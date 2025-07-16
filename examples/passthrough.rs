@@ -149,12 +149,14 @@ impl Filesystem for PassthroughFs {
     ) -> Result<KernelConfig, Errno> {
         let mut config = config;
         config.add_capabilities(consts::FUSE_PASSTHROUGH)
-            .expect("FUSE Kernel did not advertise support for passthrough. Refused capability");
+            .expect("FUSE Kernel did not advertise support for passthrough (required for this example).");
         config.set_max_stack_depth(2).unwrap();
         Ok(config)
     }
 
+    #[allow(clippy::cast_sign_loss)]
     fn lookup(&mut self, _req: RequestMeta, parent: u64, name: &Path) -> Result<Entry, Errno> {
+        log::info!("lookup(name={name:?})");
         if parent == 1 && name.to_str() == Some("passthrough") {
             Ok(Entry {
                 ino: self.passthrough_file_attr.ino,
@@ -216,6 +218,7 @@ impl Filesystem for PassthroughFs {
         Ok(())
     }
 
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     fn readdir<'dir, 'name>(
         &mut self,
         _req: RequestMeta,
@@ -228,14 +231,14 @@ impl Filesystem for PassthroughFs {
             return Err(Errno::ENOENT);
         }
         // In this example, return up to three entries depending on the offset.
-        if offset > 2 || offset < 0 {
-            // Case 1: offset out of range:
-            // No need to allocate anything; just use the Empty enum case.
-            Ok(DirentList::Empty)
-        } else {
-            // Case 2: offset in range:
+        if (0..=2).contains(&offset) {
+            // Case: offset in range:
             // Return a borrowed ('static) slice of entries.
             Ok((&ROOT_DIR_ENTRIES[offset as usize..]).into())
+        } else {
+            // Case: offset out of range:
+            // No need to allocate anything; just use the Empty enum case.
+            Ok(DirentList::Empty)
         }
     }
 }

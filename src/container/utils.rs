@@ -7,7 +7,7 @@ use std::cell::RefCell;
 // --- From Raw ---
 
 // ----- Simple Variants -----
-impl<T: Clone> From<(/* Empty */)>  for Container<'_, T> {fn from(_: ()) -> Self {Container::Empty}}
+impl<T: Clone> From<(/* Empty */)>  for Container<'_, T> {fn from((): ()) -> Self {Container::Empty}}
 impl<T: Clone> From<Box<[T]>> for Container<'_, T> {fn from(value: Box<[T]>) -> Self {Container::Box(value)}}
 impl<T: Clone> From<Vec<T>> for Container<'_, T> {fn from(value: Vec<T>) -> Self {Container::Vec(value)}}
 impl<'a, T: Clone> From<&'a [T]> for Container<'a, T> {fn from(value: &'a [T]) -> Self {Container::Ref(value)}}
@@ -73,6 +73,7 @@ impl<T: Clone> Clone for Container<'_, T> {
 impl<T: Clone> Container<'_, T> {
     /// Returns the length of the container.
     /// Returns zero if the source data is unavailable.
+    #[must_use]
     pub fn len(&self) -> usize {
         match self.try_borrow(){
             Ok(value) => value.len(),
@@ -82,6 +83,7 @@ impl<T: Clone> Container<'_, T> {
 
     /// Returns true if the container is empty.
     /// Also returns true if the source data is unavailable. 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -89,6 +91,7 @@ impl<T: Clone> Container<'_, T> {
     /// Converts the container to an owned Vec<T>.
     /// This will most likely be a copy.
     /// Returns an empty vector if the source data is unavailable.
+    #[must_use]
     pub fn to_vec(&self) -> Vec<T> {
         match self.try_borrow(){
             Ok(value) => value.to_vec(),
@@ -100,7 +103,7 @@ impl<T: Clone> Container<'_, T> {
 // ----- Serialize -----
 #[cfg(feature = "serializable")]
 mod serialize {
-    use super::*;
+    use super::Container;
     use super::super::core::Borrow;
     use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeSeq};
     /// Serialize a Borrow. 

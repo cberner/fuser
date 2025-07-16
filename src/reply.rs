@@ -36,7 +36,7 @@ impl fmt::Debug for Box<dyn ReplySender> {
     }
 }
 
-/// ReplyHander is a struct which holds the unique identifiers needed to reply
+/// `ReplyHander` is a struct which holds the unique identifiers needed to reply
 /// to a specific request. Traits are implemented on the struct so that ownership
 /// of the struct determines whether the identifiers have ever been used. 
 /// This guarantees that a reply is send at most once per request.
@@ -59,26 +59,26 @@ impl ReplyHandler {
     }
 
     /// Reply to a request with a formatted reponse. Can be called
-    /// more than once (the `&mut self`` argument does not consume `self`)
+    /// more than once (the `&mut self` argument does not consume `self`)
     /// Avoid using this variant unless you know what you are doing!
     fn send_ll_mut(&mut self, response: &ll::Response<'_>) {
         assert!(self.sender.is_some());
         let sender = self.sender.take().unwrap();
         let res = response.with_iovec(self.unique, |iov| sender.send(iov));
         if let Err(err) = res {
-            error!("Failed to send FUSE reply: {}", err);
+            error!("Failed to send FUSE reply: {err}");
         }
     }
     /// Reply to a request with a formatted reponse. May be called
-    /// only once (the `mut self`` argument consumes `self`).
+    /// only once (the `mut self` argument consumes `self`).
     /// Use this variant for general replies. 
     fn send_ll(mut self, response: &ll::Response<'_>) {
-        self.send_ll_mut(response)
+        self.send_ll_mut(response);
     }
 
 }
 
-/// Drop is implemented on ReplyHandler so that if the program logic fails 
+/// Drop is implemented on `ReplyHandler` so that if the program logic fails 
 /// (for example, due to an interrupt or a panic),
 /// a reply will be sent when the Reply Handler falls out of scope.
 impl Drop for ReplyHandler {
@@ -97,19 +97,19 @@ impl Drop for ReplyHandler {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[cfg_attr(feature = "serializable", derive(Serialize, Deserialize))]
 pub enum FileType {
-    /// Named pipe (S_IFIFO)
+    /// Named pipe (`S_IFIFO`)
     NamedPipe,
-    /// Character device (S_IFCHR)
+    /// Character device (`S_IFCHR`)
     CharDevice,
-    /// Block device (S_IFBLK)
+    /// Block device (`S_IFBLK`)
     BlockDevice,
-    /// Directory (S_IFDIR)
+    /// Directory (`S_IFDIR`)
     Directory,
-    /// Regular file (S_IFREG)
+    /// Regular file (`S_IFREG`)
     RegularFile,
-    /// Symbolic link (S_IFLNK)
+    /// Symbolic link (`S_IFLNK`)
     Symlink,
-    /// Unix domain socket (S_IFSOCK)
+    /// Unix domain socket (`S_IFSOCK`)
     Socket,
 }
 
@@ -165,20 +165,25 @@ pub struct Entry {
     pub attr_ttl: Duration,
 }
 
-#[derive(Debug, Clone)] //TODO #[derive(Copy)]
+#[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "serializable", derive(Serialize, Deserialize))]
 /// Open file handle response data
 pub struct Open {
     /// File handle for the opened file
     pub fh: u64,
     /// Flags for the opened file
-    pub flags: u32
+    pub flags: u32,
+    /// Optional backing id for passthrough
+    pub backing_id: Option<u32>
 }
+
+/// A container for bytes, implementing flexible ownership.
+pub type Bytes<'a> = Container<'a, u8>;
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serializable", derive(Serialize, Deserialize))]
-/// A sinegle directory entry.
-/// The `'name` lifetime parameter is associated with the `name` field if it is from borrowed Bytes.
+/// A single directory entry.
+/// The `'name` lifetime parameter is associated with the `name` field if it is a borrowed value.
 pub struct Dirent<'name> {
     /// file inode number
     pub ino: u64,
@@ -195,7 +200,6 @@ pub type DirentList<'dir, 'name> = Container<'dir, Dirent<'name>>;
 
 /// A list of directory entries, plus additional file data for the kernel cache.
 pub type DirentPlusList<'dir, 'name> = Container<'dir, (Dirent<'name>, Entry)>;
-
 
 #[cfg(target_os = "macos")]
 #[derive(Debug)]
@@ -283,8 +287,16 @@ impl ReplyHandler {
     }
 
     /// Reply to a general request with data
-    pub fn data<'a>(self, data: Bytes<'a>) {
-        self.send_ll(&ll::Response::new_slice(&data.borrow()));
+    pub fn data(self, data: Bytes<'_>) {
+        match data.try_borrow(){
+            Ok(slice) => {
+                self.send_ll(&ll::Response::new_slice(&slice));
+            },
+            Err(e) => {
+                log::error!("ReplyHandler::data: Borrow Error: {e:?}");
+                self.error(Errno::EIO);
+            }
+        }
     }
 
     // Reply to an init request with available features
@@ -334,9 +346,8 @@ impl ReplyHandler {
             ll::INodeNo(entry.ino),
             ll::Generation(entry.generation.unwrap_or(1)),
             entry.file_ttl,
-            &entry.attr.into(),
+            &entry.attr,
             entry.attr_ttl,
-
         ));
     }
 
@@ -355,22 +366,19 @@ impl ReplyHandler {
     pub fn opened(self, open: Open) {
         #[cfg(feature = "abi-7-40")]
         assert_eq!(open.flags & FOPEN_PASSTHROUGH, 0);
-        self.send_ll(&ll::Response::new_open(ll::FileHandle(open.fh), open.flags, 0))
+        self.send_ll(&ll::Response::new_open(ll::FileHandle(open.fh), open.flags, 0));
     }
 
     /// Reply to a request with the number of bytes written
     pub fn written(self, size: u32) {
-        self.send_ll(&ll::Response::new_write(size))
+        self.send_ll(&ll::Response::new_write(size));
     }
 
-    /// Reply to a statfs request 
-    pub fn statfs(
-        self,
-        statfs: Statfs
-    ) {
+    /// Reply to a statfs request
+    pub fn statfs(self, statfs: Statfs) {
         self.send_ll(&ll::Response::new_statfs(
             statfs.blocks, statfs.bfree, statfs.bavail, statfs.files, statfs.ffree, statfs.bsize, statfs.namelen, statfs.frsize,
-        ))
+        ));
     }
 
     /// Reply to a request with a newle created file entry and its newly open file handle
@@ -384,7 +392,7 @@ impl ReplyHandler {
             ll::FileHandle(open.fh),
             open.flags,
             0,
-        ))
+        ));
     }
 
     /// Reply to a request with a file lock
@@ -393,24 +401,32 @@ impl ReplyHandler {
             range: (lock.start, lock.end),
             typ: lock.typ,
             pid: lock.pid,
-        }))
+        }));
     }
 
     /// Reply to a request with a bmap
     pub fn bmap(self, block: u64) {
-        self.send_ll(&ll::Response::new_bmap(block))
+        self.send_ll(&ll::Response::new_bmap(block));
     }
 
     #[cfg(feature = "abi-7-11")]
     /// Reply to a request with an ioctl
     pub fn ioctl(self, ioctl: Ioctl<'_>) {
-        self.send_ll(&ll::Response::new_ioctl(ioctl.result, &ioctl.data.borrow()));
+        match ioctl.data.try_borrow(){
+            Ok(slice) => {
+                self.send_ll(&ll::Response::new_ioctl(ioctl.result, &slice));
+            },
+            Err(e) => {
+                log::error!("ReplyHandler::ioctl: Borrow Error: {e:?}");
+                self.error(Errno::EIO);
+            }
+        }
     }
 
     #[cfg(feature = "abi-7-11")]
     /// Reply to a request with a poll result
     pub fn poll(self, revents: u32) {
-        self.send_ll(&ll::Response::new_poll(revents))
+        self.send_ll(&ll::Response::new_poll(revents));
     }
 
     /// Reply to a request with a filled directory buffer
@@ -421,10 +437,12 @@ impl ReplyHandler {
         min_offset: i64,
     ) {
         let mut buf = DirentBuf::new(size);
+        // Alternatively, consider a panic if the borrow fails.
         let entries = match entries_list.try_borrow(){
             Ok(entries) => entries,
             Err(e) => {
-                log::error!("ReplyHandler::dir: Borrow Error: {:?}", e);
+                log::error!("ReplyHandler::dir: Borrow Error: {e:?}");
+                self.error(Errno::EIO);
                 return;
             }
         };
@@ -432,13 +450,19 @@ impl ReplyHandler {
             if item.offset < min_offset {
                 log::debug!("ReplyHandler::dir: skipping item with offset #{}", item.offset);
                 continue;
-            } else {
-                log::debug!("ReplyHandler::dir: processing item with offset #{}", item.offset);
             }
-            let full= buf.push(item);
-            if full {
-                log::debug!("ReplyHandler::dir: buffer full!");
-                break;
+            log::debug!("ReplyHandler::dir: processing item with offset #{}", item.offset);
+            match buf.push(item) {
+                Ok(true) => {
+                    log::debug!("ReplyHandler::dir: buffer full!");
+                    break;
+                }
+                Ok(false) => {}
+                Err(e) => {
+                    log::error!("ReplyHandler::dir: abort!");
+                    self.error(e);
+                    return;
+                }
             }
         }
         self.send_ll(&buf.into());
@@ -453,10 +477,12 @@ impl ReplyHandler {
         min_offset: i64,
     ) {
         let mut buf = DirentPlusBuf::new(size);
+        // Alternatively, consider a panic if the borrow fails.
         let entries = match entries_plus_list.try_borrow(){
             Ok(entries) => entries,
             Err(e) => {
-                log::error!("ReplyHandler::dirplus: Borrow Error: {:?}", e);
+                log::error!("ReplyHandler::dirplus: Borrow Error: {e:?}");
+                self.error(Errno::EIO);
                 return;
             }
         };
@@ -464,13 +490,19 @@ impl ReplyHandler {
             if dirent.offset < min_offset {
                 log::debug!("ReplyHandler::dirplus: skipping item with offset #{}", dirent.offset);
                 continue;
-            } else {
-                log::debug!("ReplyHandler::dirplus: processing item with offset #{}", dirent.offset);
             }
-            let full = buf.push(&dirent, &entry);
-            if full {
-                log::debug!("ReplyHandler::dirplus: buffer full!");
-                break;
+            log::debug!("ReplyHandler::dirplus: processing item with offset #{}", dirent.offset);
+            match buf.push(dirent, entry) {
+                Ok(true) => {
+                    log::debug!("ReplyHandler::dirplus: buffer full!");
+                    break;
+                }
+                Ok(false) => {}
+                Err(e) => {
+                    log::error!("ReplyHandler::dirplus: abort!");
+                    self.error(e);
+                    return;
+                }
             }
         }
         self.send_ll(&buf.into());
@@ -486,24 +518,39 @@ impl ReplyHandler {
 
     /// Reply to a request with the size of an xattr result.
     pub fn xattr_size(self, size: u32) {
-        self.send_ll(&ll::Response::new_xattr_size(size))
+        self.send_ll(&ll::Response::new_xattr_size(size));
     }
 
     /// Reply to a request with the data in an xattr result.
     pub fn xattr_data(self, data: Bytes<'_>) {
-        self.send_ll(&ll::Response::new_slice(&data.borrow()))
+        match data.try_borrow(){
+            Ok(slice) => {
+                self.send_ll(&ll::Response::new_slice(&slice));
+            },
+            Err(e) => {
+                log::error!("ReplyHandler::xattr_data: Borrow Error: {e:?}");
+                self.error(Errno::EIO);
+            }
+        }
     }
 
     #[cfg(feature = "abi-7-24")]
     /// Reply to a request with a seeked offset
     pub fn offset(self, offset: i64) {
-        self.send_ll(&ll::Response::new_lseek(offset))
+        self.send_ll(&ll::Response::new_lseek(offset));
     }
 
+    /// Disable this replyhandler. No reply will be sent.
+    pub fn no_reply(mut self) {
+        self.sender = None;
+    }
 }
 
 #[cfg(test)]
+#[allow(clippy::unreadable_literal)] // ugly hardcoded literals for testing
+#[allow(clippy::cast_possible_truncation)] // predetermined literals will not be truncated
 mod test {
+    #[allow(clippy::wildcard_imports)]
     use super::*;
     use crate::{FileAttr, FileType};
     use std::io::IoSlice;
@@ -550,7 +597,7 @@ mod test {
         fn send(&self, data: &[IoSlice<'_>]) -> std::io::Result<()> {
             let mut v = vec![];
             for x in data {
-                v.extend_from_slice(x)
+                v.extend_from_slice(x);
             }
             assert_eq!(self.expected, v);
             Ok(())
@@ -653,7 +700,7 @@ mod test {
                 0x78, 0x56, 0x00, 0x00,
         ]);
         #[cfg(target_os = "macos")]
-        expected.extend_from_slice([
+        expected.extend_from_slice(&[
                 // crtime (ns)
                 0x78, 0x56, 0x00, 0x00,
         ]);
@@ -701,11 +748,11 @@ mod test {
         };
         // send the test reply
         replyhandler.entry(
-            Entry{
+            Entry {
                 ino: attr.ino,
                 generation: Some(0xaa),
                 file_ttl: ttl,
-                attr: attr,
+                attr,
                 attr_ttl: ttl,
             }
         );
@@ -911,7 +958,7 @@ mod test {
                 ino: attr.ino,
                 generation: Some(0xaa),
                 file_ttl: ttl,
-                attr: attr,
+                attr,
                 attr_ttl: ttl,
             },
             Open {
@@ -931,14 +978,12 @@ mod test {
             ],
         };
         let replyhandler: ReplyHandler = ReplyHandler::new(0xdeadbeef, sender);
-        replyhandler.locked(
-            Lock {
-                start: 0x11,
-                end: 0x22,
-                typ: 0x33,
-                pid: 0x44
-            }
-        );
+        replyhandler.locked(Lock {
+            start: 0x11,
+            end: 0x22,
+            typ: 0x33,
+            pid: 0x44,
+        });
     }
 
     #[test]
@@ -1010,7 +1055,7 @@ mod test {
             0x78, 0x56, 0x00, 0x00, 0x78, 0x56, 0x00, 0x00, 0x78, 0x56, 0x00, 0x00,
         ]);
         #[cfg(target_os = "macos")]
-        attr_bytes.extend_from_slice([
+        attr_bytes.extend_from_slice(&[
             0x78, 0x56, 0x00, 0x00,
         ]);
         attr_bytes.extend_from_slice(&[

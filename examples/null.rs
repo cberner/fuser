@@ -13,7 +13,7 @@ fn main() {
 
 #[cfg(test)]
 mod test {
-    use fuser::{Filesystem, RequestMeta, Errno};
+    use fuser::{Errno, Filesystem, RequestMeta};
     use std::path::PathBuf;
 
     fn dummy_meta() -> RequestMeta {

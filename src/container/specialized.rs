@@ -66,7 +66,7 @@ impl<'a> From<&'a OsStr> for Container<'a, u8> {
 impl Container<'_, u8> {
     /// Converts the bytes to an owned UTF-8 String.
     /// Most likely, this is a copy.
-    ///
+    /// # Errors
     /// Returns an error if the byte slice is not valid UTF-8.
     /// Returns an error if the source data is not available.
     pub fn try_to_string(&self) -> Result<String, ToStringError> {
@@ -74,9 +74,9 @@ impl Container<'_, u8> {
         Ok(std::str::from_utf8(&borrowed)?.to_string())
     }
 
-    /// Converts the container's content to an owned OsString.
+    /// Converts the container's content to an owned `OsString`.
     /// Most likely, this is a copy.
-    ///
+    /// # Errors
     /// Returns an error if the source data is not available.
     pub fn try_to_os_string(&self) -> Result<OsString, ToStringError> {
         let borrowed = self.try_borrow()?;
@@ -88,13 +88,14 @@ impl Container<'_, u8> {
 
 impl Borrow<'_, u8> {
     /// Converts the borrowed bytes to an borrowed UTF-8 String.
-    ///
+    /// # Errors
     /// Returns an error if the byte slice is not valid UTF-8.
     pub fn try_to_str(&self) -> Result<&str, ToStringError> {
         Ok(std::str::from_utf8(self)?)
     }
 
-    /// Converts the borrowed bytes to a borrowed OsStr.
+    /// Converts the borrowed bytes to a borrowed `OsStr`.
+    #[must_use]    
     pub fn to_os_str(&self) -> &OsStr {
         OsStr::from_bytes(self)
     }

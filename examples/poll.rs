@@ -163,7 +163,7 @@ impl Filesystem for FSelFS {
             return Err(Errno::EINVAL);
         };
 
-        let mut entries: Vec<Dirent> = Vec::new();
+        let mut entries = Vec::new();
         for idx in start_offset..NUMFILES {
             let ascii_char_val = match idx {
                 0..=9 => b'0' + idx,
@@ -199,14 +199,10 @@ impl Filesystem for FSelFS {
             return Err(Errno::EACCES);
         }
 
-        {
-            let mut d = self.get_data();
-
-            if d.open_mask & (1 << idx) != 0 {
-                return Err(Errno::EBUSY);
-            }
-            d.open_mask |= 1 << idx;
+        if self.data.open_mask & (1 << idx) != 0 {
+            return Err(Errno::EBUSY);
         }
+        self.data.open_mask |= 1 << idx;
 
         Ok(Open {
             fh: idx.into(), // Using idx as file handle
@@ -284,7 +280,7 @@ impl Filesystem for FSelFS {
 
             if flags & FUSE_POLL_SCHEDULE_NOTIFY != 0 {
                 d.notify_mask |= 1 << idx;
-                d.poll_handles[idx as usize] = ph.into();
+                d.poll_handles[idx as usize] = ph;
             }
 
             let nbytes = d.bytecnt[idx as usize];
@@ -318,9 +314,9 @@ fn producer(data: &Mutex<FSelData>, notifier: &fuser::Notifier) {
                 if d.bytecnt[tidx] != MAXBYTES {
                     d.bytecnt[tidx] += 1;
                     if d.notify_mask & (1 << t) != 0 {
-                        println!("NOTIFY {:X}", t);
+                        println!("NOTIFY {t:X}");
                         if let Err(e) = notifier.poll(d.poll_handles[tidx]) {
-                            eprintln!("poll notification failed: {}", e);
+                            eprintln!("poll notification failed: {e}");
                         }
                         d.notify_mask &= !(1 << t);
                     }

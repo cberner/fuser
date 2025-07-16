@@ -6,14 +6,15 @@
 //! for filesystem operations under its mount point.
 
 use libc::{EAGAIN, EINTR, ENODEV, ENOENT};
-use log::{info, warn};
+#[allow(unused_imports)]
+use log::{debug, info, warn, error};
 use nix::unistd::geteuid;
 use std::fmt;
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
-use std::{io, ops::DerefMut};
+use std::io;
 
 use crate::ll::fuse_abi as abi;
 use crate::request::Request;
@@ -29,7 +30,7 @@ use crate::{channel::ChannelSender, notify::Notifier};
 pub const MAX_WRITE_SIZE: usize = 16 * 1024 * 1024;
 
 /// Size of the buffer for reading a request from the kernel. Since the kernel may send
-/// up to MAX_WRITE_SIZE bytes in a write request, we use that value plus some extra space.
+/// up to `MAX_WRITE_SIZE` bytes in a write request, we use that value plus some extra space.
 const BUFFER_SIZE: usize = MAX_WRITE_SIZE + 4096;
 
 #[derive(Default, Debug, Eq, PartialEq)]
@@ -54,7 +55,7 @@ pub struct Session<FS: Filesystem> {
     /// Handle to the mount.  Dropping this unmounts.
     mount: Arc<Mutex<Option<(PathBuf, Mount)>>>,
     /// Whether to restrict access to owner, root + owner, or unrestricted
-    /// Used to implement allow_root and auto_unmount
+    /// Used to implement `allow_root` and `auto_unmount`
     pub(crate) allowed: SessionACL,
     /// User that launched the fuser process
     pub(crate) session_owner: u32,
@@ -146,7 +147,7 @@ impl<FS: Filesystem> Session<FS> {
         // it is reused immediately after dispatching to conserve memory and allocations.
         let mut buffer = vec![0; BUFFER_SIZE];
         let buf = aligned_sub_buf(
-            buffer.deref_mut(),
+            &mut buffer,
             std::mem::align_of::<abi::fuse_in_header>(),
         );
         loop {
@@ -218,6 +219,8 @@ fn aligned_sub_buf(buf: &mut [u8], alignment: usize) -> &mut [u8] {
     }
 }
 
+/// A session can be run synchronously in the current thread using `run()` or spawned into a
+/// background thread using `spawn()`.
 impl<FS: 'static + Filesystem + Send> Session<FS> {
     /// Run the session loop in a background thread
     pub fn spawn(self) -> io::Result<BackgroundSession> {

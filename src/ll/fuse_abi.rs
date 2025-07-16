@@ -23,7 +23,6 @@
 // TODO: fix all these non camel case types
 #![allow(non_camel_case_types)]
 
-
 #[cfg(feature = "abi-7-9")]
 use crate::consts::{FATTR_ATIME_NOW, FATTR_MTIME_NOW};
 use std::convert::TryFrom;
@@ -739,6 +738,7 @@ pub struct fuse_open_out {
     pub open_flags: u32,
     #[cfg(not(feature = "abi-7-40"))]
     pub padding: u32,
+    /// The `backing_id` field is used to pass a backing file descriptor to the kernel.
     #[cfg(feature = "abi-7-40")]
     pub backing_id: u32,
 }

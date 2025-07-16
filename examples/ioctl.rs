@@ -2,6 +2,8 @@
 //
 //   cargo run --example ioctl --features abi-7-11 /tmp/foobar
 
+#![allow(clippy::cast_possible_truncation)] // many conversions with unhandled errors
+
 use clap::{crate_version, Arg, ArgAction, Command};
 use fuser::{
     Bytes, Dirent, DirentList, Entry, Errno, FileAttr,
@@ -13,6 +15,9 @@ use std::path::Path;
 use std::time::{Duration, UNIX_EPOCH};
 
 const TTL: Duration = Duration::from_secs(1); // 1 second
+
+const FIOC_GET_SIZE: u64 = nix::request_code_read!('E', 0, std::mem::size_of::<usize>());
+const FIOC_SET_SIZE: u64 = nix::request_code_write!('E', 1, std::mem::size_of::<usize>());
 
 struct FiocFS {
     content: Vec<u8>,
@@ -99,6 +104,7 @@ impl Filesystem for FiocFS{
         }
     }
 
+    #[allow(clippy::cast_sign_loss)]
     fn read<'a>(
         &mut self,
         _req: RequestMeta,
@@ -128,6 +134,7 @@ impl Filesystem for FiocFS{
         }
     }
 
+    #[allow(clippy::cast_possible_truncation)]
     fn readdir<'dir, 'name>(
         &mut self,
         _req: RequestMeta,
@@ -159,9 +166,6 @@ impl Filesystem for FiocFS{
             return Err(Errno::EINVAL);
         }
 
-        const FIOC_GET_SIZE: u64 = nix::request_code_read!('E', 0, std::mem::size_of::<usize>());
-        const FIOC_SET_SIZE: u64 = nix::request_code_write!('E', 1, std::mem::size_of::<usize>());
-
         match cmd.into() {
             FIOC_GET_SIZE => {
                 let size_bytes = self.content.len().to_ne_bytes();
@@ -179,7 +183,7 @@ impl Filesystem for FiocFS{
                 })
             }
             _ => {
-                debug!("unknown ioctl: {}", cmd);
+                debug!("unknown ioctl: {cmd}");
                 Err(Errno::EINVAL)
             }
         }

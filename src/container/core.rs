@@ -117,6 +117,7 @@ impl<T> From<PoisonError<T>> for BorrowError {
 impl<T: Clone> Container<'_, T> {
     /// Borrows a slice-like immutable reference from the container.
     /// Will attempt to gain access to a locking variant.
+    /// # Errors
     /// Returns an error if the source data is unavailable.
     pub fn try_borrow(&self) -> Result<Borrow<'_, T>, BorrowError> {
         match self {
@@ -149,14 +150,17 @@ impl<T: Clone> Container<'_, T> {
 
     /// Borrows a slice-like immutable reference from the container.
     /// Will attempt to gain access to a locking variant.
+    /// # Panics
     /// Panics if the source data is unavailable.
+    #[must_use]
     pub fn borrow(&self) -> Borrow<'_, T> {
         self.try_borrow().unwrap()
     }
 
     /// Returns a borrowed slice &[] from the container if it is an immutable variant.
+    /// # Errors
     /// Returns an error if the container is a locking variant.
-    /// Hint: use try_borrow() to handle locking variants. 
+    /// Hint: use `try_borrow()` to handle locking variants. 
     pub fn try_as_ref(&self) -> Result<&[T], &str> {
         match self {
             // ----- Simple Variants -----
@@ -184,8 +188,9 @@ impl<T: Clone> Container<'_, T> {
 
 impl<T: Clone> AsRef<[T]> for Container<'_, T> {
     /// Returns a borrowed slice &[] from the container.
+    /// # Panics
     /// Will panic if the container is a locking variant.
-    /// Hint: use borrow() to handle locking variants. 
+    /// Hint: use `borrow()` to handle locking variants. 
     fn as_ref(&self) -> &[T] {
         self.try_as_ref().unwrap()
     }

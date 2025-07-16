@@ -88,7 +88,7 @@ impl<'a> Response<'a> {
             attr_valid: attr_ttl.as_secs(),
             entry_valid_nsec: file_ttl.subsec_nanos(),
             attr_valid_nsec: attr_ttl.subsec_nanos(),
-            attr: fuse_attr_from_attr(&attr),
+            attr: fuse_attr_from_attr(attr),
         };
         Self::from_struct(d.as_bytes())
     }
@@ -228,7 +228,7 @@ impl<'a> Response<'a> {
             // these fields are only needed for unrestricted ioctls
             flags: 0,
             in_iovs: 1,
-            out_iovs: if !data.is_empty() { 1 } else { 0 },
+            out_iovs: if data.is_empty() { 0 } else { 1 },
         };
         // TODO: Don't copy this data
         let mut v: ResponseBuf = ResponseBuf::from_slice(r.as_bytes());
@@ -291,9 +291,9 @@ pub(crate) fn mode_from_kind_and_perm(kind: FileType, perm: u16) -> u32 {
         FileType::Symlink => libc::S_IFLNK,
         FileType::Socket => libc::S_IFSOCK,
     }) as u32
-        | perm as u32
+        | u32::from(perm)
 }
-/// Returns a fuse_attr from FileAttr
+/// Returns a `fuse_attr` from `FileAttr`
 pub(crate) fn fuse_attr_from_attr(attr: &crate::FileAttr) -> abi::fuse_attr {
     let (atime_secs, atime_nanos) = time_from_system_time(&attr.atime);
     let (mtime_secs, mtime_nanos) = time_from_system_time(&attr.mtime);
@@ -350,6 +350,7 @@ impl From<crate::FileAttr> for Attr {
 }
 
 #[derive(Debug)]
+/// A generic data buffer
 struct EntListBuf {
     max_size: usize,
     buf: ResponseBuf,
@@ -391,7 +392,7 @@ impl From<DirEntOffset> for i64 {
 }
 */
 
-/// Used to respond to [ReaddirPlus] requests.
+/// Data buffer used to respond to [`Readdir`] requests.
 #[derive(Debug)]
 pub struct DirentBuf(EntListBuf);
 impl From<DirentBuf> for Response<'_> {
@@ -408,21 +409,25 @@ impl DirentBuf {
     /// Add an entry to the directory reply buffer. Returns true if the buffer is full.
     /// A transparent offset value can be provided for each entry. The kernel uses these
     /// value to request the next entries in further readdir calls
-    #[must_use]
-    pub fn push(&mut self, ent: &crate::Dirent<'_>) -> bool {
-        let name = ent.name.try_borrow()
-            .expect("Borrow name from dirent failed");
+    pub fn push(&mut self, ent: &crate::Dirent<'_>) -> Result<bool, Errno> {
+        let name = match ent.name.try_borrow() {
+            Ok(slice) => slice,
+            Err(e) => {
+                log::error!("Dirent.name Borrow error {e:?}");
+                return Err(Errno::EIO);
+            }
+        };
         let header = abi::fuse_dirent {
-            ino: ent.ino.into(),
+            ino: ent.ino,
             off: ent.offset,
             namelen: name.len().try_into().expect("Name too long"),
             typ: mode_from_kind_and_perm(ent.kind, 0) >> 12,
         };
-        self.0.push([header.as_bytes(), &name])
+        Ok(self.0.push([header.as_bytes(), &name]))
     }
 }
 
-/// Used to respond to [Readdir] requests.
+/// Data buffer used to respond to [`ReaddirPlus`] requests.
 #[cfg(feature = "abi-7-21")]
 #[derive(Debug)]
 pub struct DirentPlusBuf(EntListBuf);
@@ -443,14 +448,18 @@ impl DirentPlusBuf {
     /// Add an entry to the directory reply buffer. Returns true if the buffer is full.
     /// A transparent offset value can be provided for each entry. The kernel uses these
     /// value to request the next entries in further readdir calls
-    #[must_use]
-    pub fn push(&mut self, x: &crate::Dirent<'_>, y: &crate::Entry) -> bool {
-        let name = x.name.try_borrow()
-            .expect("Borrow name from dirent failed");
+    pub fn push(&mut self, x: &crate::Dirent<'_>, y: &crate::Entry) -> Result<bool, Errno> {
+        let name = match x.name.try_borrow() {
+            Ok(slice) => slice,
+            Err(e) => {
+                log::error!("Dirent.name Borrow error {e:?}");
+                return Err(Errno::EIO);
+            }
+        };
         let header = abi::fuse_direntplus {
             entry_out: abi::fuse_entry_out {
                 nodeid: y.ino,
-                generation: y.generation.unwrap_or(1).into(),
+                generation: y.generation.unwrap_or(1),
                 entry_valid: y.file_ttl.as_secs(),
                 attr_valid: y.attr_ttl.as_secs(),
                 entry_valid_nsec: y.file_ttl.subsec_nanos(),
@@ -464,15 +473,17 @@ impl DirentPlusBuf {
                 typ: mode_from_kind_and_perm(x.kind, 0) >> 12,
             },
         };
-        self.0.push([header.as_bytes(), &name])
+        Ok(self.0.push([header.as_bytes(), &name]))
     }
 }
 
 #[cfg(test)]
+#[allow(clippy::cast_possible_truncation)] // predetermined literals will not be truncated
 mod test {
     use std::num::NonZeroI32;
 
     use super::super::test::ioslice_to_vec;
+    #[allow(clippy::wildcard_imports)]
     use super::*;
 
     #[test]
@@ -566,7 +577,7 @@ mod test {
             flags: 0x99,
             blksize: 0xbb,
         };
-        let r = Response::new_entry(INodeNo(0x11), Generation(0xaa), ttl, &attr.into(), ttl);
+        let r = Response::new_entry(INodeNo(0x11), Generation(0xaa), ttl, &attr, ttl);
         assert_eq!(
             r.with_iovec(RequestId(0xdeadbeef), ioslice_to_vec),
             expected
@@ -841,13 +852,13 @@ mod test {
             offset: 1,
             kind: FileType::Directory,
             name: "hello".into()
-        }));
+        }).unwrap());
         assert!(!buf.push(&crate::Dirent {
             ino: 0xccdd,
             offset: 2,
             kind: FileType::RegularFile,
             name: "world.rs".into()
-        }));
+        }).unwrap());
         let r: Response<'_> = buf.into();
         assert_eq!(
             r.with_iovec(RequestId(0xdeadbeef), ioslice_to_vec),

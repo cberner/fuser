@@ -6,7 +6,7 @@ use fuser::{
 use std::ffi::{OsStr, OsString};
 use std::path::Path;
 use std::time::{Duration, UNIX_EPOCH};
-use std::sync::Arc;
+use std::rc::Rc;
 
 const TTL: Duration = Duration::from_secs(1); // 1 second
 
@@ -60,7 +60,7 @@ const DOT_ENTRY: Dirent<'static> = Dirent {
 
 /// Example Filesystem data
 struct HelloFS<'a> {
-    hello_entry: Arc<Dirent<'a>>,
+    hello_entry: Rc<Dirent<'a>>,
 }
 
 impl HelloFS<'_> {
@@ -69,7 +69,7 @@ impl HelloFS<'_> {
             // An example of reusable Shared data.
             // Entry #3 is allocated here once.
             // It is persistent until replaced.
-            hello_entry: Arc::new(
+            hello_entry: Rc::new(
             Dirent {
                     ino: 2,
                     offset: 3,
@@ -111,6 +111,7 @@ impl Filesystem for HelloFS<'static> {
         }
     }
 
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     fn read<'a>(
         &mut self,
         _req: RequestMeta,
@@ -137,6 +138,7 @@ impl Filesystem for HelloFS<'static> {
         }
     }
 
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     fn readdir<'dir, 'name>(
         &mut self,
         _req: RequestMeta,
@@ -273,21 +275,21 @@ mod test {
             assert_eq!(entries_slice.len(), 3, "Root directory should contain exactly 3 entries");
 
             // Check entry 0: "."
-            let entry0_data = &entries_slice[0];
+            let entry0_data = entries_slice[0];
             assert_eq!(entry0_data.name.as_ref(), OsStr::new(".").as_bytes(), "First entry should be '.'");
             assert_eq!(entry0_data.ino, 1, "Inode for '.' should be 1");
             assert_eq!(entry0_data.offset, 1, "Offset for '.' should be 1");
             assert_eq!(entry0_data.kind, FileType::Directory, "'.' should be a directory");
 
             // Check entry 1: ".."
-            let entry1_data = &entries_slice[1];
+            let entry1_data = entries_slice[1];
             assert_eq!(entry1_data.name.as_ref(), OsStr::new("..").as_bytes(), "Second entry should be '..'");
             assert_eq!(entry1_data.ino, 1, "Inode for '..' should be 1");
             assert_eq!(entry1_data.offset, 2, "Offset for '..' should be 2");
             assert_eq!(entry1_data.kind, FileType::Directory, "'..' should be a directory");
 
             // Check entry 2: "hello.txt"
-            let entry2_data = &entries_slice[2];
+            let entry2_data = entries_slice[2];
             assert_eq!(entry2_data.name.as_ref(), OsStr::new("hello.txt").as_bytes(), "Third entry should be 'hello.txt'");
             assert_eq!(entry2_data.ino, 2, "Inode for 'hello.txt' should be 2");
             assert_eq!(entry2_data.offset, 3, "Offset for 'hello.txt' should be 3");

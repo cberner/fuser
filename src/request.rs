@@ -6,28 +6,27 @@
 //! TODO: This module is meant to go away soon in favor of `ll::Request`.
 
 use crate::ll::{fuse_abi as abi, Errno};
-use log::{debug, error, warn};
-use std::convert::TryFrom;
+#[allow(unused_imports)]
+use log::{debug, info, warn, error};
+use std::convert::{TryFrom, Into};
 #[cfg(feature = "abi-7-28")]
 use std::convert::TryInto;
 
 use crate::channel::ChannelSender;
 use crate::ll::Request as _;
-use crate::reply::{ReplyHandler};
+use crate::reply::ReplyHandler;
 use crate::session::{Session, SessionACL};
 use crate::Filesystem;
 #[cfg(feature = "abi-7-11")]
 use crate::PollHandle;
-use crate::{ll, KernelConfig, Forget};
+use crate::{ll, Forget, KernelConfig};
 
 /// Request data structure
 #[derive(Debug)]
 pub struct Request<'a> {
-    /// Channel sender for sending the reply
-    ch: ChannelSender,
     /// Request raw data
     #[allow(unused)]
-    data: &'a [u8],
+    data: &'a [u8], // TODO: maybe Vec<u8>?
     /// Parsed request
     request: ll::AnyRequest<'a>,
     /// Request metadata
@@ -55,7 +54,7 @@ impl<'a> Request<'a> {
         let request = match ll::AnyRequest::try_from(data) {
             Ok(request) => request,
             Err(err) => {
-                error!("{}", err);
+                error!("{err}");
                 return None;
             }
         };
@@ -67,7 +66,7 @@ impl<'a> Request<'a> {
             pid: request.pid()
         };
         let replyhandler = ReplyHandler::new(request.unique().into(), ch.clone());
-        Some(Self { ch, data, request, meta, replyhandler })
+        Some(Self { data, request, meta, replyhandler })
     }
 
     /// Dispatch request to the given filesystem.
@@ -122,7 +121,7 @@ impl<'a> Request<'a> {
                 // We don't support ABI versions before 7.6
                 let v = x.version();
                 if v < ll::Version(7, 6) {
-                    error!("Unsupported FUSE ABI version {}", v);
+                    error!("Unsupported FUSE ABI version {v}");
                     self.replyhandler.error(Errno::EPROTO);
                     return;
                 }
@@ -153,7 +152,7 @@ impl<'a> Request<'a> {
                         // Filesystem refused the config.
                         self.replyhandler.error(errno);
                     }
-                };
+                }
             }
             // Any operation is invalid before initialization
             _ if !se.initialized => {
@@ -185,27 +184,27 @@ impl<'a> Request<'a> {
                 );
                 match response {
                     Ok(entry) => {
-                        self.replyhandler.entry(entry)
+                        self.replyhandler.entry(entry);
                     },
-                    Err(err)=>{
-                        self.replyhandler.error(err)
+                    Err(err)=> {
+                        self.replyhandler.error(err);
                     }
                 }
             }
             ll::Operation::Forget(x) => {
                 let target = Forget {
                     ino: self.request.nodeid().into(),
-                    nlookup: x.nlookup()
+                    nlookup: x.nlookup(),
                 };
-                se.filesystem
-                    .forget(self.meta, target); // no reply
+                se.filesystem.forget(self.meta, target); // no response
+                self.replyhandler.no_reply(); // no reply
             }
             ll::Operation::GetAttr(_attr) => {
                 #[cfg(feature = "abi-7-9")]
                 let response = se.filesystem.getattr(
                     self.meta,
                     self.request.nodeid().into(),
-                    _attr.file_handle().map(|fh| fh.into())
+                    _attr.file_handle().map(Into::into)
                 );
                 // Pre-abi-7-9 does not support providing a file handle.
                 #[cfg(not(feature = "abi-7-9"))]
@@ -216,10 +215,10 @@ impl<'a> Request<'a> {
                 );
                 match response {
                     Ok((attr,ttl))=> {
-                        self.replyhandler.attr(attr, ttl)
+                        self.replyhandler.attr(attr, ttl);
                     }
-                    Err(err)=>{
-                        self.replyhandler.error(err)
+                    Err(err)=> {
+                        self.replyhandler.error(err);
                     }
                 }
             }
@@ -234,7 +233,7 @@ impl<'a> Request<'a> {
                     x.atime(),
                     x.mtime(),
                     x.ctime(),
-                    x.file_handle().map(|fh| fh.into()),
+                    x.file_handle().map(Into::into),
                     x.crtime(),
                     x.chgtime(),
                     x.bkuptime(),
@@ -242,10 +241,10 @@ impl<'a> Request<'a> {
                 );
                 match response {
                     Ok((attr, ttl))=> {
-                        self.replyhandler.attr(attr, ttl)
+                        self.replyhandler.attr(attr, ttl);
                     }
-                    Err(err)=>{
-                        self.replyhandler.error(err)
+                    Err(err)=> {
+                        self.replyhandler.error(err);
                     }
                 }
             }
@@ -256,10 +255,10 @@ impl<'a> Request<'a> {
                 );
                 match response {
                     Ok(data)=> {
-                        self.replyhandler.data(data)
+                        self.replyhandler.data(data);
                     }
-                    Err(err)=>{
-                        self.replyhandler.error(err)
+                    Err(err)=> {
+                        self.replyhandler.error(err);
                     }
                 }
             }
@@ -274,10 +273,10 @@ impl<'a> Request<'a> {
                 );
                 match response {
                     Ok(entry)=> {
-                        self.replyhandler.entry(entry)
+                        self.replyhandler.entry(entry);
                     }
-                    Err(err)=>{
-                        self.replyhandler.error(err)
+                    Err(err)=> {
+                        self.replyhandler.error(err);
                     }
                 }
             }
@@ -291,10 +290,10 @@ impl<'a> Request<'a> {
                 );
                 match response {
                     Ok(entry)=> {
-                        self.replyhandler.entry(entry)
+                        self.replyhandler.entry(entry);
                     }
-                    Err(err)=>{
-                        self.replyhandler.error(err)
+                    Err(err)=> {
+                        self.replyhandler.error(err);
                     }
                 }
             }
@@ -306,10 +305,10 @@ impl<'a> Request<'a> {
                 );
                 match response {
                     Ok(())=> {
-                        self.replyhandler.ok()
+                        self.replyhandler.ok();
                     }
-                    Err(err)=>{
-                        self.replyhandler.error(err)
+                    Err(err)=> {
+                        self.replyhandler.error(err);
                     }
                 }
             }
@@ -321,10 +320,10 @@ impl<'a> Request<'a> {
                 );
                 match response {
                     Ok(())=> {
-                        self.replyhandler.ok()
+                        self.replyhandler.ok();
                     }
-                    Err(err)=>{
-                        self.replyhandler.error(err)
+                    Err(err)=> {
+                        self.replyhandler.error(err);
                     }
                 }
             }
@@ -337,10 +336,10 @@ impl<'a> Request<'a> {
                 );
                 match response {
                     Ok(entry)=> {
-                        self.replyhandler.entry(entry)
+                        self.replyhandler.entry(entry);
                     }
-                    Err(err)=>{
-                        self.replyhandler.error(err)
+                    Err(err)=> {
+                        self.replyhandler.error(err);
                     }
                 }
             }
@@ -355,10 +354,10 @@ impl<'a> Request<'a> {
                 );
                 match response {
                     Ok(())=> {
-                        self.replyhandler.ok()
+                        self.replyhandler.ok();
                     }
-                    Err(err)=>{
-                        self.replyhandler.error(err)
+                    Err(err)=> {
+                        self.replyhandler.error(err);
                     }
                 }
             }
@@ -371,10 +370,10 @@ impl<'a> Request<'a> {
                 );
                 match response {
                     Ok(entry)=> {
-                        self.replyhandler.entry(entry)
+                        self.replyhandler.entry(entry);
                     }
-                    Err(err)=>{
-                        self.replyhandler.error(err)
+                    Err(err)=> {
+                        self.replyhandler.error(err);
                     }
                 }
             }
@@ -386,10 +385,10 @@ impl<'a> Request<'a> {
                 );
                 match response {
                     Ok(open)=> {
-                        self.replyhandler.opened(open)
+                        self.replyhandler.opened(open);
                     }
-                    Err(err)=>{
-                        self.replyhandler.error(err)
+                    Err(err)=> {
+                        self.replyhandler.error(err);
                     }
                 }
             }
@@ -401,14 +400,14 @@ impl<'a> Request<'a> {
                     x.offset(),
                     x.size(),
                     x.flags(),
-                    x.lock_owner().map(|l| l.into())
+                    x.lock_owner().map(Into::into)
                 );
                 match response {
                     Ok(data)=> {
-                        self.replyhandler.data(data)
+                        self.replyhandler.data(data);
                     }
-                    Err(err)=>{
-                        self.replyhandler.error(err)
+                    Err(err)=> {
+                        self.replyhandler.error(err);
                     }
                 }
             }
@@ -421,14 +420,14 @@ impl<'a> Request<'a> {
                     x.data(),
                     x.write_flags(),
                     x.flags(),
-                    x.lock_owner().map(|l| l.into())
+                    x.lock_owner().map(Into::into)
                 );
                 match response {
                     Ok(size)=> {
-                        self.replyhandler.written(size)
+                        self.replyhandler.written(size);
                     }
-                    Err(err)=>{
-                        self.replyhandler.error(err)
+                    Err(err)=> {
+                        self.replyhandler.error(err);
                     }
                 }
             }
@@ -441,10 +440,10 @@ impl<'a> Request<'a> {
                 );
                 match response {
                     Ok(())=> {
-                        self.replyhandler.ok()
+                        self.replyhandler.ok();
                     }
-                    Err(err)=>{
-                        self.replyhandler.error(err)
+                    Err(err)=> {
+                        self.replyhandler.error(err);
                     }
                 }
             }
@@ -454,15 +453,15 @@ impl<'a> Request<'a> {
                     self.request.nodeid().into(),
                     x.file_handle().into(),
                     x.flags(),
-                    x.lock_owner().map(|x| x.into()),
+                    x.lock_owner().map(Into::into),
                     x.flush()
                 );
                 match response {
                     Ok(())=> {
-                        self.replyhandler.ok()
+                        self.replyhandler.ok();
                     }
-                    Err(err)=>{
-                        self.replyhandler.error(err)
+                    Err(err)=> {
+                        self.replyhandler.error(err);
                     }
                 }
             }
@@ -475,10 +474,10 @@ impl<'a> Request<'a> {
                 );
                 match response {
                     Ok(())=> {
-                        self.replyhandler.ok()
+                        self.replyhandler.ok();
                     }
-                    Err(err)=>{
-                        self.replyhandler.error(err)
+                    Err(err)=> {
+                        self.replyhandler.error(err);
                     }
                 }
             }
@@ -490,10 +489,10 @@ impl<'a> Request<'a> {
                 );
                 match response {
                     Ok(open)=> {
-                        self.replyhandler.opened(open)
+                        self.replyhandler.opened(open);
                     }
-                    Err(err)=>{
-                        self.replyhandler.error(err)
+                    Err(err)=> {
+                        self.replyhandler.error(err);
                     }
                 }
             }
@@ -506,15 +505,15 @@ impl<'a> Request<'a> {
                     x.size()
                 );
                 match response {
-                    Ok(entries_list_result)=> {
+                    Ok(dirent_list)=> {
                         self.replyhandler.dir(
-                            &entries_list_result,
+                            &dirent_list,
                             x.size() as usize,
                             x.offset(),
-                        )
+                        );
                     }
-                    Err(err)=>{
-                        self.replyhandler.error(err)
+                    Err(err)=> {
+                        self.replyhandler.error(err);
                     }
                 }
             }
@@ -527,10 +526,10 @@ impl<'a> Request<'a> {
                 );
                 match response {
                     Ok(())=> {
-                        self.replyhandler.ok()
+                        self.replyhandler.ok();
                     }
-                    Err(err)=>{
-                        self.replyhandler.error(err)
+                    Err(err)=> {
+                        self.replyhandler.error(err);
                     }
                 }
             }
@@ -543,10 +542,10 @@ impl<'a> Request<'a> {
                 );
                 match response {
                     Ok(())=> {
-                        self.replyhandler.ok()
+                        self.replyhandler.ok();
                     }
-                    Err(err)=>{
-                        self.replyhandler.error(err)
+                    Err(err)=> {
+                        self.replyhandler.error(err);
                     }
                 }
             }
@@ -557,10 +556,10 @@ impl<'a> Request<'a> {
                 );
                 match response {
                     Ok(statfs)=> {
-                        self.replyhandler.statfs(statfs)
+                        self.replyhandler.statfs(statfs);
                     }
-                    Err(err)=>{
-                        self.replyhandler.error(err)
+                    Err(err)=> {
+                        self.replyhandler.error(err);
                     }
                 }
             }
@@ -575,10 +574,10 @@ impl<'a> Request<'a> {
                 );
                 match response {
                     Ok(())=> {
-                        self.replyhandler.ok()
+                        self.replyhandler.ok();
                     }
-                    Err(err)=>{
-                        self.replyhandler.error(err)
+                    Err(err)=> {
+                        self.replyhandler.error(err);
                     }
                 }
             }
@@ -591,10 +590,10 @@ impl<'a> Request<'a> {
                 );
                 match response {
                     Ok(xattr)=> {
-                        self.replyhandler.xattr(xattr)
+                        self.replyhandler.xattr(xattr);
                     }
-                    Err(err)=>{
-                        self.replyhandler.error(err)
+                    Err(err)=> {
+                        self.replyhandler.error(err);
                     }
                 }
             }
@@ -606,10 +605,10 @@ impl<'a> Request<'a> {
                 );
                 match response {
                     Ok(xattr)=> {
-                        self.replyhandler.xattr(xattr)
+                        self.replyhandler.xattr(xattr);
                     }
-                    Err(err)=>{
-                        self.replyhandler.error(err)
+                    Err(err)=> {
+                        self.replyhandler.error(err);
                     }
                 }
             }
@@ -621,10 +620,10 @@ impl<'a> Request<'a> {
                 );
                 match response {
                     Ok(())=> {
-                        self.replyhandler.ok()
+                        self.replyhandler.ok();
                     }
-                    Err(err)=>{
-                        self.replyhandler.error(err)
+                    Err(err)=> {
+                        self.replyhandler.error(err);
                     }
                 }
             }
@@ -636,10 +635,10 @@ impl<'a> Request<'a> {
                 );
                 match response {
                     Ok(())=> {
-                        self.replyhandler.ok()
+                        self.replyhandler.ok();
                     }
-                    Err(err)=>{
-                        self.replyhandler.error(err)
+                    Err(err)=> {
+                        self.replyhandler.error(err);
                     }
                 }
             }
@@ -654,10 +653,10 @@ impl<'a> Request<'a> {
                 );
                 match response {
                     Ok((entry, open))=> {
-                        self.replyhandler.created(entry, open)
+                        self.replyhandler.created(entry, open);
                     }
-                    Err(err)=>{
-                        self.replyhandler.error(err)
+                    Err(err)=> {
+                        self.replyhandler.error(err);
                     }
                 }
             }
@@ -674,10 +673,10 @@ impl<'a> Request<'a> {
                 );
                 match response {
                     Ok(lock)=> {
-                        self.replyhandler.locked(lock)
+                        self.replyhandler.locked(lock);
                     }
-                    Err(err)=>{
-                        self.replyhandler.error(err)
+                    Err(err)=> {
+                        self.replyhandler.error(err);
                     }
                 }
             }
@@ -695,10 +694,10 @@ impl<'a> Request<'a> {
                 );
                 match response {
                     Ok(())=> {
-                        self.replyhandler.ok()
+                        self.replyhandler.ok();
                     }
-                    Err(err)=>{
-                        self.replyhandler.error(err)
+                    Err(err)=> {
+                        self.replyhandler.error(err);
                     }
                 }
             }
@@ -716,10 +715,10 @@ impl<'a> Request<'a> {
                 );
                 match response {
                     Ok(())=> {
-                        self.replyhandler.ok()
+                        self.replyhandler.ok();
                     }
-                    Err(err)=>{
-                        self.replyhandler.error(err)
+                    Err(err)=> {
+                        self.replyhandler.error(err);
                     }
                 }
             }
@@ -732,10 +731,10 @@ impl<'a> Request<'a> {
                 );
                 match response {
                     Ok(block)=> {
-                        self.replyhandler.bmap(block)
+                        self.replyhandler.bmap(block);
                     }
-                    Err(err)=>{
-                        self.replyhandler.error(err)
+                    Err(err)=> {
+                        self.replyhandler.error(err);
                     }
                 }
             }
@@ -756,10 +755,10 @@ impl<'a> Request<'a> {
                     );
                     match response {
                         Ok(ioctl)=> {
-                            self.replyhandler.ioctl(ioctl)
+                            self.replyhandler.ioctl(ioctl);
                         }
-                        Err(err)=>{
-                            self.replyhandler.error(err)
+                        Err(err)=> {
+                            self.replyhandler.error(err);
                         }
                     }
                 }
@@ -776,11 +775,11 @@ impl<'a> Request<'a> {
                     x.flags()
                 );
                 match response {
-                    Ok(revents)=> {
-                        self.replyhandler.poll(revents)
+                    Ok(ready_events)=> {
+                        self.replyhandler.poll(ready_events);
                     }
-                    Err(err)=>{
-                        self.replyhandler.error(err)
+                    Err(err)=> {
+                        self.replyhandler.error(err);
                     }
                 }
                 // TODO: register the poll handler
@@ -794,7 +793,8 @@ impl<'a> Request<'a> {
             }
             #[cfg(feature = "abi-7-16")]
             ll::Operation::BatchForget(x) => {
-                se.filesystem.batch_forget(self.meta, x.into()); // no reply
+                se.filesystem.batch_forget(self.meta, x.into()); // no response
+                self.replyhandler.no_reply(); // no reply
             }
             #[cfg(feature = "abi-7-19")]
             ll::Operation::FAllocate(x) => {
@@ -808,10 +808,10 @@ impl<'a> Request<'a> {
                 );
                 match response {
                     Ok(())=> {
-                        self.replyhandler.ok()
+                        self.replyhandler.ok();
                     }
-                    Err(err)=>{
-                        self.replyhandler.error(err)
+                    Err(err)=> {
+                        self.replyhandler.error(err);
                     }
                 }
             }
@@ -825,15 +825,15 @@ impl<'a> Request<'a> {
                     x.size()
                 );
                 match response {
-                    Ok(plus_entries_list_result)=> {
+                    Ok(dirent_plus_list)=> {
                         self.replyhandler.dirplus(
-                            &plus_entries_list_result,
+                            &dirent_plus_list,
                             x.size() as usize,
                             x.offset()
-                        )
+                        );
                     }
-                    Err(err)=>{
-                        self.replyhandler.error(err)
+                    Err(err)=> {
+                        self.replyhandler.error(err);
                     }
                 }
             }
@@ -849,10 +849,10 @@ impl<'a> Request<'a> {
                 );
                 match response {
                     Ok(())=> {
-                        self.replyhandler.ok()
+                        self.replyhandler.ok();
                     }
-                    Err(err)=>{
-                        self.replyhandler.error(err)
+                    Err(err)=> {
+                        self.replyhandler.error(err);
                     }
                 }
             }
@@ -867,10 +867,10 @@ impl<'a> Request<'a> {
                 );
                 match response {
                     Ok(offset)=> {
-                        self.replyhandler.offset(offset)
+                        self.replyhandler.offset(offset);
                     }
-                    Err(err)=>{
-                        self.replyhandler.error(err)
+                    Err(err)=> {
+                        self.replyhandler.error(err);
                     }
                 }
             }
@@ -890,10 +890,10 @@ impl<'a> Request<'a> {
                 );
                 match response {
                     Ok(written)=> {
-                        self.replyhandler.written(written)
+                        self.replyhandler.written(written);
                     }
-                    Err(err)=>{
-                        self.replyhandler.error(err)
+                    Err(err)=> {
+                        self.replyhandler.error(err);
                     }
                 }
             }
@@ -907,7 +907,7 @@ impl<'a> Request<'a> {
                     Ok(())=> {
                         self.replyhandler.ok()
                     }
-                    Err(err)=>{
+                    Err(err)=> {
                         self.replyhandler.error(err)
                     }
                 }
@@ -922,10 +922,9 @@ impl<'a> Request<'a> {
                     Ok(xtimes)=> {
                         self.replyhandler.xtimes(xtimes)
                     }
-                    Err(err)=>{
+                    Err(err)=> {
                         self.replyhandler.error(err)
                     }
-
                 }
             }
             #[cfg(target_os = "macos")]
@@ -942,7 +941,7 @@ impl<'a> Request<'a> {
                     Ok(())=> {
                         self.replyhandler.ok()
                     }
-                    Err(err)=>{
+                    Err(err)=> {
                         self.replyhandler.error(err)
                     }
                 }
