@@ -1,6 +1,5 @@
 use super::fuse3_sys::{
     fuse_session_destroy, fuse_session_fd, fuse_session_mount, fuse_session_new,
-    fuse_session_unmount,
 };
 use super::{with_fuse_args, MountOption};
 use std::{
@@ -54,7 +53,6 @@ impl Mount {
 impl Drop for Mount {
     fn drop(&mut self) {
         unsafe {
-            fuse_session_unmount(self.fuse_session);
             fuse_session_destroy(self.fuse_session);
         }
     }
