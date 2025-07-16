@@ -771,7 +771,7 @@ impl<'a> Request<'a> {
                     self.meta,
                     self.request.nodeid().into(),
                     x.file_handle().into(),
-                    ph,
+                    ph.into(),
                     x.events(),
                     x.flags()
                 );

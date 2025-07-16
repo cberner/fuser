@@ -4,12 +4,11 @@
 
 use clap::{crate_version, Arg, ArgAction, Command};
 use fuser::{
-    consts, BackingId, FileAttr, FileType, Filesystem, KernelConfig, MountOption, ReplyAttr,
-    ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen, Request,
+    consts, BackingId, Bytes, Dirent, DirentList, Entry, Errno,
+    FileAttr, FileType, Filesystem, KernelConfig, MountOption, Open, RequestMeta,
 };
-use libc::ENOENT;
 use std::collections::HashMap;
-use std::ffi::{c_int, OsStr};
+use std::path::Path;
 use std::fs::File;
 use std::rc::{Rc, Weak};
 use std::time::{Duration, UNIX_EPOCH};
@@ -87,6 +86,12 @@ struct PassthroughFs {
     backing_cache: BackingCache,
 }
 
+const ROOT_DIR_ENTRIES: [Dirent; 3] = [
+    Dirent { ino: 1, offset: 1, kind: FileType::Directory,   name: Bytes::Ref(b".") },
+    Dirent { ino: 1, offset: 2, kind: FileType::Directory,   name: Bytes::Ref(b"..") },
+    Dirent { ino: 2, offset: 3, kind: FileType::RegularFile, name: Bytes::Ref(b"passthrough") },
+];
+
 impl PassthroughFs {
     fn new() -> Self {
         let uid = unsafe { libc::getuid() };
@@ -139,88 +144,99 @@ impl PassthroughFs {
 impl Filesystem for PassthroughFs {
     fn init(
         &mut self,
-        _req: &Request,
-        config: &mut KernelConfig,
-    ) -> std::result::Result<(), c_int> {
-        config.add_capabilities(consts::FUSE_PASSTHROUGH).unwrap();
+        _req: RequestMeta,
+        config: KernelConfig,
+    ) -> Result<KernelConfig, Errno> {
+        let mut config = config;
+        config.add_capabilities(consts::FUSE_PASSTHROUGH)
+            .expect("FUSE Kernel did not advertise support for passthrough. Refused capability");
         config.set_max_stack_depth(2).unwrap();
-        Ok(())
+        Ok(config)
     }
 
-    fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
+    fn lookup(&mut self, _req: RequestMeta, parent: u64, name: &Path) -> Result<Entry, Errno> {
         if parent == 1 && name.to_str() == Some("passthrough") {
-            reply.entry(&TTL, &self.passthrough_file_attr, 0);
+            Ok(Entry {
+                ino: self.passthrough_file_attr.ino,
+                generation: None,
+                file_ttl: TTL,
+                attr: self.passthrough_file_attr,
+                attr_ttl: TTL,
+            })
         } else {
-            reply.error(ENOENT);
+            Err(Errno::ENOENT)
         }
     }
 
-    fn getattr(&mut self, _req: &Request, ino: u64, _fh: Option<u64>, reply: ReplyAttr) {
+    fn getattr(&mut self,
+        _req: RequestMeta,
+        ino: u64,
+        _fh: Option<u64>,
+    ) -> Result<(FileAttr, Duration), Errno> {
         match ino {
-            1 => reply.attr(&TTL, &self.root_attr),
-            2 => reply.attr(&TTL, &self.passthrough_file_attr),
-            _ => reply.error(ENOENT),
+            1 => Ok((self.root_attr, TTL)),
+            2 => Ok((self.passthrough_file_attr, TTL)),
+            _ =>Err(Errno::ENOENT),
         }
     }
 
-    fn open(&mut self, _req: &Request, ino: u64, _flags: i32, reply: ReplyOpen) {
+    fn open(&mut self, _req: RequestMeta, ino: u64, _flags: i32) -> Result<Open, Errno> {
         if ino != 2 {
-            reply.error(ENOENT);
-            return;
+            return Err(Errno::ENOENT);
         }
 
         let (fh, id) = self
             .backing_cache
             .get_or(ino, || {
-                let file = File::open("/etc/os-release")?;
-                reply.open_backing(file)
+                let _file = File::open("/etc/os-release")?;
+                // TODO: Implement opening the backing file and returning appropriate
+                // information, possibly including a BackingId within the Open struct,
+                // or handle it through other means if fd-passthrough is intended here.
+                Err(std::io::Error::new(std::io::ErrorKind::Other, "TODO: passthrough open not fully implemented"))
             })
             .unwrap();
 
         eprintln!("  -> opened_passthrough({fh:?}, 0, {id:?});\n");
-        reply.opened_passthrough(fh, 0, &id);
+        // TODO: Ensure fd-passthrough is correctly set up if intended.
+        // The Open struct would carry necessary info.
+        // TODO: implement flags for Open struct
+        Ok(Open{fh, flags: 0 })
     }
 
     fn release(
         &mut self,
-        _req: &Request<'_>,
+        _req: RequestMeta,
         _ino: u64,
         fh: u64,
         _flags: i32,
         _lock_owner: Option<u64>,
         _flush: bool,
-        reply: ReplyEmpty,
-    ) {
+    ) -> Result<(), Errno> {
         self.backing_cache.put(fh);
-        reply.ok();
+        Ok(())
     }
 
-    fn readdir(
+    fn readdir<'dir, 'name>(
         &mut self,
-        _req: &Request,
+        _req: RequestMeta,
         ino: u64,
         _fh: u64,
         offset: i64,
-        mut reply: ReplyDirectory,
-    ) {
+        _max_bytes: u32
+    ) -> Result<DirentList<'dir, 'name>, Errno> {
         if ino != 1 {
-            reply.error(ENOENT);
-            return;
+            return Err(Errno::ENOENT);
         }
-
-        let entries = vec![
-            (1, FileType::Directory, "."),
-            (1, FileType::Directory, ".."),
-            (2, FileType::RegularFile, "passthrough"),
-        ];
-
-        for (i, entry) in entries.into_iter().enumerate().skip(offset as usize) {
-            // i + 1 means the index of the next entry
-            if reply.add(entry.0, (i + 1) as i64, entry.1, entry.2) {
-                break;
-            }
+        // In this example, return up to three entries depending on the offset.
+        if offset > 2 || offset < 0 {
+            // Case 1: offset out of range:
+            // No need to allocate anything; just use the Empty enum case.
+            Ok(DirentList::Empty)
+        } else {
+            // Case 2: offset in range:
+            // Return a borrowed ('static) slice of entries.
+            Ok((&ROOT_DIR_ENTRIES[offset as usize..]).into())
         }
-        reply.ok();
     }
 }
 

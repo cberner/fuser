@@ -8,7 +8,8 @@
 // licensed under the terms of the GNU GPLv2.
 
 use std::{
-    ffi::OsStr,
+    ffi::{OsStr, OsString},
+    path::Path,
     sync::{
         atomic::{AtomicU64, Ordering::SeqCst},
         Arc, Mutex,
@@ -17,22 +18,19 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use libc::{ENOBUFS, ENOENT, ENOTDIR};
-
 use clap::Parser;
 
 use fuser::{
-    FileAttr, FileType, Filesystem, MountOption, ReplyAttr, ReplyDirectory, ReplyEntry, Request,
-    FUSE_ROOT_ID,
+    Dirent, DirentList, Entry, Errno, FileAttr, FileType,
+    Filesystem, Forget, MountOption, RequestMeta, FUSE_ROOT_ID,
 };
-
 struct ClockFS<'a> {
     file_name: Arc<Mutex<String>>,
     lookup_cnt: &'a AtomicU64,
     timeout: Duration,
 }
 
-impl<'a> ClockFS<'a> {
+impl ClockFS<'_> {
     const FILE_INO: u64 = 2;
 
     fn get_filename(&self) -> String {
@@ -67,58 +65,70 @@ impl<'a> ClockFS<'a> {
     }
 }
 
-impl<'a> Filesystem for ClockFS<'a> {
-    fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
-        if parent != FUSE_ROOT_ID || name != AsRef::<OsStr>::as_ref(&self.get_filename()) {
-            reply.error(ENOENT);
-            return;
+impl Filesystem for ClockFS<'_> {
+    fn lookup(&mut self, _req: RequestMeta, parent: u64, name: &Path) -> Result<Entry, Errno> {
+        if parent != FUSE_ROOT_ID || name != OsStr::new(&self.get_filename()) {
+            return Err(Errno::ENOENT);
         }
 
         self.lookup_cnt.fetch_add(1, SeqCst);
-        reply.entry(&self.timeout, &ClockFS::stat(ClockFS::FILE_INO).unwrap(), 0);
+        match ClockFS::stat(ClockFS::FILE_INO) {
+            Some(attr) => Ok(Entry {
+                ino: attr.ino,
+                generation: None,
+                file_ttl: self.timeout,
+                attr,
+                attr_ttl: self.timeout,
+            }),
+            None => Err(Errno::EIO), // Should not happen if FILE_INO is valid
+        }
     }
 
-    fn forget(&mut self, _req: &Request, ino: u64, nlookup: u64) {
-        if ino == ClockFS::FILE_INO {
-            let prev = self.lookup_cnt.fetch_sub(nlookup, SeqCst);
-            assert!(prev >= nlookup);
+    fn forget(&mut self, _req: RequestMeta, target: Forget) {
+        if target.ino == ClockFS::FILE_INO {
+            let prev = self.lookup_cnt.fetch_sub(target.nlookup, SeqCst);
+            assert!(prev >= target.nlookup);
         } else {
-            assert!(ino == FUSE_ROOT_ID);
+            assert!(target.ino == FUSE_ROOT_ID);
         }
     }
 
-    fn getattr(&mut self, _req: &Request, ino: u64, _fh: Option<u64>, reply: ReplyAttr) {
+    fn getattr(&mut self, _req: RequestMeta, ino: u64, _fh: Option<u64>) -> Result<(FileAttr, Duration), Errno> {
         match ClockFS::stat(ino) {
-            Some(a) => reply.attr(&self.timeout, &a),
-            None => reply.error(ENOENT),
+            Some(attr) => Ok((attr, self.timeout)),
+            None => Err(Errno::ENOENT),
         }
     }
 
-    fn readdir(
+    fn readdir<'dir, 'name>(
         &mut self,
-        _req: &Request,
+        _req: RequestMeta,
         ino: u64,
         _fh: u64,
         offset: i64,
-        mut reply: ReplyDirectory,
-    ) {
+        _max_bytes: u32,
+    ) -> Result<DirentList<'dir, 'name>, Errno> {
         if ino != FUSE_ROOT_ID {
-            reply.error(ENOTDIR);
-            return;
+            return Err(Errno::ENOTDIR);
         }
+        // In this example, construct and return an owned vector,
+        // containing owned bytes.
+        let mut entries= Vec::new();
+        if offset == 0 {
+            let filename_string = self.get_filename(); // Returns String
+            let filename_os_string = OsString::from(filename_string);
 
-        if offset == 0
-            && reply.add(
-                ClockFS::FILE_INO,
-                offset + 1,
-                FileType::RegularFile,
-                &self.get_filename(),
-            )
-        {
-            reply.error(ENOBUFS);
-        } else {
-            reply.ok();
+            let entry = Dirent {
+                ino: ClockFS::FILE_INO,
+                offset: 1, // This entry's cookie
+                kind: FileType::RegularFile,
+                name: filename_os_string.into(),
+            };
+            entries.push(entry);
         }
+        // If offset is > 0, we've already returned the single entry during a previous request,
+        // so just return the empty vector.
+        Ok(entries.into())
     }
 }
 

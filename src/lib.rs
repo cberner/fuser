@@ -918,7 +918,7 @@ pub trait Filesystem {
         _req: RequestMeta,
         ino: u64,
         fh: u64,
-        ph: PollHandle,
+        ph: u64,
         events: u32,
         flags: u32,
     ) -> Result<u32, Errno> {
@@ -1029,10 +1029,13 @@ pub trait Filesystem {
 }
 
 /// Mount the given filesystem to the given mountpoint. This function will
-/// not return until the filesystem is unmounted.
+/// block until the filesystem is unmounted.
 ///
-/// Note that you need to lead each option with a separate `"-o"` string.
-#[deprecated(note = "use mount2() instead")]
+/// `filesystem`: The filesystem implementation.
+/// `mountpoint`: The path to the mountpoint.
+/// `options`: A slice of mount options. Each option needs to be a separate string,
+/// typically starting with `"-o"`. For example: `&[OsStr::new("-o"), OsStr::new("auto_unmount")]`.
+#[deprecated(note = "Use `mount2` instead, which takes a slice of `MountOption` enums for better type safety and clarity.")]
 pub fn mount<FS: Filesystem, P: AsRef<Path>>(
     filesystem: FS,
     mountpoint: P,
@@ -1043,9 +1046,13 @@ pub fn mount<FS: Filesystem, P: AsRef<Path>>(
 }
 
 /// Mount the given filesystem to the given mountpoint. This function will
-/// not return until the filesystem is unmounted.
+/// block until the filesystem is unmounted.
 ///
-/// NOTE: This will eventually replace mount(), once the API is stable
+/// `filesystem`: The filesystem implementation.
+/// `mountpoint`: The path to the mountpoint.
+/// `options`: A slice of `MountOption` enums specifying mount options.
+///
+/// This is the recommended way to mount a FUSE filesystem.
 pub fn mount2<FS: Filesystem, P: AsRef<Path>>(
     filesystem: FS,
     mountpoint: P,
@@ -1055,12 +1062,17 @@ pub fn mount2<FS: Filesystem, P: AsRef<Path>>(
     Session::new(filesystem, mountpoint.as_ref(), options).and_then(|mut se| se.run())
 }
 
-/// Mount the given filesystem to the given mountpoint. This function spawns
-/// a background thread to handle filesystem operations while being mounted
-/// and therefore returns immediately. The returned handle should be stored
-/// to reference the mounted filesystem. If it's dropped, the filesystem will
+/// Mount the given filesystem to the given mountpoint in a background thread.
+/// This function spawns a new thread to handle filesystem operations and returns
+/// immediately. The returned `BackgroundSession` handle should be stored to
+/// keep the filesystem mounted. When the handle is dropped, the filesystem will
 /// be unmounted.
-#[deprecated(note = "use spawn_mount2() instead")]
+///
+/// `filesystem`: The filesystem implementation. Must be `Send + 'static`.
+/// `mountpoint`: The path to the mountpoint.
+/// `options`: A slice of mount options. Each option needs to be a separate string,
+/// typically starting with `"-o"`. For example: `&[OsStr::new("-o"), OsStr::new("auto_unmount")]`.
+#[deprecated(note = "Use `spawn_mount2` instead, which takes a slice of `MountOption` enums for better type safety and clarity.")]
 pub fn spawn_mount<'a, FS: Filesystem + Send + 'static + 'a, P: AsRef<Path>>(
     filesystem: FS,
     mountpoint: P,
@@ -1074,13 +1086,17 @@ pub fn spawn_mount<'a, FS: Filesystem + Send + 'static + 'a, P: AsRef<Path>>(
     Session::new(filesystem, mountpoint.as_ref(), options.as_ref()).and_then(|se| se.spawn())
 }
 
-/// Mount the given filesystem to the given mountpoint. This function spawns
-/// a background thread to handle filesystem operations while being mounted
-/// and therefore returns immediately. The returned handle should be stored
-/// to reference the mounted filesystem. If it's dropped, the filesystem will
+/// Mount the given filesystem to the given mountpoint in a background thread.
+/// This function spawns a new thread to handle filesystem operations and returns
+/// immediately. The returned `BackgroundSession` handle should be stored to
+/// keep the filesystem mounted. When the handle is dropped, the filesystem will
 /// be unmounted.
 ///
-/// NOTE: This is the corresponding function to mount2.
+/// `filesystem`: The filesystem implementation. Must be `Send + 'static`.
+/// `mountpoint`: The path to the mountpoint.
+/// `options`: A slice of `MountOption` enums specifying mount options.
+///
+/// This is the recommended way to mount a FUSE filesystem in the background.
 pub fn spawn_mount2<'a, FS: Filesystem + Send + 'static + 'a, P: AsRef<Path>>(
     filesystem: FS,
     mountpoint: P,

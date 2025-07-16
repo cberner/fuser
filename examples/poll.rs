@@ -7,10 +7,13 @@
 // Due to the above provenance, unlike the rest of fuser this file is
 // licensed under the terms of the GNU GPLv2.
 
+// Requires feature = "abi-7-11"
+
 use std::{
     convert::TryInto,
-    ffi::OsStr,
-    os::unix::ffi::OsStrExt,
+    ffi::OsString,
+    path::Path,
+    os::unix::ffi::{OsStrExt, OsStringExt}, // for converting to and from
     sync::{
         atomic::{AtomicU64, Ordering::SeqCst},
         Arc, Mutex,
@@ -19,11 +22,11 @@ use std::{
     time::{Duration, UNIX_EPOCH},
 };
 
-use libc::{EACCES, EBADF, EBUSY, EINVAL, ENOENT, ENOTDIR};
-
 use fuser::{
     consts::{FOPEN_DIRECT_IO, FOPEN_NONSEEKABLE, FUSE_POLL_SCHEDULE_NOTIFY},
-    FileAttr, FileType, MountOption, PollHandle, Request, FUSE_ROOT_ID,
+    Bytes, Dirent, DirentList, Entry, Errno,
+    FileAttr, Filesystem, FileType, MountOption, Open, RequestMeta,
+    FUSE_ROOT_ID,
 };
 
 const NUMFILES: u8 = 16;
@@ -80,28 +83,42 @@ impl FSelFS {
     }
 }
 
-impl fuser::Filesystem for FSelFS {
-    fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: fuser::ReplyEntry) {
-        if parent != FUSE_ROOT_ID || name.len() != 1 {
-            reply.error(ENOENT);
-            return;
+impl Filesystem for FSelFS {
+    fn lookup(
+        &mut self,
+        _req: RequestMeta,
+        parent: u64,
+        name: &Path
+    ) -> Result<Entry, Errno> {
+        if parent != FUSE_ROOT_ID || name.as_os_str().len() != 1 {
+            return Err(Errno::ENOENT);
         }
 
-        let name = name.as_bytes();
+        let name_bytes = name.as_os_str().as_bytes();
 
-        let idx = match name[0] {
-            b'0'..=b'9' => name[0] - b'0',
-            b'A'..=b'F' => name[0] - b'A' + 10,
+        let idx = match name_bytes[0] {
+            b'0'..=b'9' => name_bytes[0] - b'0',
+            b'A'..=b'F' => name_bytes[0] - b'A' + 10,
             _ => {
-                reply.error(ENOENT);
-                return;
+                return Err(Errno::ENOENT);
             }
         };
-
-        reply.entry(&Duration::ZERO, &self.get_data().filestat(idx), 0);
+        Ok(Entry {
+            ino: FSelData::idx_to_ino(idx),
+            generation: Some(0),
+            file_ttl: Duration::ZERO,
+            attr: self.get_data().filestat(idx),
+            attr_ttl: Duration::ZERO,
+        })
     }
 
-    fn getattr(&mut self, _req: &Request, ino: u64, _fh: Option<u64>, reply: fuser::ReplyAttr) {
+    fn getattr(
+        &mut self,
+        _req:
+        RequestMeta,
+        ino: u64,
+        _fh: Option<u64>
+    ) -> Result<(FileAttr, Duration), Errno> {
         if ino == FUSE_ROOT_ID {
             let a = FileAttr {
                 ino: FUSE_ROOT_ID,
@@ -120,150 +137,146 @@ impl fuser::Filesystem for FSelFS {
                 flags: 0,
                 blksize: 0,
             };
-            reply.attr(&Duration::ZERO, &a);
-            return;
+            return Ok((a, Duration::ZERO));
         }
         let idx = FSelData::ino_to_idx(ino);
         if idx < NUMFILES {
-            reply.attr(&Duration::ZERO, &self.get_data().filestat(idx));
+            Ok((self.get_data().filestat(idx), Duration::ZERO))
         } else {
-            reply.error(ENOENT);
+            Err(Errno::ENOENT)
         }
     }
 
-    fn readdir(
+    fn readdir<'dir, 'name>(
         &mut self,
-        _req: &Request,
+        _req: RequestMeta,
         ino: u64,
         _fh: u64,
         offset: i64,
-        mut reply: fuser::ReplyDirectory,
-    ) {
+        _max_bytes: u32,
+    ) -> Result<DirentList<'dir, 'name>, Errno> {
         if ino != FUSE_ROOT_ID {
-            reply.error(ENOTDIR);
-            return;
+            return Err(Errno::ENOTDIR);
         }
 
-        let Ok(offset): Result<u8, _> = offset.try_into() else {
-            reply.error(EINVAL);
-            return;
+        let Ok(start_offset): Result<u8, _> = offset.try_into() else {
+            return Err(Errno::EINVAL);
         };
 
-        for idx in offset..NUMFILES {
-            let ascii = match idx {
-                0..=9 => [b'0' + idx],
-                10..=16 => [b'A' + idx - 10],
-                _ => panic!(),
+        let mut entries: Vec<Dirent> = Vec::new();
+        for idx in start_offset..NUMFILES {
+            let ascii_char_val = match idx {
+                0..=9 => b'0' + idx,
+                10..=15 => b'A' + idx - 10, // Corrected range to 15 for NUMFILES = 16
+                _ => panic!("idx out of range for NUMFILES"),
             };
-            let name = OsStr::from_bytes(&ascii);
-            if reply.add(
-                FSelData::idx_to_ino(idx),
-                (idx + 1).into(),
-                FileType::RegularFile,
-                name,
-            ) {
-                break;
-            }
+            // Create OsString from the single byte character
+            let name_os_string = OsString::from_vec(vec![ascii_char_val]);
+            let entry_data = Dirent {
+                ino: FSelData::idx_to_ino(idx),
+                offset: (idx + 1).into(),
+                kind: FileType::RegularFile,
+                // Convert the OsString back into an owned vector, 
+                // and then into an appropriate Bytes variant, in one step, 
+                // using the From trait.
+                name: Bytes::from(name_os_string),
+            };
+            entries.push(entry_data);
+            // Fuser library will ensure that max_bytes is respected.
         }
-
-        reply.ok();
+        // convert the vector of entries into an appropriate DirentList variant,
+        // using the Into trait
+        Ok(entries.into())
     }
 
-    fn open(&mut self, _req: &Request, ino: u64, flags: i32, reply: fuser::ReplyOpen) {
+    fn open(&mut self, _req: RequestMeta, ino: u64, flags: i32) -> Result<Open, Errno> {
         let idx = FSelData::ino_to_idx(ino);
         if idx >= NUMFILES {
-            reply.error(ENOENT);
-            return;
+            return Err(Errno::ENOENT);
         }
 
         if (flags & libc::O_ACCMODE) != libc::O_RDONLY {
-            reply.error(EACCES);
-            return;
+            return Err(Errno::EACCES);
         }
 
         {
             let mut d = self.get_data();
 
             if d.open_mask & (1 << idx) != 0 {
-                reply.error(EBUSY);
-                return;
+                return Err(Errno::EBUSY);
             }
-
             d.open_mask |= 1 << idx;
         }
 
-        reply.opened(idx.into(), FOPEN_DIRECT_IO | FOPEN_NONSEEKABLE);
+        Ok(Open {
+            fh: idx.into(), // Using idx as file handle
+            flags: FOPEN_DIRECT_IO | FOPEN_NONSEEKABLE,
+        })
     }
 
     fn release(
         &mut self,
-        _req: &Request,
+        _req: RequestMeta,
         _ino: u64,
         fh: u64,
         _flags: i32,
         _lock_owner: Option<u64>,
         _flush: bool,
-        reply: fuser::ReplyEmpty,
-    ) {
-        let idx = fh;
+    ) -> Result<(), Errno> {
+        let idx = fh; // fh is the idx from open()
         if idx >= NUMFILES.into() {
-            reply.error(EBADF);
-            return;
+            return Err(Errno::EBADF);
         }
         self.get_data().open_mask &= !(1 << idx);
-        reply.ok();
+        Ok(())
     }
 
-    fn read(
+    fn read<'a>(
         &mut self,
-        _req: &Request,
+        _req: RequestMeta,
         _ino: u64,
         fh: u64,
-        _offset: i64,
-        size: u32,
+        _offset: i64, // offset is ignored due to FOPEN_NONSEEKABLE
+        max_size: u32,
         _flags: i32,
         _lock_owner: Option<u64>,
-        reply: fuser::ReplyData,
-    ) {
+    ) -> Result<Bytes<'a>, Errno> {
         let Ok(idx): Result<u8, _> = fh.try_into() else {
-            reply.error(EINVAL);
-            return;
+            return Err(Errno::EINVAL);
         };
         if idx >= NUMFILES {
-            reply.error(EBADF);
-            return;
+            return Err(Errno::EBADF);
         }
         let cnt = &mut self.get_data().bytecnt[idx as usize];
-        let size = (*cnt).min(size.into());
+        let size = (*cnt).min(max_size.into());
         println!("READ   {:X} transferred={} cnt={}", idx, size, *cnt);
         *cnt -= size;
         let elt = match idx {
             0..=9 => b'0' + idx,
-            10..=16 => b'A' + idx - 10,
-            _ => panic!(),
+            10..=15 => b'A' + idx - 10, // Corrected range
+            _ => panic!("idx out of range for NUMFILES"),
         };
         let data = vec![elt; size.try_into().unwrap()];
-        reply.data(data.as_slice());
+        // example of converting to an explicit Bytes Box variant
+        Ok(Bytes::Box(data.into_boxed_slice()))
     }
 
+    #[cfg(feature = "abi-7-11")]
     fn poll(
         &mut self,
-        _req: &Request,
+        _req: RequestMeta,
         _ino: u64,
         fh: u64,
-        ph: PollHandle,
+        ph: u64,
         _events: u32,
         flags: u32,
-        reply: fuser::ReplyPoll,
-    ) {
+    ) -> Result<u32, Errno> {
         static POLLED_ZERO: AtomicU64 = AtomicU64::new(0);
         let Ok(idx): Result<u8, _> = fh.try_into() else {
-            reply.error(EINVAL);
-            return;
+            return Err(Errno::EINVAL);
         };
         if idx >= NUMFILES {
-            reply.error(EBADF);
-            return;
+            return Err(Errno::EBADF);
         }
 
         let revents = {
@@ -288,8 +301,7 @@ impl fuser::Filesystem for FSelFS {
                 0
             }
         };
-
-        reply.poll(revents);
+        Ok(revents)
     }
 }
 
@@ -341,4 +353,73 @@ fn main() {
     let bg = session.spawn().unwrap();
 
     producer(&data, &bg.notifier());
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use fuser::{Filesystem, RequestMeta, Errno};
+    use std::sync::{Arc, Mutex};
+
+    fn setup_test_fs() -> FSelFS {
+        let data = Arc::new(Mutex::new(FSelData {
+            bytecnt: [0; NUMFILES as usize],
+            open_mask: 0,
+            notify_mask: 0,
+            poll_handles: [0; NUMFILES as usize],
+        }));
+        FSelFS { data }
+    }
+
+    #[test]
+    fn test_poll_data_available() {
+        let mut fs = setup_test_fs();
+        let req = RequestMeta { unique: 0, uid: 0, gid: 0, pid: 0 };
+        let idx = 0;
+        let fh = idx as u64;
+        let ph = 1;
+        {
+            let mut data = fs.get_data();
+            data.bytecnt[idx as usize] = 5; // Simulate data available
+        }
+        let result = fs.poll(req, FSelData::idx_to_ino(idx), fh, ph, libc::POLLIN as u32, FUSE_POLL_SCHEDULE_NOTIFY);
+        assert!(result.is_ok(), "Poll should succeed when data is available");
+        if let Ok(revents) = result {
+            assert_eq!(revents, libc::POLLIN as u32, "Should return POLLIN when data is available");
+        }
+        let data = fs.get_data();
+        assert_eq!(data.notify_mask & (1 << idx), 1 << idx, "Notify mask should be set for this index");
+        assert_eq!(data.poll_handles[idx as usize], 1, "Poll handle should be stored");
+    }
+
+    #[test]
+    fn test_poll_no_data() {
+        let mut fs = setup_test_fs();
+        let req = RequestMeta { unique: 0, uid: 0, gid: 0, pid: 0 };
+        let idx = 0;
+        let fh = idx as u64;
+        let ph = 1;
+        {
+            let mut data = fs.get_data();
+            data.bytecnt[idx as usize] = 0; // No data available
+        }
+        let result = fs.poll(req, FSelData::idx_to_ino(idx), fh, ph, libc::POLLIN as u32, FUSE_POLL_SCHEDULE_NOTIFY);
+        assert!(result.is_ok(), "Poll should succeed even when no data is available");
+        if let Ok(revents) = result {
+            assert_eq!(revents, 0, "Should return 0 when no data is available");
+        }
+    }
+
+    #[test]
+    fn test_poll_invalid_handle() {
+        let mut fs = setup_test_fs();
+        let req = RequestMeta { unique: 0, uid: 0, gid: 0, pid: 0 };
+        let invalid_idx = NUMFILES as u64;
+        let ph = 1;
+        let result = fs.poll(req, FSelData::idx_to_ino(0), invalid_idx, ph, libc::POLLIN as u32, FUSE_POLL_SCHEDULE_NOTIFY);
+        assert!(result.is_err(), "Poll should fail for invalid file handle");
+        if let Err(e) = result {
+            assert_eq!(e, Errno::EBADF, "Should return EBADF for invalid handle");
+        }
+    }
 }

@@ -4,12 +4,12 @@
 
 use clap::{crate_version, Arg, ArgAction, Command};
 use fuser::{
-    FileAttr, FileType, Filesystem, MountOption, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry,
-    Request,
+    Bytes, Dirent, DirentList, Entry, Errno, FileAttr,
+    Filesystem, FileType, Ioctl, MountOption, RequestMeta,
 };
-use libc::{EINVAL, ENOENT};
 use log::debug;
 use std::ffi::OsStr;
+use std::path::Path;
 use std::time::{Duration, UNIX_EPOCH};
 
 const TTL: Duration = Duration::from_secs(1); // 1 second
@@ -19,6 +19,13 @@ struct FiocFS {
     root_attr: FileAttr,
     fioc_file_attr: FileAttr,
 }
+
+// Constant data can be stored as Borrowed to prevent unnecessary copying
+const DIR_ENTRIES: [Dirent; 3] = [
+    Dirent { ino: 1, offset: 1, kind: FileType::Directory,   name: Bytes::Ref(b".") },
+    Dirent { ino: 1, offset: 2, kind: FileType::Directory,   name: Bytes::Ref(b"..") },
+    Dirent { ino: 2, offset: 3, kind: FileType::RegularFile, name: Bytes::Ref(b"fioc")},
+];
 
 impl FiocFS {
     fn new() -> Self {
@@ -69,83 +76,87 @@ impl FiocFS {
     }
 }
 
-impl Filesystem for FiocFS {
-    fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
-        if parent == 1 && name.to_str() == Some("fioc") {
-            reply.entry(&TTL, &self.fioc_file_attr, 0);
+impl Filesystem for FiocFS{
+    fn lookup(&mut self, _req: RequestMeta, parent: u64, name: &Path) -> Result<Entry, Errno> {
+        if parent == 1 && name == OsStr::new("fioc") {
+            Ok(Entry {
+                ino: self.fioc_file_attr.ino,
+                generation: None,
+                attr: self.fioc_file_attr,
+                attr_ttl: TTL,
+                file_ttl: TTL,
+            })
         } else {
-            reply.error(ENOENT);
+            Err(Errno::ENOENT)
         }
     }
 
-    fn getattr(&mut self, _req: &Request, ino: u64, _fh: Option<u64>, reply: ReplyAttr) {
+    fn getattr(&mut self, _req: RequestMeta, ino: u64, _fh: Option<u64>) -> Result<(FileAttr, Duration), Errno> {
         match ino {
-            1 => reply.attr(&TTL, &self.root_attr),
-            2 => reply.attr(&TTL, &self.fioc_file_attr),
-            _ => reply.error(ENOENT),
+            1 => Ok((self.root_attr, TTL)),
+            2 => Ok((self.fioc_file_attr, TTL)),
+            _ => Err(Errno::ENOENT),
         }
     }
 
-    fn read(
+    fn read<'a>(
         &mut self,
-        _req: &Request,
+        _req: RequestMeta,
         ino: u64,
         _fh: u64,
         offset: i64,
         _size: u32,
         _flags: i32,
         _lock: Option<u64>,
-        reply: ReplyData,
-    ) {
+    ) -> Result<Bytes<'a>, Errno> {
         if ino == 2 {
-            reply.data(&self.content[offset as usize..])
+            let offset = offset as usize;
+            if offset >= self.content.len() {
+                // No need to allocate anything, just borrow from this 'static empty literal.
+                Ok(Bytes::Ref(&[]))
+            } else {
+                /***********
+                // Option 1: Copy the bytes into a new boxed slice
+                let copy_of_bytes = self.content[offset..].to_owned().into_boxed_slice();
+                Ok(ByteBox::Owned(copy_of_bytes))
+                ***********/
+                // Option 2: Using From<...>/Into<...> trait methods
+                Ok(self.content[offset..].to_vec().into())
+            }
         } else {
-            reply.error(ENOENT);
+            Err(Errno::ENOENT)
         }
     }
 
-    fn readdir(
+    fn readdir<'dir, 'name>(
         &mut self,
-        _req: &Request,
+        _req: RequestMeta,
         ino: u64,
         _fh: u64,
-        offset: i64,
-        mut reply: ReplyDirectory,
-    ) {
+        // Fuser library will ensure that offset and max_bytes are respected.
+        _offset: i64,
+        _max_bytes: u32,
+    ) -> Result<DirentList<'dir, 'name>, Errno> {
         if ino != 1 {
-            reply.error(ENOENT);
-            return;
+            return Err(Errno::ENOENT);
         }
-
-        let entries = vec![
-            (1, FileType::Directory, "."),
-            (1, FileType::Directory, ".."),
-            (2, FileType::RegularFile, "fioc"),
-        ];
-
-        for (i, entry) in entries.into_iter().enumerate().skip(offset as usize) {
-            // i + 1 means the index of the next entry
-            if reply.add(entry.0, (i + 1) as i64, entry.1, entry.2) {
-                break;
-            }
-        }
-        reply.ok();
+        // In this example, return a borrowed reference to the (static) list of dir entries.
+        Ok(DirentList::Ref(&DIR_ENTRIES))
     }
 
-    fn ioctl(
+    #[cfg(feature = "abi-7-11")]
+    fn ioctl<'a>(
         &mut self,
-        _req: &Request<'_>,
+        _req: RequestMeta,
         ino: u64,
         _fh: u64,
         _flags: u32,
         cmd: u32,
         in_data: &[u8],
         _out_size: u32,
-        reply: fuser::ReplyIoctl,
-    ) {
+    ) -> Result<Ioctl<'a>, Errno> {
         if ino != 2 {
-            reply.error(EINVAL);
-            return;
+            return Err(Errno::EINVAL);
         }
 
         const FIOC_GET_SIZE: u64 = nix::request_code_read!('E', 0, std::mem::size_of::<usize>());
@@ -154,16 +165,22 @@ impl Filesystem for FiocFS {
         match cmd.into() {
             FIOC_GET_SIZE => {
                 let size_bytes = self.content.len().to_ne_bytes();
-                reply.ioctl(0, &size_bytes);
+                Ok(Ioctl {
+                    result: 0,
+                    data: Bytes::Box(Box::new(size_bytes)),
+                })
             }
             FIOC_SET_SIZE => {
                 let new_size = usize::from_ne_bytes(in_data.try_into().unwrap());
                 self.content = vec![0_u8; new_size];
-                reply.ioctl(0, &[]);
+                Ok(Ioctl {
+                    result: 0,
+                    data: Bytes::Empty,
+                })
             }
             _ => {
                 debug!("unknown ioctl: {}", cmd);
-                reply.error(EINVAL);
+                Err(Errno::EINVAL)
             }
         }
     }
