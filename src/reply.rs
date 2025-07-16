@@ -5,6 +5,9 @@
 //! or, if the reply handler goes out of scope before that happens, the drop trait will send an error response. 
 
 use crate::{Container, Bytes, KernelConfig};
+use crate::ll::{self, reply::DirentBuf};
+#[cfg(feature = "abi-7-21")]
+use crate::ll::reply::{DirentPlusBuf};
 #[cfg(feature = "abi-7-40")]
 use crate::{consts::FOPEN_PASSTHROUGH, passthrough::BackingId};
 #[allow(unused_imports)]
@@ -171,6 +174,28 @@ pub struct Open {
     /// Flags for the opened file
     pub flags: u32
 }
+
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serializable", derive(Serialize, Deserialize))]
+/// A sinegle directory entry.
+/// The `'name` lifetime parameter is associated with the `name` field if it is from borrowed Bytes.
+pub struct Dirent<'name> {
+    /// file inode number
+    pub ino: u64,
+    /// entry number in directory
+    pub offset: i64,
+    /// kind of file
+    pub kind: FileType,
+    /// name of file
+    pub name: Bytes<'name>,
+}
+
+/// A list of directory entries.
+pub type DirentList<'dir, 'name> = Container<'dir, Dirent<'name>>;
+
+/// A list of directory entries, plus additional file data for the kernel cache.
+pub type DirentPlusList<'dir, 'name> = Container<'dir, (Dirent<'name>, Entry)>;
+
 
 #[cfg(target_os = "macos")]
 #[derive(Debug)]
@@ -942,16 +967,157 @@ mod test {
         };
         let replyhandler: ReplyHandler = ReplyHandler::new(0xdeadbeef, sender);
         let entries = vec!(
+            Dirent {
+                ino: 0xaabb,
+                offset: 1,
+                kind: FileType::Directory,
+                name: OsString::from("hello").into(),
+            },
+            Dirent {
+                ino: 0xccdd,
+                offset: 2,
+                kind: FileType::RegularFile,
+                name: OsString::from("world.rs").into(),
+            }
         );
+        replyhandler.dir(&entries.into(), std::mem::size_of::<u8>()*128, 0);
     }
     
     #[test]
     #[cfg(feature = "abi-7-24")]
     fn reply_directory_plus() {
         // prepare the expected file attribute portion of the message
+        // see test::reply_entry() for details
+        let mut attr_bytes = Vec::new();
+        attr_bytes.extend_from_slice(&[
+            0xbb, 0xaa, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0xaa, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x65, 0x87, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x65, 0x87, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x21, 0x43, 0x00, 0x00, 0x21, 0x43, 0x00, 0x00,
+            0xbb, 0xaa, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x22, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x33, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x34, 0x12, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x34, 0x12, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x34, 0x12, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ]);
+        #[cfg(target_os = "macos")]
+        attr_bytes.extend_from_slice(&[
+            0x34, 0x12, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ]);
+        attr_bytes.extend_from_slice(&[
+            0x78, 0x56, 0x00, 0x00, 0x78, 0x56, 0x00, 0x00, 0x78, 0x56, 0x00, 0x00,
+        ]);
+        #[cfg(target_os = "macos")]
+        attr_bytes.extend_from_slice([
+            0x78, 0x56, 0x00, 0x00,
+        ]);
+        attr_bytes.extend_from_slice(&[
+            0xa4, 0x41, 0x00, 0x00, 0x55, 0x00, 0x00, 0x00, 0x66, 0x00, 0x00, 0x00,
+            0x77, 0x00, 0x00, 0x00, 0x88, 0x00, 0x00, 0x00,
+        ]);
+        #[cfg(target_os = "macos")]
+        attr_bytes.extend_from_slice(&[
+            0x99, 0x00, 0x00, 0x00,
+        ]);
+        #[cfg(feature = "abi-7-9")]
+        attr_bytes.extend_from_slice(&[
+            0xbb, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+        ]);
+
+        let mut expected = Vec::new();
+        // header
+        expected.extend_from_slice(&[
+            0x50, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0xef, 0xbe, 0xad, 0xde, 0x00, 0x00, 0x00, 0x00,
+        ]);
+        // attr 1
+        expected.extend_from_slice(&attr_bytes);
+        // dir entry 1
+        expected.extend_from_slice(&[
+            0xbb, 0xaa, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x05, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
+            0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x00, 0x00, 0x00,
+        ]);
+        // attr 2 has a different ino value in two positions
+        attr_bytes[0]=0xdd;
+        attr_bytes[1]=0xcc;
+        attr_bytes[40]=0xdd;
+        attr_bytes[41]=0xcc;
+        // attr 2 has a different file permission in one position
+        let i = if cfg!(target_os = "macos") {113} else {101};
+        attr_bytes[i]=0x81;
+        expected.extend_from_slice(&attr_bytes);
+        // dir entry 2
+        expected.extend_from_slice(&[
+            0xdd, 0xcc, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x08, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00,
+            0x77, 0x6f, 0x72, 0x6c, 0x64, 0x2e, 0x72, 0x73,
+        ]);
+        // correct the header
+        expected[0] = (expected.len()) as u8;
         // test reply will be compared to expected
         let sender = AssertSender {expected};
         let replyhandler: ReplyHandler = ReplyHandler::new(0xdeadbeef, sender);
+        let time = UNIX_EPOCH + Duration::new(0x1234, 0x5678);
+        let ttl = Duration::new(0x8765, 0x4321);
+        let attr1 = FileAttr {
+            ino: 0xaabb,
+            size: 0x22,
+            blocks: 0x33,
+            atime: time,
+            mtime: time,
+            ctime: time,
+            crtime: time,
+            kind: FileType::Directory,
+            perm: 0o644,
+            nlink: 0x55,
+            uid: 0x66,
+            gid: 0x77,
+            rdev: 0x88,
+            flags: 0x99,
+            blksize: 0xbb,
+        };
+        let mut attr2 = attr1; //implicit copy
+        attr2.ino = 0xccdd;
+        attr2.kind = FileType::RegularFile;
+        let generation = Some(0xaa);
+        let entries = vec!(
+            (
+                Dirent {
+                    ino: 0xaabb,
+                    offset: 1,
+                    kind: FileType::Directory,
+                    name: OsString::from("hello").into(),
+                },
+                Entry {
+                    ino: 0xaabb,
+                    generation,
+                    file_ttl: ttl,
+                    attr: attr1,
+                    attr_ttl: ttl,
+                }
+            ),
+            (
+                Dirent {
+                    ino: 0xccdd,
+                    offset: 2,
+                    kind: FileType::RegularFile,
+                    name: OsString::from("world.rs").into(),
+                },
+                Entry {
+                    ino:0xccdd,
+                    generation,
+                    file_ttl: ttl,
+                    attr: attr2,
+                    attr_ttl: ttl,
+                }
+            )
+        );
+        replyhandler.dirplus(&entries.into(), std::mem::size_of::<u8>()*4096, 0);
     }
 
     #[test]

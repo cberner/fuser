@@ -503,10 +503,14 @@ impl<'a> Request<'a> {
                     self.request.nodeid().into(),
                     x.file_handle().into(),
                     x.offset(),
+                    x.size()
                 );
                 match response {
                     Ok(entries_list_result)=> {
                         self.replyhandler.dir(
+                            &entries_list_result,
+                            x.size() as usize,
+                            x.offset(),
                         )
                     }
                     Err(err)=>{
@@ -818,10 +822,14 @@ impl<'a> Request<'a> {
                     self.request.nodeid().into(),
                     x.file_handle().into(),
                     x.offset(),
+                    x.size()
                 );
                 match response {
                     Ok(plus_entries_list_result)=> {
                         self.replyhandler.dirplus(
+                            &plus_entries_list_result,
+                            x.size() as usize,
+                            x.offset()
                         )
                     }
                     Err(err)=>{

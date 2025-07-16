@@ -34,7 +34,7 @@ pub use reply::Ioctl;
 pub use passthrough::BackingId;
 #[cfg(target_os = "macos")]
 pub use reply::XTimes;
-pub use reply::{Entry, FileAttr, FileType, Open, Statfs, Xattr, Lock};
+pub use reply::{Entry, FileAttr, FileType, Dirent, DirentList, DirentPlusList, Open, Statfs, Xattr, Lock};
 pub use ll::Errno;
 pub use request::RequestMeta;
 pub use session::{BackgroundSession, Session, SessionACL, SessionUnmounter};
@@ -628,39 +628,45 @@ pub trait Filesystem {
     }
 
     /// Read directory.
-    /// Send a buffer filled using buffer.fill(), with size not exceeding the
-    /// requested size. Send an empty buffer on end of stream. fh will contain the
-    /// value set by the opendir method, or will be undefined if the opendir method
-    /// didn't set any value.
-    fn readdir(
+    /// The filesystem should return a list of directory entries.
+    /// A buffer will be filled with entries from up to `max_bytes`.
+    /// An empty list indicates the end of the stream.
+    /// `fh` will contain the value set by the opendir method, or will be undefined if the
+    /// opendir method didn't set any value.
+    fn readdir<'dir, 'name>(
         &mut self,
         req: RequestMeta,
         ino: u64,
         fh: u64,
         offset: i64,
-    ) -> Result<(), Errno> {
+        max_bytes: u32
+    ) -> Result<DirentList<'dir, 'name>, Errno> {
         warn!(
-            "[Not Implemented] readdir(ino: {:#x?}, fh: {}, offset: {})",
-            ino, fh, offset
+            "[Not Implemented] readdir(ino: {:#x?}, fh: {}, offset: {}, max_bytes: {})",
+            ino, fh, offset, max_bytes
         );
         Err(Errno::ENOSYS)
     }
 
     /// Read directory.
-    /// Send a buffer filled using buffer.fill(), with size not exceeding the
-    /// requested size. Send an empty buffer on end of stream. fh will contain the
-    /// value set by the opendir method, or will be undefined if the opendir method
-    /// didn't set any value.
-    fn readdirplus(
+    /// Similar to `readdir`, but also returns the attributes of each directory entry.
+    /// The filesystem should return a list of tuples of directory entries and their attributes.
+    /// A buffer will be filled with entries and attributes up to `max_bytes`.
+    /// An empty list indicates the end of the stream.
+    /// `fh` will contain the value set by the opendir method, or will be
+    /// undefined if the opendir method didn't set any value.
+    #[cfg(feature = "abi-7-21")]
+    fn readdirplus<'dir, 'name>(
         &mut self,
         req: RequestMeta,
         ino: u64,
         fh: u64,
         offset: i64,
-    ) -> Result<(), Errno> {
+        max_bytes: u32,
+    ) -> Result<DirentPlusList<'dir, 'name>, Errno> {
         warn!(
-            "[Not Implemented] readdirplus(ino: {:#x?}, fh: {}, offset: {})",
-            ino, fh, offset
+            "[Not Implemented] readdirplus(ino: {:#x?}, fh: {}, offset: {}, max_bytes: {})",
+            ino, fh, offset, max_bytes
         );
         Err(Errno::ENOSYS)
     }

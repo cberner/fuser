@@ -2,8 +2,6 @@ use std::{
     convert::TryInto,
     io::IoSlice,
     mem::size_of,
-    os::unix::prelude::OsStrExt,
-    path::Path,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -222,7 +220,9 @@ impl<'a> Response<'a> {
     }
 
     // TODO: Are you allowed to send data while result != 0?
-    pub(crate) fn new_ioctl(result: i32, data: &[IoSlice<'_>]) -> Self {
+    // TODO: This used to be IoSlice -- does that have any additional utility here?
+    #[cfg(feature = "abi-7-11")]
+    pub(crate) fn new_ioctl(result: i32, data: &[u8]) -> Self {
         let r = abi::fuse_ioctl_out {
             result,
             // these fields are only needed for unrestricted ioctls
@@ -232,9 +232,7 @@ impl<'a> Response<'a> {
         };
         // TODO: Don't copy this data
         let mut v: ResponseBuf = ResponseBuf::from_slice(r.as_bytes());
-        for x in data {
-            v.extend_from_slice(x)
-        }
+        v.extend_from_slice(data);
         Self::Data(v)
     }
 
@@ -257,6 +255,7 @@ impl<'a> Response<'a> {
         Self::from_struct(&r)
     }
 
+    #[cfg(feature = "abi-7-24")]
     pub(crate) fn new_lseek(offset: i64) -> Self {
         let r = abi::fuse_lseek_out { offset };
         Self::from_struct(&r)
@@ -381,6 +380,8 @@ impl EntListBuf {
     }
 }
 
+/*
+// TODO: strong typing on `offset` values.
 #[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord)]
 pub struct DirEntOffset(pub i64);
 impl From<DirEntOffset> for i64 {
@@ -388,37 +389,19 @@ impl From<DirEntOffset> for i64 {
         x.0
     }
 }
+*/
 
+/// Used to respond to [ReaddirPlus] requests.
 #[derive(Debug)]
-pub struct DirEntry<T: AsRef<Path>> {
-    ino: INodeNo,
-    offset: DirEntOffset,
-    kind: FileType,
-    name: T,
-}
-
-impl<T: AsRef<Path>> DirEntry<T> {
-    pub fn new(ino: INodeNo, offset: DirEntOffset, kind: FileType, name: T) -> DirEntry<T> {
-        DirEntry::<T> {
-            ino,
-            offset,
-            kind,
-            name,
-        }
-    }
-}
-
-/// Used to respond to [ReadDirPlus] requests.
-#[derive(Debug)]
-pub struct DirEntList(EntListBuf);
-impl From<DirEntList> for Response<'_> {
-    fn from(l: DirEntList) -> Self {
+pub struct DirentBuf(EntListBuf);
+impl From<DirentBuf> for Response<'_> {
+    fn from(l: DirentBuf) -> Self {
         assert!(l.0.buf.len() <= l.0.max_size);
         Response::new_directory(l.0)
     }
 }
 
-impl DirEntList {
+impl DirentBuf {
     pub(crate) fn new(max_size: usize) -> Self {
         Self(EntListBuf::new(max_size))
     }
@@ -426,63 +409,34 @@ impl DirEntList {
     /// A transparent offset value can be provided for each entry. The kernel uses these
     /// value to request the next entries in further readdir calls
     #[must_use]
-    pub fn push<T: AsRef<Path>>(&mut self, ent: &DirEntry<T>) -> bool {
-        let name = ent.name.as_ref().as_os_str().as_bytes();
+    pub fn push(&mut self, ent: &crate::Dirent<'_>) -> bool {
+        let name = ent.name.try_borrow()
+            .expect("Borrow name from dirent failed");
         let header = abi::fuse_dirent {
             ino: ent.ino.into(),
-            off: ent.offset.0,
+            off: ent.offset,
             namelen: name.len().try_into().expect("Name too long"),
             typ: mode_from_kind_and_perm(ent.kind, 0) >> 12,
         };
-        self.0.push([header.as_bytes(), name])
+        self.0.push([header.as_bytes(), &name])
     }
 }
 
+/// Used to respond to [Readdir] requests.
+#[cfg(feature = "abi-7-21")]
 #[derive(Debug)]
-pub struct DirEntryPlus<T: AsRef<Path>> {
-    #[allow(unused)] // We use `attr.ino` instead
-    ino: INodeNo,
-    generation: Generation,
-    offset: DirEntOffset,
-    name: T,
-    entry_valid: Duration,
-    attr: Attr,
-    attr_valid: Duration,
-}
+pub struct DirentPlusBuf(EntListBuf);
 
-impl<T: AsRef<Path>> DirEntryPlus<T> {
-    pub fn new(
-        ino: INodeNo,
-        generation: Generation,
-        offset: DirEntOffset,
-        name: T,
-        entry_valid: Duration,
-        attr: Attr,
-        attr_valid: Duration,
-    ) -> Self {
-        Self {
-            ino,
-            generation,
-            offset,
-            name,
-            entry_valid,
-            attr,
-            attr_valid,
-        }
-    }
-}
-
-/// Used to respond to [ReadDir] requests.
-#[derive(Debug)]
-pub struct DirEntPlusList(EntListBuf);
-impl From<DirEntPlusList> for Response<'_> {
-    fn from(l: DirEntPlusList) -> Self {
+#[cfg(feature = "abi-7-21")]
+impl From<DirentPlusBuf> for Response<'_> {
+    fn from(l: DirentPlusBuf) -> Self {
         assert!(l.0.buf.len() <= l.0.max_size);
         Response::new_directory(l.0)
     }
 }
 
-impl DirEntPlusList {
+#[cfg(feature = "abi-7-21")]
+impl DirentPlusBuf {
     pub(crate) fn new(max_size: usize) -> Self {
         Self(EntListBuf::new(max_size))
     }
@@ -490,26 +444,27 @@ impl DirEntPlusList {
     /// A transparent offset value can be provided for each entry. The kernel uses these
     /// value to request the next entries in further readdir calls
     #[must_use]
-    pub fn push<T: AsRef<Path>>(&mut self, x: &DirEntryPlus<T>) -> bool {
-        let name = x.name.as_ref().as_os_str().as_bytes();
+    pub fn push(&mut self, x: &crate::Dirent<'_>, y: &crate::Entry) -> bool {
+        let name = x.name.try_borrow()
+            .expect("Borrow name from dirent failed");
         let header = abi::fuse_direntplus {
             entry_out: abi::fuse_entry_out {
-                nodeid: x.attr.attr.ino,
-                generation: x.generation.into(),
-                entry_valid: x.entry_valid.as_secs(),
-                attr_valid: x.attr_valid.as_secs(),
-                entry_valid_nsec: x.entry_valid.subsec_nanos(),
-                attr_valid_nsec: x.attr_valid.subsec_nanos(),
-                attr: x.attr.attr,
+                nodeid: y.ino,
+                generation: y.generation.unwrap_or(1).into(),
+                entry_valid: y.file_ttl.as_secs(),
+                attr_valid: y.attr_ttl.as_secs(),
+                entry_valid_nsec: y.file_ttl.subsec_nanos(),
+                attr_valid_nsec: y.attr_ttl.subsec_nanos(),
+                attr: fuse_attr_from_attr(&y.attr),
             },
             dirent: abi::fuse_dirent {
-                ino: x.attr.attr.ino,
-                off: x.offset.into(),
+                ino: x.ino,
+                off: x.offset,
                 namelen: name.len().try_into().expect("Name too long"),
-                typ: x.attr.attr.mode >> 12,
+                typ: mode_from_kind_and_perm(x.kind, 0) >> 12,
             },
         };
-        self.0.push([header.as_bytes(), name])
+        self.0.push([header.as_bytes(), &name])
     }
 }
 
@@ -880,19 +835,19 @@ mod test {
             0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x08, 0x00,
             0x00, 0x00, 0x77, 0x6f, 0x72, 0x6c, 0x64, 0x2e, 0x72, 0x73,
         ];
-        let mut buf = DirEntList::new(4096);
-        assert!(!buf.push(&DirEntry::new(
-            INodeNo(0xaabb),
-            DirEntOffset(1),
-            FileType::Directory,
-            "hello"
-        )));
-        assert!(!buf.push(&DirEntry::new(
-            INodeNo(0xccdd),
-            DirEntOffset(2),
-            FileType::RegularFile,
-            "world.rs"
-        )));
+        let mut buf = DirentBuf::new(4096);
+        assert!(!buf.push(&crate::Dirent {
+            ino: 0xaabb,
+            offset: 1,
+            kind: FileType::Directory,
+            name: "hello".into()
+        }));
+        assert!(!buf.push(&crate::Dirent {
+            ino: 0xccdd,
+            offset: 2,
+            kind: FileType::RegularFile,
+            name: "world.rs".into()
+        }));
         let r: Response<'_> = buf.into();
         assert_eq!(
             r.with_iovec(RequestId(0xdeadbeef), ioslice_to_vec),
