@@ -3,14 +3,12 @@
 //! A reply handler object is created to guarantee that each fuse request receives a reponse exactly once.
 //! Either the request logic will call the one of the reply handler's self-destructive methods, 
 //! or, if the reply handler goes out of scope before that happens, the drop trait will send an error response. 
-use crate::KernelConfig;
+
+use crate::{Container, Bytes, KernelConfig};
 #[cfg(feature = "abi-7-40")]
 use crate::{consts::FOPEN_PASSTHROUGH, passthrough::BackingId};
-use crate::ll;
-use libc::c_int;
-use log::{error, warn};
-use std::convert::AsRef;
-use std::ffi::OsStr;
+#[allow(unused_imports)]
+use log::{error, warn, info, debug};
 use std::fmt;
 use std::io::IoSlice;
 #[cfg(feature = "abi-7-40")]
@@ -220,6 +218,29 @@ pub struct Lock {
     pub pid: u32,
 }
 
+/// `Xattr` represents the response for extended attribute operations (`getxattr`, `listxattr`).
+/// It can either indicate the size of the attribute data or provide the data itself
+/// using `Bytes` for flexible ownership.
+#[derive(Debug)]
+pub enum Xattr<'a> {
+    /// Indicates the size of the extended attribute data. Used when the caller
+    /// provides a zero-sized buffer to query the required buffer size.
+    Size(u32),
+    /// Contains the extended attribute data. `Bytes` allows this data to be
+    /// returned in a zero-copy data ownership model.
+    Data(Bytes<'a>),
+}
+
+#[cfg(feature = "abi-7-11")]
+#[derive(Debug)]
+/// File io control reponse data
+pub struct Ioctl<'a> {
+    /// Result of the ioctl operation
+    pub result: i32,
+    /// Data to be returned with the ioctl operation
+    pub data: Bytes<'a>
+}
+
 //
 // Methods to reply to a request for each kind of data
 //
@@ -237,8 +258,8 @@ impl ReplyHandler {
     }
 
     /// Reply to a general request with data
-    pub fn data(self, data: &[u8]) {
-        self.send_ll(&ll::Response::new_slice(data));
+    pub fn data<'a>(self, data: Bytes<'a>) {
+        self.send_ll(&ll::Response::new_slice(&data.borrow()));
     }
 
     // Reply to an init request with available features
@@ -355,9 +376,11 @@ impl ReplyHandler {
         self.send_ll(&ll::Response::new_bmap(block))
     }
 
-     #[cfg(feature = "abi-7-11")]
+    #[cfg(feature = "abi-7-11")]
     /// Reply to a request with an ioctl
-    pub fn ioctl(self) {}
+    pub fn ioctl(self, ioctl: Ioctl<'_>) {
+        self.send_ll(&ll::Response::new_ioctl(ioctl.result, &ioctl.data.borrow()));
+    }
 
     #[cfg(feature = "abi-7-11")]
     /// Reply to a request with a poll result
@@ -366,14 +389,85 @@ impl ReplyHandler {
     }
 
     /// Reply to a request with a filled directory buffer
-    pub fn dir(self) {}
+    pub fn dir(
+        self,
+        entries_list: &DirentList<'_, '_>,
+        size: usize,
+        min_offset: i64,
+    ) {
+        let mut buf = DirentBuf::new(size);
+        let entries = match entries_list.try_borrow(){
+            Ok(entries) => entries,
+            Err(e) => {
+                log::error!("ReplyHandler::dir: Borrow Error: {:?}", e);
+                return;
+            }
+        };
+        for item in entries.iter() {
+            if item.offset < min_offset {
+                log::debug!("ReplyHandler::dir: skipping item with offset #{}", item.offset);
+                continue;
+            } else {
+                log::debug!("ReplyHandler::dir: processing item with offset #{}", item.offset);
+            }
+            let full= buf.push(item);
+            if full {
+                log::debug!("ReplyHandler::dir: buffer full!");
+                break;
+            }
+        }
+        self.send_ll(&buf.into());
+    }
 
     #[cfg(feature = "abi-7-21")]
-    /// Reply to a request with a filled directory plus buffer
-    pub fn dirplus(self) {}
+    // Reply to a request with a filled directory plus buffer
+    pub fn dirplus(
+        self,
+        entries_plus_list: &DirentPlusList<'_, '_>,
+        size: usize,
+        min_offset: i64,
+    ) {
+        let mut buf = DirentPlusBuf::new(size);
+        let entries = match entries_plus_list.try_borrow(){
+            Ok(entries) => entries,
+            Err(e) => {
+                log::error!("ReplyHandler::dirplus: Borrow Error: {:?}", e);
+                return;
+            }
+        };
+        for (dirent, entry) in entries.iter() {
+            if dirent.offset < min_offset {
+                log::debug!("ReplyHandler::dirplus: skipping item with offset #{}", dirent.offset);
+                continue;
+            } else {
+                log::debug!("ReplyHandler::dirplus: processing item with offset #{}", dirent.offset);
+            }
+            let full = buf.push(&dirent, &entry);
+            if full {
+                log::debug!("ReplyHandler::dirplus: buffer full!");
+                break;
+            }
+        }
+        self.send_ll(&buf.into());
+    }
 
     /// Reply to a request with extended attributes.
-    pub fn xattr(self) {}
+    pub fn xattr(self, reply: Xattr<'_>) {
+        match reply {
+            Xattr::Size(s) => self.xattr_size(s),
+            Xattr::Data(d) => self.xattr_data(d),
+        }
+    }
+
+    /// Reply to a request with the size of an xattr result.
+    pub fn xattr_size(self, size: u32) {
+        self.send_ll(&ll::Response::new_xattr_size(size))
+    }
+
+    /// Reply to a request with the data in an xattr result.
+    pub fn xattr_data(self, data: Bytes<'_>) {
+        self.send_ll(&ll::Response::new_slice(&data.borrow()))
+    }
 
     #[cfg(feature = "abi-7-24")]
     /// Reply to a request with a seeked offset
@@ -494,7 +588,7 @@ mod test {
             ],
         };
         let replyhandler: ReplyHandler = ReplyHandler::new(0xdeadbeef, sender);
-        replyhandler.data(&[0xde, 0xad, 0xbe, 0xef]);
+        replyhandler.data(Bytes::Ref(&[0xde, 0xad, 0xbe, 0xef]));
     }
 
     #[test]
@@ -869,6 +963,7 @@ mod test {
             ],
         };
         let replyhandler: ReplyHandler = ReplyHandler::new(0xdeadbeef, sender);
+        replyhandler.xattr(Xattr::Size(0x12345678));
     }
 
     #[test]
@@ -880,6 +975,7 @@ mod test {
             ],
         };
         let replyhandler: ReplyHandler = ReplyHandler::new(0xdeadbeef, sender);
+        replyhandler.xattr(Xattr::Data(vec![0x11, 0x22, 0x33, 0x44].into()));
     }
 
     impl super::ReplySender for SyncSender<()> {

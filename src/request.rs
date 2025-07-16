@@ -405,7 +405,7 @@ impl<'a> Request<'a> {
                 );
                 match response {
                     Ok(data)=> {
-                        self.replyhandler.data(data.as_ref())
+                        self.replyhandler.data(data)
                     }
                     Err(err)=>{
                         self.replyhandler.error(err)
