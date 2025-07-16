@@ -13,7 +13,7 @@ use std::convert::TryInto;
 
 use crate::channel::ChannelSender;
 use crate::ll::Request as _;
-use crate::reply::{ReplyHandler, ReplySender};
+use crate::reply::{ReplyHandler};
 use crate::session::{Session, SessionACL};
 use crate::Filesystem;
 #[cfg(feature = "abi-7-11")]

@@ -79,18 +79,18 @@ impl<'a> Response<'a> {
     pub(crate) fn new_entry(
         ino: INodeNo,
         generation: Generation,
-        attr: &Attr,
+        file_ttl: Duration,
+        attr: &crate::FileAttr,
         attr_ttl: Duration,
-        entry_ttl: Duration,
     ) -> Self {
         let d = abi::fuse_entry_out {
             nodeid: ino.into(),
             generation: generation.into(),
-            entry_valid: entry_ttl.as_secs(),
+            entry_valid: file_ttl.as_secs(),
             attr_valid: attr_ttl.as_secs(),
-            entry_valid_nsec: entry_ttl.subsec_nanos(),
+            entry_valid_nsec: file_ttl.subsec_nanos(),
             attr_valid_nsec: attr_ttl.subsec_nanos(),
-            attr: attr.attr,
+            attr: fuse_attr_from_attr(&attr),
         };
         Self::from_struct(d.as_bytes())
     }
@@ -611,7 +611,7 @@ mod test {
             flags: 0x99,
             blksize: 0xbb,
         };
-        let r = Response::new_entry(INodeNo(0x11), Generation(0xaa), &attr.into(), ttl, ttl);
+        let r = Response::new_entry(INodeNo(0x11), Generation(0xaa), ttl, &attr.into(), ttl);
         assert_eq!(
             r.with_iovec(RequestId(0xdeadbeef), ioslice_to_vec),
             expected

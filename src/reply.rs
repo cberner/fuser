@@ -15,12 +15,10 @@ use std::fmt;
 use std::io::IoSlice;
 #[cfg(feature = "abi-7-40")]
 use std::os::fd::BorrowedFd;
-use std::time::Duration;
-
-#[cfg(target_os = "macos")]
-use std::time::SystemTime;
-
-use crate::{FileAttr, FileType};
+use std::time::{Duration, SystemTime};
+use zerocopy::IntoBytes;
+#[cfg(feature = "serializable")]
+use serde::{Deserialize, Serialize};
 
 /// Generic reply callback to send data
 pub(crate) trait ReplySender: Send + Sync + Unpin + 'static {
@@ -94,6 +92,134 @@ impl Drop for ReplyHandler {
     }
 }
 
+/// File types
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serializable", derive(Serialize, Deserialize))]
+pub enum FileType {
+    /// Named pipe (S_IFIFO)
+    NamedPipe,
+    /// Character device (S_IFCHR)
+    CharDevice,
+    /// Block device (S_IFBLK)
+    BlockDevice,
+    /// Directory (S_IFDIR)
+    Directory,
+    /// Regular file (S_IFREG)
+    RegularFile,
+    /// Symbolic link (S_IFLNK)
+    Symlink,
+    /// Unix domain socket (S_IFSOCK)
+    Socket,
+}
+
+/// File attributes
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serializable", derive(Serialize, Deserialize))]
+pub struct FileAttr {
+    /// Unique number for this file
+    pub ino: u64,
+    /// Size in bytes
+    pub size: u64,
+    /// Size in blocks
+    pub blocks: u64,
+    /// Time of last access
+    pub atime: SystemTime,
+    /// Time of last modification
+    pub mtime: SystemTime,
+    /// Time of last change
+    pub ctime: SystemTime,
+    /// Time of creation (macOS only)
+    pub crtime: SystemTime,
+    /// Kind of file (directory, file, pipe, etc)
+    pub kind: FileType,
+    /// Permissions
+    pub perm: u16,
+    /// Number of hard links
+    pub nlink: u32,
+    /// User id
+    pub uid: u32,
+    /// Group id
+    pub gid: u32,
+    /// Rdev
+    pub rdev: u32,
+    /// Block size
+    pub blksize: u32,
+    /// Flags (macOS only, see chflags(2))
+    pub flags: u32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serializable", derive(Serialize, Deserialize))]
+/// An entry in the kernel's file cache
+pub struct Entry {
+    /// file inode number
+    pub ino: u64,
+    /// file generation number
+    pub generation: Option<u64>,
+    /// duration to cache file identity
+    pub file_ttl: Duration,
+    /// file attributes
+    pub attr: FileAttr,
+    /// duration to cache file attributes
+    pub attr_ttl: Duration,
+}
+
+#[derive(Debug, Clone)] //TODO #[derive(Copy)]
+#[cfg_attr(feature = "serializable", derive(Serialize, Deserialize))]
+/// Open file handle response data
+pub struct Open {
+    /// File handle for the opened file
+    pub fh: u64,
+    /// Flags for the opened file
+    pub flags: u32
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Debug)]
+/// Xtimes response data
+pub struct XTimes {
+    /// Backup time
+    pub bkuptime: SystemTime,
+    /// Creation time
+    pub crtime: SystemTime
+}
+
+#[derive(Copy, Clone, Debug)]
+/// Statfs response data
+pub struct Statfs {
+    /// Total blocks (in units of frsize)
+    pub blocks: u64,
+    /// Free blocks
+    pub bfree: u64,
+    /// Free blocks for unprivileged users
+    pub bavail: u64,
+    /// Total inodes
+    pub files: u64,
+    /// Free inodes
+    pub ffree: u64,
+    /// Filesystem block size
+    pub bsize: u32,
+    /// Maximum filename length
+    pub namelen: u32,
+    /// Fundamental file system block size
+    pub frsize: u32
+}
+
+#[derive(Copy, Clone, Debug)]
+/// File lock response data
+pub struct Lock {
+    /// start of locked byte range
+    pub start: u64,
+    /// end of locked byte range
+    pub end: u64,
+    // NOTE: lock field is defined as u32 in fuse_kernel.h in libfuse. However, it is treated as signed
+    // TODO enum {F_RDLCK, F_WRLCK, F_UNLCK}
+    /// kind of lock (read and/or write)
+    pub typ: i32,
+    /// PID of process blocking our lock
+    pub pid: u32,
+}
+
 //
 // Methods to reply to a request for each kind of data
 //
@@ -157,7 +283,16 @@ impl ReplyHandler {
     }
 
     /// Reply to a request with a file entry
-    pub fn entry(self) {}
+    pub fn entry(self, entry: Entry) {
+        self.send_ll(&ll::Response::new_entry(
+            ll::INodeNo(entry.ino),
+            ll::Generation(entry.generation.unwrap_or(1)),
+            entry.file_ttl,
+            &entry.attr.into(),
+            entry.attr_ttl,
+
+        ));
+    }
 
     /// Reply to a request with a file attributes
     pub fn attr(self, attr: FileAttr, ttl: Duration) {
@@ -166,10 +301,16 @@ impl ReplyHandler {
 
     #[cfg(target_os = "macos")]
     /// Reply to a request with xtimes attributes
-    pub fn xtimes(self) {}
+    pub fn xtimes(self, xtimes: XTimes) {
+        self.send_ll(&ll::Response::new_xtimes(xtimes.bkuptime, xtimes.crtime))
+    }
 
     /// Reply to a request with a newly opened file handle
-    pub fn opened(self) {}
+    pub fn opened(self, open: Open) {
+        #[cfg(feature = "abi-7-40")]
+        assert_eq!(open.flags & FOPEN_PASSTHROUGH, 0);
+        self.send_ll(&ll::Response::new_open(ll::FileHandle(open.fh), open.flags, 0))
+    }
 
     /// Reply to a request with the number of bytes written
     pub fn written(self, size: u32) {
@@ -179,25 +320,35 @@ impl ReplyHandler {
     /// Reply to a statfs request 
     pub fn statfs(
         self,
-        blocks: u64,
-        bfree: u64,
-        bavail: u64,
-        files: u64,
-        ffree: u64,
-        bsize: u32,
-        namelen: u32,
-        frsize: u32,
+        statfs: Statfs
     ) {
         self.send_ll(&ll::Response::new_statfs(
-            blocks, bfree, bavail, files, ffree, bsize, namelen, frsize,
+            statfs.blocks, statfs.bfree, statfs.bavail, statfs.files, statfs.ffree, statfs.bsize, statfs.namelen, statfs.frsize,
         ))
     }
 
     /// Reply to a request with a newle created file entry and its newly open file handle
-    pub fn created(self) {}
+    pub fn created(self, entry: Entry, open: Open) {
+        #[cfg(feature = "abi-7-40")]
+        assert_eq!(open.flags & FOPEN_PASSTHROUGH, 0);
+        self.send_ll(&ll::Response::new_create(
+            &entry.file_ttl,
+            &entry.attr.into(),
+            ll::Generation(entry.generation.unwrap_or(1)),
+            ll::FileHandle(open.fh),
+            open.flags,
+            0,
+        ))
+    }
 
     /// Reply to a request with a file lock
-    pub fn locked(self) {}
+    pub fn locked(self, lock: Lock) {
+        self.send_ll(&ll::Response::new_lock(&ll::Lock{
+            range: (lock.start, lock.end),
+            typ: lock.typ,
+            pid: lock.pid,
+        }))
+    }
 
     /// Reply to a request with a bmap
     pub fn bmap(self, block: u64) {
@@ -348,6 +499,63 @@ mod test {
 
     #[test]
     fn reply_entry() {
+        // prepare the expected message
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&[
+                // header
+                0x98, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0xef, 0xbe, 0xad, 0xde, 0x00, 0x00, 0x00, 0x00,
+                // ino
+                0x11, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                // generation
+                0xaa, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                // ttl
+                0x65, 0x87, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x65, 0x87, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x21, 0x43, 0x00, 0x00, 0x21, 0x43, 0x00, 0x00,
+                // file attributes
+                0x11, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x22, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x33, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                // file times (s)
+                0x34, 0x12, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x34, 0x12, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x34, 0x12, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ]);
+        #[cfg(target_os = "macos")]
+        expected.extend_from_slice(&[
+                // crtime (s)
+                0x34, 0x12, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ]);
+        expected.extend_from_slice(&[
+                // file times (ns)
+                0x78, 0x56, 0x00, 0x00,
+                0x78, 0x56, 0x00, 0x00,
+                0x78, 0x56, 0x00, 0x00,
+        ]);
+        #[cfg(target_os = "macos")]
+        expected.extend_from_slice([
+                // crtime (ns)
+                0x78, 0x56, 0x00, 0x00,
+        ]);
+        expected.extend_from_slice(&[
+                // file permissions
+                0xa4, 0x81, 0x00, 0x00,
+                // file owners
+                0x55, 0x00, 0x00, 0x00, 0x66, 0x00, 0x00, 0x00,
+                0x77, 0x00, 0x00, 0x00, 0x88, 0x00, 0x00, 0x00,
+        ]);
+        #[cfg(target_os = "macos")]
+        expected.extend_from_slice(&[
+                // flags
+                0x99, 0x00, 0x00, 0x00,
+        ]);
+        #[cfg(feature = "abi-7-9")]
+        expected.extend_from_slice(&[
+                // blksize
+                0xbb, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+        ]);
+        // correct the header
         expected[0] = (expected.len()) as u8;
         // test reply will be compare with the expected message
         let sender = AssertSender { expected };
@@ -374,6 +582,13 @@ mod test {
         };
         // send the test reply
         replyhandler.entry(
+            Entry{
+                ino: attr.ino,
+                generation: Some(0xaa),
+                file_ttl: ttl,
+                attr: attr,
+                attr_ttl: ttl,
+            }
         );
     }
 
@@ -447,6 +662,10 @@ mod test {
         let replyhandler: ReplyHandler = ReplyHandler::new(0xdeadbeef, sender);
         let time = UNIX_EPOCH + Duration::new(0x1234, 0x5678);
         replyhandler.xtimes(
+            XTimes{
+                bkuptime: time,
+                crtime: time,
+            }
         );
     }
 
@@ -461,6 +680,7 @@ mod test {
         };
         let replyhandler: ReplyHandler = ReplyHandler::new(0xdeadbeef, sender);
         replyhandler.opened(
+            Open { fh: 0x1122, flags: 0x33}
         );
     }
 
@@ -491,6 +711,16 @@ mod test {
         };
         let replyhandler: ReplyHandler = ReplyHandler::new(0xdeadbeef, sender);
         replyhandler.statfs(
+            Statfs{
+                blocks: 0x11,
+                bfree: 0x22,
+                bavail: 0x33,
+                files: 0x44,
+                ffree: 0x55,
+                bsize: 0x66,
+                namelen: 0x77,
+                frsize: 0x88
+            }
         );
     }
 
@@ -523,7 +753,7 @@ mod test {
                 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x78, 0x56, 0x00, 0x00, 0x78, 0x56, 0x00, 0x00,
                 0x78, 0x56, 0x00, 0x00, 0xa4, 0x81, 0x00, 0x00, 0x55, 0x00, 0x00, 0x00, 0x66, 0x00,
                 0x00, 0x00, 0x77, 0x00, 0x00, 0x00, 0x88, 0x00, 0x00, 0x00, 0xbb, 0x00, 0x00, 0x00,
-                0x00, 0x00, 0x00, 0x00, 0xcc, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             ]
         };
 
@@ -558,6 +788,17 @@ mod test {
             blksize: 0xdd,
         };
         replyhandler.created(
+            Entry {
+                ino: attr.ino,
+                generation: Some(0xaa),
+                file_ttl: ttl,
+                attr: attr,
+                attr_ttl: ttl,
+            },
+            Open {
+                fh: 0xbb,
+                flags: 0x0f
+            }
         );
     }
 
@@ -572,6 +813,12 @@ mod test {
         };
         let replyhandler: ReplyHandler = ReplyHandler::new(0xdeadbeef, sender);
         replyhandler.locked(
+            Lock {
+                start: 0x11,
+                end: 0x22,
+                typ: 0x33,
+                pid: 0x44
+            }
         );
     }
 
