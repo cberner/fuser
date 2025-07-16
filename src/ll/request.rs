@@ -5,7 +5,7 @@
 
 use super::fuse_abi::{fuse_in_header, fuse_opcode, InvalidOpcodeError};
 
-use super::{fuse_abi as abi, Errno, Response};
+use super::{fuse_abi as abi, Errno};
 #[cfg(feature = "serializable")]
 use serde::{Deserialize, Serialize};
 use std::{convert::TryFrom, fmt::Display, path::Path};
@@ -226,11 +226,6 @@ pub trait Request: Sized {
 
     /// Returns the PID of the process that triggered this request.
     fn pid(&self) -> u32;
-
-    /// Create an error response for this Request
-    fn reply_err(&self, errno: Errno) -> Response<'_> {
-        Response::new_error(errno)
-    }
 }
 
 macro_rules! impl_request {
@@ -265,8 +260,6 @@ macro_rules! impl_request {
 }
 
 mod op {
-    use crate::ll::Response;
-
     use super::{
         super::{argument::ArgumentIterator, TimeOrNow},
         FilenameInDir, Request,
@@ -987,46 +980,6 @@ mod op {
         pub fn version(&self) -> super::Version {
             super::Version(self.arg.major, self.arg.minor)
         }
-
-        pub fn reply(&self, config: &crate::KernelConfig) -> Response<'a> {
-            let flags = self.capabilities() & config.requested; // use requested features and reported as capable
-
-            let init = fuse_init_out {
-                major: FUSE_KERNEL_VERSION,
-                minor: FUSE_KERNEL_MINOR_VERSION,
-                max_readahead: config.max_readahead,
-                #[cfg(not(feature = "abi-7-36"))]
-                flags: flags as u32,
-                #[cfg(feature = "abi-7-36")]
-                flags: (flags | FUSE_INIT_EXT) as u32,
-                #[cfg(not(feature = "abi-7-13"))]
-                unused: 0,
-                #[cfg(feature = "abi-7-13")]
-                max_background: config.max_background,
-                #[cfg(feature = "abi-7-13")]
-                congestion_threshold: config.congestion_threshold(),
-                max_write: config.max_write,
-                #[cfg(feature = "abi-7-23")]
-                time_gran: config.time_gran.as_nanos() as u32,
-                #[cfg(all(feature = "abi-7-23", not(feature = "abi-7-28")))]
-                reserved: [0; 9],
-                #[cfg(feature = "abi-7-28")]
-                max_pages: config.max_pages(),
-                #[cfg(feature = "abi-7-28")]
-                unused2: 0,
-                #[cfg(all(feature = "abi-7-28", not(feature = "abi-7-36")))]
-                reserved: [0; 8],
-                #[cfg(feature = "abi-7-36")]
-                flags2: (flags >> 32) as u32,
-                #[cfg(all(feature = "abi-7-36", not(feature = "abi-7-40")))]
-                reserved: [0; 7],
-                #[cfg(feature = "abi-7-40")]
-                max_stack_depth: config.max_stack_depth,
-                #[cfg(feature = "abi-7-40")]
-                reserved: [0; 6],
-            };
-            Response::new_data(init.as_bytes())
-        }
     }
 
     /// Open a directory.
@@ -1313,11 +1266,6 @@ mod op {
         header: &'a fuse_in_header,
     }
     impl_request!(Destroy<'a>);
-    impl<'a> Destroy<'a> {
-        pub fn reply(&self) -> Response<'a> {
-            Response::new_empty()
-        }
-    }
 
     /// Control device
     #[cfg(feature = "abi-7-11")]
@@ -1416,6 +1364,25 @@ mod op {
         /// TODO: Don't return fuse_forget_one, this should be private
         pub fn nodes(&self) -> &'a [fuse_forget_one] {
             self.nodes
+        }
+    }
+    #[cfg(feature = "abi-7-16")]
+    use crate::Forget as ForgetAPI; // to distinguish from op::Forget (above)
+    #[cfg(feature = "abi-7-16")]
+    #[allow(clippy::from_over_into)]
+    /// just a convenience function 
+    impl Into<Vec<ForgetAPI>> for BatchForget<'_> {
+        fn into(self) -> Vec<ForgetAPI> {
+            let mut buf = Vec::new();
+            for node in self.nodes {
+                buf.push({
+                    ForgetAPI{
+                        ino: node.nodeid,
+                        nlookup: node.nlookup
+                    }
+                })
+            }
+            buf
         }
     }
 

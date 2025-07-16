@@ -3,6 +3,7 @@
 //! A reply handler object is created to guarantee that each fuse request receives a reponse exactly once.
 //! Either the request logic will call the one of the reply handler's self-destructive methods, 
 //! or, if the reply handler goes out of scope before that happens, the drop trait will send an error response. 
+use crate::KernelConfig;
 #[cfg(feature = "abi-7-40")]
 use crate::{consts::FOPEN_PASSTHROUGH, passthrough::BackingId};
 use crate::ll;
@@ -113,8 +114,47 @@ impl ReplyHandler {
     pub fn data(self, data: &[u8]) {
         self.send_ll(&ll::Response::new_slice(data));
     }
-    /// Reply to an init request with available features
-    pub fn config(self) {}
+
+    // Reply to an init request with available features
+    pub fn config(self, capabilities: u64, config: KernelConfig) {
+        let flags = capabilities & config.requested; // use features requested by fs and reported as capable by kernel
+
+        let init = ll::fuse_abi::fuse_init_out {
+            major: ll::fuse_abi::FUSE_KERNEL_VERSION,
+            minor: ll::fuse_abi::FUSE_KERNEL_MINOR_VERSION,
+            max_readahead: config.max_readahead,
+            #[cfg(not(feature = "abi-7-36"))]
+            flags: flags as u32,
+            #[cfg(feature = "abi-7-36")]
+            flags: (flags | ll::fuse_abi::consts::FUSE_INIT_EXT) as u32,
+            #[cfg(not(feature = "abi-7-13"))]
+            unused: 0,
+            #[cfg(feature = "abi-7-13")]
+            max_background: config.max_background,
+            #[cfg(feature = "abi-7-13")]
+            congestion_threshold: config.congestion_threshold(),
+            max_write: config.max_write,
+            #[cfg(feature = "abi-7-23")]
+            time_gran: config.time_gran.as_nanos() as u32,
+            #[cfg(all(feature = "abi-7-23", not(feature = "abi-7-28")))]
+            reserved: [0; 9],
+            #[cfg(feature = "abi-7-28")]
+            max_pages: config.max_pages(),
+            #[cfg(feature = "abi-7-28")]
+            unused2: 0,
+            #[cfg(all(feature = "abi-7-28", not(feature = "abi-7-36")))]
+            reserved: [0; 8],
+            #[cfg(feature = "abi-7-36")]
+            flags2: (flags >> 32) as u32,
+            #[cfg(all(feature = "abi-7-36", not(feature = "abi-7-40")))]
+            reserved: [0; 7],
+            #[cfg(feature = "abi-7-40")]
+            max_stack_depth: config.max_stack_depth,
+            #[cfg(feature = "abi-7-40")]
+            reserved: [0; 6],
+        };
+        self.send_ll(&ll::Response::new_data(init.as_bytes()));
+    }
 
     /// Reply to a request with a file entry
     pub fn entry(self) {}
