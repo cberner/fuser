@@ -82,73 +82,40 @@ impl<'a> Request<'a> {
             return;
         }
         let op = op_result.unwrap();
+
         // Implement allow_root & access check for auto_unmount
-        if (se.allowed == SessionACL::RootAndOwner
+        let access_denied = if (se.allowed == SessionACL::RootAndOwner
             && self.request.uid() != se.session_owner
             && self.request.uid() != 0)
             || (se.allowed == SessionACL::Owner && self.request.uid() != se.session_owner)
         {
-            #[cfg(feature = "abi-7-21")]
-            {
-                match op {
-                    // Only allow operations that the kernel may issue without a uid set
-                    ll::Operation::Init(_)
-                    | ll::Operation::Destroy(_)
-                    | ll::Operation::Read(_)
-                    | ll::Operation::ReadDir(_)
-                    | ll::Operation::ReadDirPlus(_)
-                    | ll::Operation::BatchForget(_)
-                    | ll::Operation::Forget(_)
-                    | ll::Operation::Write(_)
-                    | ll::Operation::FSync(_)
-                    | ll::Operation::FSyncDir(_)
-                    | ll::Operation::Release(_)
-                    | ll::Operation::ReleaseDir(_) => {}
-                    _ => {
-                        self.replyhandler.error(Errno::EACCES);
-                    }
-                }
+            match op {
+                // Only allow operations that the kernel may issue without a uid set
+                ll::Operation::Init(_)
+                | ll::Operation::Destroy(_)
+                | ll::Operation::Read(_)
+                | ll::Operation::ReadDir(_)
+                | ll::Operation::Forget(_)
+                | ll::Operation::Write(_)
+                | ll::Operation::FSync(_)
+                | ll::Operation::FSyncDir(_)
+                | ll::Operation::Release(_)
+                | ll::Operation::ReleaseDir(_) => false,
+                #[cfg(feature = "abi-7-16")]
+                ll::Operation::BatchForget(_) => false,
+                #[cfg(feature = "abi-7-21")]
+                ll::Operation::ReadDirPlus(_) => false,
+                _ => true,
             }
-            #[cfg(all(feature = "abi-7-16", not(feature = "abi-7-21")))]
-            {
-                match op {
-                    // Only allow operations that the kernel may issue without a uid set
-                    ll::Operation::Init(_)
-                    | ll::Operation::Destroy(_)
-                    | ll::Operation::Read(_)
-                    | ll::Operation::ReadDir(_)
-                    | ll::Operation::BatchForget(_)
-                    | ll::Operation::Forget(_)
-                    | ll::Operation::Write(_)
-                    | ll::Operation::FSync(_)
-                    | ll::Operation::FSyncDir(_)
-                    | ll::Operation::Release(_)
-                    | ll::Operation::ReleaseDir(_) => {}
-                    _ => {
-                        self.replyhandler.error(Errno::EACCES);
-                    }
-                }
-            }
-            #[cfg(not(feature = "abi-7-16"))]
-            {
-                match op {
-                    // Only allow operations that the kernel may issue without a uid set
-                    ll::Operation::Init(_)
-                    | ll::Operation::Destroy(_)
-                    | ll::Operation::Read(_)
-                    | ll::Operation::ReadDir(_)
-                    | ll::Operation::Forget(_)
-                    | ll::Operation::Write(_)
-                    | ll::Operation::FSync(_)
-                    | ll::Operation::FSyncDir(_)
-                    | ll::Operation::Release(_)
-                    | ll::Operation::ReleaseDir(_) => {}
-                    _ => {
-                        self.replyhandler.error(Errno::EACCES);
-                    }
-                }
-            }
+        } else {
+            false
+        };
+
+        if access_denied {
+            self.replyhandler.error(Errno::EACCES);
+            return;
         }
+
         match op {
             // Filesystem initialization
             ll::Operation::Init(x) => {
@@ -194,7 +161,7 @@ impl<'a> Request<'a> {
                 self.replyhandler.error(Errno::EIO);
             }
             // Filesystem destroyed
-            ll::Operation::Destroy(x) => {
+            ll::Operation::Destroy(_x) => {
                 se.filesystem.destroy();
                 se.destroyed = true;
                 self.replyhandler.ok();
@@ -214,7 +181,7 @@ impl<'a> Request<'a> {
                 let response = se.filesystem.lookup(
                     self.meta,
                     self.request.nodeid().into(),
-                    x.name().as_ref(),
+                    x.name()
                 );
                 match response {
                     Ok(entry) => {
@@ -300,7 +267,7 @@ impl<'a> Request<'a> {
                 let response = se.filesystem.mknod(
                     self.meta,
                     self.request.nodeid().into(),
-                    x.name().as_ref(),
+                    x.name(),
                     x.mode(),
                     x.umask(),
                     x.rdev()
@@ -318,7 +285,7 @@ impl<'a> Request<'a> {
                 let response = se.filesystem.mkdir(
                     self.meta,
                     self.request.nodeid().into(),
-                    x.name().as_ref(),
+                    x.name(),
                     x.mode(),
                     x.umask()
                 );
@@ -335,7 +302,7 @@ impl<'a> Request<'a> {
                 let response = se.filesystem.unlink(
                     self.meta,
                     self.request.nodeid().into(),
-                    x.name().into()
+                    x.name()
                 );
                 match response {
                     Ok(())=> {
@@ -350,7 +317,7 @@ impl<'a> Request<'a> {
                 let response = se.filesystem.rmdir(
                     self.meta,
                     self.request.nodeid().into(),
-                    x.name().as_ref(),
+                    x.name()
                 );
                 match response {
                     Ok(())=> {
@@ -365,8 +332,8 @@ impl<'a> Request<'a> {
                 let response = se.filesystem.symlink(
                     self.meta,
                     self.request.nodeid().into(),
-                    x.link_name().as_ref(),
-                    Path::new(x.target()),
+                    x.link_name(),
+                    x.target()
                 );
                 match response {
                     Ok(entry)=> {
@@ -381,9 +348,9 @@ impl<'a> Request<'a> {
                 let response = se.filesystem.rename(
                     self.meta,
                     self.request.nodeid().into(),
-                    x.src().name.as_ref(),
+                    x.src().name,
                     x.dest().dir.into(),
-                    x.dest().name.as_ref(),
+                    x.dest().name,
                     0
                 );
                 match response {
@@ -400,7 +367,7 @@ impl<'a> Request<'a> {
                     self.meta,
                     x.inode_no().into(),
                     self.request.nodeid().into(),
-                    x.dest().name.as_ref(),
+                    x.dest().name
                 );
                 match response {
                     Ok(entry)=> {
@@ -646,7 +613,7 @@ impl<'a> Request<'a> {
                 let response = se.filesystem.removexattr(
                     self.meta,
                     self.request.nodeid().into(),
-                    x.name(),
+                    x.name()
                 );
                 match response {
                     Ok(())=> {
@@ -676,7 +643,7 @@ impl<'a> Request<'a> {
                 let response = se.filesystem.create(
                     self.meta,
                     self.request.nodeid().into(),
-                    x.name().as_ref(),
+                    x.name(),
                     x.mode(),
                     x.umask(),
                     x.flags()
@@ -867,9 +834,9 @@ impl<'a> Request<'a> {
                 let response = se.filesystem.rename(
                     self.meta,
                     x.from().dir.into(),
-                    x.from().name.as_ref(),
+                    x.from().name,
                     x.to().dir.into(),
-                    x.to().name.as_ref(),
+                    x.to().name,
                     x.flags()
                 );
                 match response {
@@ -958,9 +925,9 @@ impl<'a> Request<'a> {
                 let response = se.filesystem.exchange(
                     self.meta,
                     x.from().dir.into(),
-                    x.from().name.into(),
+                    x.from().name,
                     x.to().dir.into(),
-                    x.to().name.into(),
+                    x.to().name,
                     x.options()
                 );
                 match response {

@@ -37,7 +37,7 @@ macro_rules! errno {
 }
 
 /// Represents an error code to be returned to the caller
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Errno(pub NonZeroI32);
 impl Errno {
     /// Operation not permitted
@@ -225,6 +225,7 @@ impl Errno {
     #[cfg(not(target_os = "linux"))]
     pub const NO_XATTR: Errno = Self::ENOATTR;
 
+    /// Use this to try to convert an integer error code into a fuser Errno
     pub fn from_i32(err: i32) -> Errno {
         err.try_into().ok().map(Errno).unwrap_or(Errno::EIO)
     }
