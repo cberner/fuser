@@ -150,7 +150,7 @@ impl Filesystem for FSelFS {
         };
         Ok(Entry {
             ino: FSelData::idx_to_ino(idx),
-            generation: Some(0),
+            generation: None,
             file_ttl: Duration::ZERO,
             attr: self.data.filestat(idx),
             attr_ttl: Duration::ZERO,
@@ -252,6 +252,7 @@ impl Filesystem for FSelFS {
         Ok(Open {
             fh: idx.into(), // Using idx as file handle
             flags: FOPEN_DIRECT_IO | FOPEN_NONSEEKABLE,
+            backing_id: None,
         })
     }
 

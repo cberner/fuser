@@ -8,14 +8,10 @@ use crate::{Container, Errno, KernelConfig};
 use crate::ll::{self, reply::DirentBuf};
 #[cfg(feature = "abi-7-21")]
 use crate::ll::reply::{DirentPlusBuf};
-#[cfg(feature = "abi-7-40")]
-use crate::{consts::FOPEN_PASSTHROUGH, passthrough::BackingId};
 #[allow(unused_imports)]
 use log::{error, warn, info, debug};
 use std::fmt;
 use std::io::IoSlice;
-#[cfg(feature = "abi-7-40")]
-use std::os::fd::BorrowedFd;
 use std::time::{Duration, SystemTime};
 use zerocopy::IntoBytes;
 #[cfg(feature = "serializable")]
@@ -24,11 +20,7 @@ use serde::{Deserialize, Serialize};
 /// Generic reply callback to send data
 pub(crate) trait ReplySender: Send + Sync + Unpin + 'static {
     /// Send data.
-    fn send(&self, data: &[IoSlice<'_>]) -> std::io::Result<()>;
-    /// Open a backing file
-    #[cfg(feature = "abi-7-40")]
-    fn open_backing(&self, fd: BorrowedFd<'_>) -> std::io::Result<BackingId>;
-}
+    fn send(&self, data: &[IoSlice<'_>]) -> std::io::Result<()>;}
 
 impl fmt::Debug for Box<dyn ReplySender> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
@@ -364,9 +356,11 @@ impl ReplyHandler {
 
     /// Reply to a request with a newly opened file handle
     pub fn opened(self, open: Open) {
-        #[cfg(feature = "abi-7-40")]
-        assert_eq!(open.flags & FOPEN_PASSTHROUGH, 0);
-        self.send_ll(&ll::Response::new_open(ll::FileHandle(open.fh), open.flags, 0));
+        self.send_ll(&ll::Response::new_open(
+            ll::FileHandle(open.fh),
+            open.flags,
+            open.backing_id.unwrap_or(0),
+        ));
     }
 
     /// Reply to a request with the number of bytes written
@@ -383,15 +377,13 @@ impl ReplyHandler {
 
     /// Reply to a request with a newle created file entry and its newly open file handle
     pub fn created(self, entry: Entry, open: Open) {
-        #[cfg(feature = "abi-7-40")]
-        assert_eq!(open.flags & FOPEN_PASSTHROUGH, 0);
         self.send_ll(&ll::Response::new_create(
             &entry.file_ttl,
             &entry.attr.into(),
             ll::Generation(entry.generation.unwrap_or(1)),
             ll::FileHandle(open.fh),
             open.flags,
-            0,
+            open.backing_id.unwrap_or(0),
         ));
     }
 
@@ -601,11 +593,6 @@ mod test {
             }
             assert_eq!(self.expected, v);
             Ok(())
-        }
-
-        #[cfg(feature = "abi-7-40")]
-        fn open_backing(&self, _fd: BorrowedFd<'_>) -> std::io::Result<BackingId> {
-            unreachable!()
         }
     }
 
@@ -836,17 +823,23 @@ mod test {
 
     #[test]
     fn reply_open() {
+        #[cfg(feature = "abi-7-40")]
+        let backing_byte = 0x44;
+        #[cfg(not(feature = "abi-7-40"))]
+        let backing_byte = 0x00;
         let sender = AssertSender {
             expected: vec![
                 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xef, 0xbe, 0xad, 0xde, 0x00, 0x00,
                 0x00, 0x00, 0x22, 0x11, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x33, 0x00, 0x00, 0x00,
-                0x00, 0x00, 0x00, 0x00,
+                backing_byte, 0x00, 0x00, 0x00,
             ],
         };
         let replyhandler: ReplyHandler = ReplyHandler::new(0xdeadbeef, sender);
-        replyhandler.opened(
-            Open { fh: 0x1122, flags: 0x33}
-        );
+        replyhandler.opened(Open {
+            fh: 0x1122,
+            flags: 0x33,
+            backing_id: Some(u32::from(backing_byte)),
+        });
     }
 
     #[test]
@@ -891,6 +884,10 @@ mod test {
 
     #[test]
     fn reply_create() {
+        #[cfg(feature = "abi-7-40")]
+        let backing_byte = 0x44;
+        #[cfg(not(feature = "abi-7-40"))]
+        let backing_byte = 0x00;
         let mut expected = if cfg!(target_os = "macos") {
             vec![
                 0xa8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xef, 0xbe, 0xad, 0xde, 0x00, 0x00,
@@ -904,7 +901,8 @@ mod test {
                 0x78, 0x56, 0x00, 0x00, 0x78, 0x56, 0x00, 0x00, 0x78, 0x56, 0x00, 0x00, 0x78, 0x56,
                 0x00, 0x00, 0xa4, 0x81, 0x00, 0x00, 0x55, 0x00, 0x00, 0x00, 0x66, 0x00, 0x00, 0x00,
                 0x77, 0x00, 0x00, 0x00, 0x88, 0x00, 0x00, 0x00, 0x99, 0x00, 0x00, 0x00, 0xbb, 0x00,
-                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xcc, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x00, 0x00,
+                backing_byte, 0x00, 0x00, 0x00,
             ]
         } else {
             vec![
@@ -918,7 +916,8 @@ mod test {
                 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x78, 0x56, 0x00, 0x00, 0x78, 0x56, 0x00, 0x00,
                 0x78, 0x56, 0x00, 0x00, 0xa4, 0x81, 0x00, 0x00, 0x55, 0x00, 0x00, 0x00, 0x66, 0x00,
                 0x00, 0x00, 0x77, 0x00, 0x00, 0x00, 0x88, 0x00, 0x00, 0x00, 0xbb, 0x00, 0x00, 0x00,
-                0x00, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x00, 0x00,
+                backing_byte, 0x00, 0x00, 0x00,
             ]
         };
 
@@ -962,7 +961,8 @@ mod test {
             },
             Open {
                 fh: 0xbb,
-                flags: 0x0f
+                flags: 0x0f,
+                backing_id: Some(u32::from(backing_byte)),
             }
         );
     }
@@ -1192,11 +1192,6 @@ mod test {
         fn send(&self, _: &[IoSlice<'_>]) -> std::io::Result<()> {
             self.send(()).unwrap();
             Ok(())
-        }
-
-        #[cfg(feature = "abi-7-40")]
-        fn open_backing(&self, _fd: BorrowedFd<'_>) -> std::io::Result<BackingId> {
-            unreachable!()
         }
     }
 

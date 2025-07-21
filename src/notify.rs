@@ -88,6 +88,12 @@ pub enum Notification {
     /// An inode deletion notification
     #[cfg(feature = "abi-7-18")]
     Delete((Delete, Option<Sender<io::Result<()>>>)),
+    /// A request to register a file descriptor and receive a backing ID
+    #[cfg(feature = "abi-7-40")]
+    OpenBacking((u32, Option<Sender<io::Result<u32>>>)),
+    /// A request to close a backing ID
+    #[cfg(feature = "abi-7-40")]
+    CloseBacking((u32, Option<Sender<io::Result<u32>>>)),
     /// (Internal) Disable notifications for this session
     Stop
 }
@@ -102,6 +108,7 @@ impl From<InvalInode> for Notification {fn from(notification: InvalInode) -> Sel
 impl From<Store>      for Notification {fn from(notification: Store)      -> Self{Notification::Store((notification, None))}}
 #[cfg(feature = "abi-7-18")]
 impl From<Delete>     for Notification {fn from(notification: Delete)     -> Self{Notification::Delete((notification, None))}}
+//TODO: strong typing on fd(u32) and backing_id(u32) to enable From<> trait
 
 /// A handle by which the application can send notifications to the server
 #[derive(Debug, Clone)]
@@ -184,6 +191,30 @@ impl Notifier {
                 }
                 res
             },
+            #[cfg(feature = "abi-7-40")]
+            Notification::OpenBacking((data, sender)) => {
+                let res = self.open_backing(data);
+                if let Some(sender) = sender {
+                    if let Err(SendError(res)) = sender.send(res) {
+                        log::warn!("OpenBacking notification reply {res:?} could not be delivered.");
+                        return res.map(|_|{} );
+                    }
+                    return Ok(());
+                }
+                res.map(|_|{} )
+            },
+            #[cfg(feature = "abi-7-40")]
+            Notification::CloseBacking((data, sender)) => {
+                let res = self.close_backing(data);
+                if let Some(sender) = sender {
+                    if let Err(SendError(res)) = sender.send(res) {
+                        log::warn!("CloseBacking notification reply {res:?} could not be delivered.");
+                        return res.map(|_|{} );
+                    }
+                    return Ok(());
+                }
+                res.map(|_|{} )
+            },
             // For completeness
             Notification::Stop => Ok(())
         }
@@ -237,6 +268,19 @@ impl Notifier {
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
             x => x,
         }
+    }
+    
+    #[cfg(feature = "abi-7-40")]
+    /// Registers a file descriptor with the kernel for passthrough.
+    /// If the kernel accepts, it returns a backing ID.
+    pub fn open_backing(&self, fd: u32) -> io::Result<u32> {
+        self.0.open_backing(fd)
+    }
+
+    #[cfg(feature = "abi-7-40")]
+    /// Deregisters a backing ID.
+    pub fn close_backing(&self, backing_id: u32) -> io::Result<u32> {
+        self.0.close_backing(backing_id)
     }
 
     fn send(&self, code: notify_code, notification: &NotificationBuf<'_>) -> io::Result<()> {

@@ -38,8 +38,6 @@ pub use notify::Store;
 pub use notify::Delete;
 #[cfg(feature = "abi-7-11")]
 pub use reply::Ioctl;
-#[cfg(feature = "abi-7-40")]
-pub use passthrough::BackingId;
 #[cfg(target_os = "macos")]
 pub use reply::XTimes;
 pub use reply::{Bytes, Entry, FileAttr, FileType, Dirent, DirentList, DirentPlusList, Open, Statfs, Xattr, Lock};
@@ -58,8 +56,6 @@ mod ll;
 mod mnt;
 #[cfg(feature = "abi-7-11")]
 mod notify;
-#[cfg(feature = "abi-7-40")]
-mod passthrough;
 mod reply;
 mod request;
 mod session;
