@@ -806,6 +806,10 @@ impl Filesystem for SimpleFS {
             }
         };
 
+        if parent_attrs.kind != FileKind::Directory {
+            return Err(Errno::ENOTDIR);
+        }
+
         if !check_access(
             parent_attrs.uid,
             parent_attrs.gid,
@@ -883,6 +887,10 @@ impl Filesystem for SimpleFS {
                 return Err(Errno::from_i32(error_code));
             }
         };
+
+        if parent_attrs.kind != FileKind::Directory {
+            return Err(Errno::ENOTDIR);
+        }
 
         if !check_access(
             parent_attrs.uid,
@@ -1073,6 +1081,10 @@ impl Filesystem for SimpleFS {
             }
         };
 
+        if parent_attrs.kind != FileKind::Directory {
+            return Err(Errno::ENOTDIR);
+        }
+
         if !check_access(
             parent_attrs.uid,
             parent_attrs.gid,
@@ -1180,6 +1192,10 @@ impl Filesystem for SimpleFS {
                 return Err(Errno::from_i32(error_code));
             }
         };
+
+        if new_parent_attrs.kind != FileKind::Directory {
+            return Err(Errno::ENOTDIR);
+        }
 
         if !check_access(
             new_parent_attrs.uid,
@@ -1747,6 +1763,10 @@ impl Filesystem for SimpleFS {
                 return Err(Errno::from_i32(error_code));
             }
         };
+
+        if parent_attrs.kind != FileKind::Directory {
+            return Err(Errno::ENOTDIR);
+        }
 
         if !check_access(
             parent_attrs.uid,
