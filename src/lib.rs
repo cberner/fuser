@@ -936,7 +936,7 @@ pub trait Filesystem {
     /// `FUSE_VOL_RENAME` to enable.
     /// The method should return `Ok(())` on success, or `Err(Errno)` otherwise.
     #[cfg(target_os = "macos")]
-    fn setvolname(&mut self, req: RequestMeta, name: OsStr) -> Result<(), Errno> {
+    fn setvolname(&mut self, req: RequestMeta, name: &OsStr) -> Result<(), Errno> {
         warn!("[Not Implemented] setvolname(name: {name:?})");
         Err(Errno::ENOSYS)
     }

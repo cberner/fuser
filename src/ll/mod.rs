@@ -219,9 +219,11 @@ impl Errno {
     pub const ENOATTR: Errno = errno!(libc::ENOATTR);
 
     /// Use this as an error return from getxattr/removexattr to indicate that the xattr doesn't
-    /// exist.  This resolves to the appropriate platform specific error code.
+    /// exist.  This resolves to the appropriate platform-specific error code.
     #[cfg(target_os = "linux")]
     pub const NO_XATTR: Errno = Self::ENODATA;
+    /// Use this as an error return from getxattr/removexattr to indicate that the xattr doesn't
+    /// exist.  This resolves to the appropriate platform-specific error code.
     #[cfg(not(target_os = "linux"))]
     pub const NO_XATTR: Errno = Self::ENOATTR;
 
