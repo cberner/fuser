@@ -32,6 +32,7 @@ pub struct InvalEntry {
     pub parent: u64,
     /// Name: the file name of the invalid entry
     pub name: OsString
+    // TODO: maybe Bytes<'_> instead?
 }
 
 /// Invalid inode notification to be sent to the kernel
@@ -56,6 +57,7 @@ pub struct Store {
     pub offset: u64,
     /// The new metadata
     pub data: Vec<u8>
+    // TODO: maybe Bytes<'_> instead?
 }
 
 /// Deleted file notification to be sent to the kernel
@@ -68,6 +70,7 @@ pub struct Delete {
     pub ino: u64,
     /// Name: the file name of the deleted entry
     pub name: OsString
+    // TODO: maybe Bytes<'_> instead?
 }
 
 /// The list of supported notification types

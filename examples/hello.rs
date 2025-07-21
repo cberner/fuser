@@ -275,21 +275,21 @@ mod test {
             assert_eq!(entries_slice.len(), 3, "Root directory should contain exactly 3 entries");
 
             // Check entry 0: "."
-            let entry0_data = entries_slice[0];
+            let entry0_data = &entries_slice[0];
             assert_eq!(entry0_data.name.as_ref(), OsStr::new(".").as_bytes(), "First entry should be '.'");
             assert_eq!(entry0_data.ino, 1, "Inode for '.' should be 1");
             assert_eq!(entry0_data.offset, 1, "Offset for '.' should be 1");
             assert_eq!(entry0_data.kind, FileType::Directory, "'.' should be a directory");
 
             // Check entry 1: ".."
-            let entry1_data = entries_slice[1];
+            let entry1_data = &entries_slice[1];
             assert_eq!(entry1_data.name.as_ref(), OsStr::new("..").as_bytes(), "Second entry should be '..'");
             assert_eq!(entry1_data.ino, 1, "Inode for '..' should be 1");
             assert_eq!(entry1_data.offset, 2, "Offset for '..' should be 2");
             assert_eq!(entry1_data.kind, FileType::Directory, "'..' should be a directory");
 
             // Check entry 2: "hello.txt"
-            let entry2_data = entries_slice[2];
+            let entry2_data = &entries_slice[2];
             assert_eq!(entry2_data.name.as_ref(), OsStr::new("hello.txt").as_bytes(), "Third entry should be 'hello.txt'");
             assert_eq!(entry2_data.ino, 2, "Inode for 'hello.txt' should be 2");
             assert_eq!(entry2_data.offset, 3, "Offset for 'hello.txt' should be 3");
