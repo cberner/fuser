@@ -36,13 +36,10 @@ pub use reply::Ioctl;
 pub use passthrough::BackingId;
 #[cfg(target_os = "macos")]
 pub use reply::XTimes;
-pub use reply::{Entry, FileAttr, FileType, Dirent, DirentList, DirentPlusList, Open, Statfs, Xattr, Lock};
+pub use reply::{Bytes, Entry, FileAttr, FileType, Dirent, DirentList, DirentPlusList, Open, Statfs, Xattr, Lock};
 pub use request::RequestMeta;
 pub use session::{BackgroundSession, Session, SessionACL, SessionUnmounter};
 pub use container::{Container, Borrow};
-
-/// A container for bytes, implementing flexible ownership.
-pub type Bytes<'a> = Container<'a, u8>;
 
 #[cfg(feature = "abi-7-28")]
 use std::cmp::max;

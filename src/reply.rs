@@ -4,7 +4,7 @@
 //! Either the request logic will call the one of the reply handler's self-destructive methods, 
 //! or, if the reply handler goes out of scope before that happens, the drop trait will send an error response. 
 
-use crate::{Container, Bytes, KernelConfig};
+use crate::{Container, Errno, KernelConfig};
 use crate::ll::{self, reply::DirentBuf};
 #[cfg(feature = "abi-7-21")]
 use crate::ll::reply::{DirentPlusBuf};
@@ -88,7 +88,7 @@ impl Drop for ReplyHandler {
                 "Reply not sent for operation {}, replying with I/O error",
                 self.unique.0
             );
-            self.send_ll_mut(&ll::Response::new_error(ll::Errno::EIO));
+            self.send_ll_mut(&ll::Response::new_error(Errno::EIO));
         }
     }
 }
@@ -282,7 +282,7 @@ impl ReplyHandler {
     }
 
     /// Reply to a general request with an error code
-    pub fn error(self, err: ll::Errno) {
+    pub fn error(self, err: Errno) {
         self.send_ll(&ll::Response::new_error(err));
     }
 
@@ -635,7 +635,6 @@ mod test {
             ],
         };
         let replyhandler: ReplyHandler = ReplyHandler::new(0xdeadbeef, sender);
-        use crate::ll::Errno;
         replyhandler.error(Errno::from_i32(66));
     }
 
