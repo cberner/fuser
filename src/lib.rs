@@ -29,7 +29,13 @@ use crate::mnt::mount_options::check_option_conflicts;
 use crate::session::MAX_WRITE_SIZE;
 pub use mnt::mount_options::MountOption;
 #[cfg(feature = "abi-7-11")]
-pub use notify::{Notifier, PollHandle};
+pub use notify::{Notification, Poll};
+#[cfg(feature = "abi-7-12")]
+pub use notify::{InvalEntry, InvalInode};
+#[cfg(feature = "abi-7-15")]
+pub use notify::Store;
+#[cfg(feature = "abi-7-18")]
+pub use notify::Delete;
 #[cfg(feature = "abi-7-11")]
 pub use reply::Ioctl;
 #[cfg(feature = "abi-7-40")]
@@ -272,6 +278,19 @@ impl KernelConfig {
     fn max_pages(&self) -> u16 {
         ((max(self.max_write, self.max_readahead) - 1) / page_size::get() as u32) as u16 + 1
     }
+}
+
+#[derive(Debug)]
+/// This enum is an optional way for the Filesystem to report its status to a Session thread.
+pub enum FsStatus {
+    /// Default may be used when the Filesystem does not implement a status
+    Default,
+    /// Ready indicates the Filesystem has no actions in progress
+    Ready,
+    /// Busy indicates the Filesytem has one or more actions in progress
+    Busy,
+    /// Stopped indicates that the Filesystem will not accept new requests
+    Stopped
 }
 
 /// Filesystem trait.
@@ -857,6 +876,10 @@ pub trait Filesystem {
 
     /// Poll for events.
     /// The method should return `Ok(u32)` with the poll events, or `Err(Errno)` otherwise.
+    /// Ok(nonzero) indicates that the file is ready now.
+    /// Ok(0) indicates that the file is not ready. In that case,
+    /// the filesystem should save the poll handle (`ph`) in its internal structure.
+    /// Later events should be sent via the notification channel.
     #[cfg(feature = "abi-7-11")]
     fn poll(
         &mut self,
@@ -872,6 +895,22 @@ pub trait Filesystem {
             ph: {ph:?}, events: {events}, flags: {flags})"
         );
         Err(Errno::ENOSYS)
+    }
+
+    /// Initializes the notification event sender for the filesystem.
+    /// The boolean indicates whether the filesystem supports it.
+    #[cfg(feature = "abi-7-11")]
+    fn init_notification_sender(
+        &mut self,
+        _sender: crossbeam_channel::Sender<Notification>,
+    ) -> bool {
+        false // Default: not supported
+    }
+
+    /// In a syncronous execution model where a sleep may happen,
+    /// the heartbeat may be used to alert the Filesystem that time has passed.
+    fn heartbeat(&mut self) -> Result<FsStatus, Errno> {
+        Ok(FsStatus::Default)
     }
 
     /// Preallocate or deallocate space to a file.

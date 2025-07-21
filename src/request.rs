@@ -17,8 +17,6 @@ use crate::ll::Request as _;
 use crate::reply::ReplyHandler;
 use crate::session::{Session, SessionACL};
 use crate::Filesystem;
-#[cfg(feature = "abi-7-11")]
-use crate::PollHandle;
 use crate::{ll, Forget, KernelConfig};
 
 /// Request data structure
@@ -765,12 +763,11 @@ impl<'a> Request<'a> {
             }
             #[cfg(feature = "abi-7-11")]
             ll::Operation::Poll(x) => {
-                let ph = PollHandle::new(se.ch.sender(), x.kernel_handle());
                 let response = se.filesystem.poll(
                     self.meta,
                     self.request.nodeid().into(),
                     x.file_handle().into(),
-                    ph.into(),
+                    x.kernel_handle(),
                     x.events(),
                     x.flags()
                 );
@@ -782,9 +779,6 @@ impl<'a> Request<'a> {
                         self.replyhandler.error(err);
                     }
                 }
-                // TODO: register the poll handler
-                // TODO: receive poll data from the application
-                // TODO: use the poll handler to send the data
             }
             #[cfg(feature = "abi-7-15")]
             ll::Operation::NotifyReply(_) => {

@@ -6,36 +6,40 @@
 //
 // Due to the above provenance, unlike the rest of fuser this file is
 // licensed under the terms of the GNU GPLv2.
+//
+// Converted to the synchronous execution model by Richard Lawrence
 
 use std::{
-    ffi::{OsStr, OsString},
+    ffi::OsString,
     path::Path,
-    sync::{
-        atomic::{AtomicU64, Ordering::SeqCst},
-        Arc, Mutex,
-    },
-    thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+#[allow(unused_imports)]
+use log::{error, warn, info, debug};
 use clap::Parser;
-
+use crossbeam_channel::{Receiver, Sender};
 use fuser::{
-    Dirent, DirentList, Entry, Errno, FileAttr, FileType,
-    Filesystem, Forget, MountOption, RequestMeta, FUSE_ROOT_ID,
+    Dirent, DirentList, Entry, Errno, FileAttr, FileType, Filesystem, Forget,
+    FsStatus, InvalEntry, MountOption, Notification, RequestMeta, FUSE_ROOT_ID,
 };
-struct ClockFS<'a> {
-    file_name: Arc<Mutex<String>>,
-    lookup_cnt: &'a AtomicU64,
+struct ClockFS {
+    file_name: OsString,
+    lookup_cnt: u64,
+    last_update: SystemTime,
+    opts: Options,
     timeout: Duration,
+    update_interval: Duration,
+    notification_sender: Option<Sender<Notification>>,
+    // the reply is just for some extra logging
+    notification_reply: Option<Receiver<std::io::Result<()>>>,
 }
 
-impl ClockFS<'_> {
+impl ClockFS {
     const FILE_INO: u64 = 2;
 
-    fn get_filename(&self) -> String {
-        let n = self.file_name.lock().unwrap();
-        n.clone()
+    fn get_filename(&self) -> OsString {
+        self.file_name.clone()
     }
 
     fn stat(ino: u64) -> Option<FileAttr> {
@@ -65,13 +69,77 @@ impl ClockFS<'_> {
     }
 }
 
-impl Filesystem for ClockFS<'_> {
+impl Filesystem for ClockFS {
+    #[cfg(feature = "abi-7-11")]
+    fn init_notification_sender(
+        &mut self,
+        sender: Sender<Notification>,
+    ) -> bool {
+        self.notification_sender = Some(sender);
+        true
+    }
+
+    fn heartbeat(&mut self) -> Result<FsStatus, Errno> {
+        // log the reply, if there is one.
+        if let Some(r) = &self.notification_reply {
+            if let Ok(result) = r.try_recv() {
+                match result {
+                    Ok(()) => debug!("Received OK reply"),
+                    Err(e) => warn!("Received error reply: {e}"),
+                }
+                // Only read a reply once.
+                self.notification_reply=None;
+            }
+        }
+        let now = SystemTime::now();
+        if now.duration_since(self.last_update).unwrap_or_default() >= self.update_interval {
+            // Update filename
+            let old_filename = self.get_filename();
+            self.file_name = now_filename();
+            self.last_update = now;
+            // Notifications, as appropriate
+            if !self.opts.no_notify && self.lookup_cnt != 0 {
+                if let Some(sender) = &self.notification_sender {
+                    if self.opts.only_expire {
+                        // TODO: implement expiration method
+                    } else {
+                        // invalidate old_filename
+                        let notification = Notification::from(InvalEntry {
+                            parent: FUSE_ROOT_ID,
+                            name: old_filename,
+                        });
+                        if let Err(e) = sender.send(notification) {
+                            warn!("Warning: failed to send InvalEntry notification: {e}");
+                        } else {
+                            info!("Sent InvalEntry notification (old filename).");
+                        }
+                        // invalidate new filename
+                        let (s, r) = crossbeam_channel::bounded(1);
+                        let notification = Notification::InvalEntry((
+                            InvalEntry {
+                                parent: FUSE_ROOT_ID,
+                                name: self.get_filename(),
+                            },
+                            Some(s),
+                        ));
+                        if let Err(e) = sender.send(notification) {
+                            warn!("Warning: failed to send InvalEntry notification: {e}");
+                        } else {
+                            info!("Sent InvalEntry notification (new filename).");
+                            self.notification_reply = Some(r);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(FsStatus::Ready)
+    }
+
     fn lookup(&mut self, _req: RequestMeta, parent: u64, name: &Path) -> Result<Entry, Errno> {
-        if parent != FUSE_ROOT_ID || name != OsStr::new(&self.get_filename()) {
+        if parent != FUSE_ROOT_ID || name != self.file_name {
             return Err(Errno::ENOENT);
         }
-
-        self.lookup_cnt.fetch_add(1, SeqCst);
+        self.lookup_cnt += 1;
         match ClockFS::stat(ClockFS::FILE_INO) {
             Some(attr) => Ok(Entry {
                 ino: attr.ino,
@@ -86,8 +154,8 @@ impl Filesystem for ClockFS<'_> {
 
     fn forget(&mut self, _req: RequestMeta, target: Forget) {
         if target.ino == ClockFS::FILE_INO {
-            let prev = self.lookup_cnt.fetch_sub(target.nlookup, SeqCst);
-            assert!(prev >= target.nlookup);
+            assert!(self.lookup_cnt >= target.nlookup);
+            self.lookup_cnt -= target.nlookup;
         } else {
             assert!(target.ino == FUSE_ROOT_ID);
         }
@@ -115,14 +183,11 @@ impl Filesystem for ClockFS<'_> {
         // containing owned bytes.
         let mut entries= Vec::new();
         if offset == 0 {
-            let filename_string = self.get_filename(); // Returns String
-            let filename_os_string = OsString::from(filename_string);
-
             let entry = Dirent {
                 ino: ClockFS::FILE_INO,
-                offset: 1, // This entry's cookie
+                offset: 1,
                 kind: FileType::RegularFile,
-                name: filename_os_string.into(),
+                name: self.get_filename().into(),
             };
             entries.push(entry);
         }
@@ -132,14 +197,14 @@ impl Filesystem for ClockFS<'_> {
     }
 }
 
-fn now_filename() -> String {
+fn now_filename() -> OsString {
     let Ok(d) = SystemTime::now().duration_since(UNIX_EPOCH) else {
         panic!("Pre-epoch SystemTime");
     };
-    format!("Time_is_{}", d.as_secs())
+    OsString::from(format!("Time_is_{}", d.as_secs()))
 }
 
-#[derive(Parser)]
+#[derive(Parser, Debug)]
 struct Options {
     /// Mount demo filesystem at given path
     mount_point: String,
@@ -162,31 +227,31 @@ struct Options {
 }
 
 fn main() {
+    env_logger::init();
     let opts = Options::parse();
-    let options = vec![MountOption::RO, MountOption::FSName("clock".to_string())];
-    let fname = Arc::new(Mutex::new(now_filename()));
-    let lookup_cnt = Box::leak(Box::new(AtomicU64::new(0)));
+    eprintln!("Mounting ClockFS (entry invalidation) at {}", &opts.mount_point);
+    eprintln!("Press Ctrl-C to unmount and exit.");
+
+    let mount_point = OsString::from(&opts.mount_point);
+    let timeout = Duration::from_secs_f32(opts.timeout);
+    let update_interval = Duration::from_secs_f32(opts.update_interval);
     let fs = ClockFS {
-        file_name: fname.clone(),
-        lookup_cnt,
-        timeout: Duration::from_secs_f32(opts.timeout),
+        file_name: now_filename(),
+        lookup_cnt: 0,
+        last_update: SystemTime::now(),
+        opts,
+        timeout,
+        update_interval,
+        notification_sender: None,
+        notification_reply: None,
     };
+    let mount_options = vec![MountOption::RO, MountOption::FSName("clock_entry".to_string())];
+    let mut session = fuser::Session::new(fs, &mount_point, &mount_options)
+        .unwrap_or_else(|e| panic!("Failed to create FUSE session: {e}"));
 
-    let session = fuser::Session::new(fs, opts.mount_point, &options).unwrap();
-    let notifier = session.notifier();
-    let _bg = session.spawn().unwrap();
+    session
+        .run_with_notifications()
+        .expect("Session ended with an error."); //TODO: log the error
 
-    loop {
-        let mut fname = fname.lock().unwrap();
-        let oldname = std::mem::replace(&mut *fname, now_filename());
-        drop(fname);
-        if !opts.no_notify && lookup_cnt.load(SeqCst) != 0 {
-            if opts.only_expire {
-                // fuser::notify_expire_entry(_SOME_HANDLE_, FUSE_ROOT_ID, &oldname);
-            } else if let Err(e) = notifier.inval_entry(FUSE_ROOT_ID, oldname.as_ref()) {
-                eprintln!("Warning: failed to invalidate entry '{}': {}", oldname, e);
-            }
-        }
-        thread::sleep(Duration::from_secs_f32(opts.update_interval));
-    }
+    eprintln!("ClockFS (entry invalidation) unmounted and exited.");
 }

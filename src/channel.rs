@@ -48,6 +48,48 @@ impl Channel {
         }
     }
 
+    /// Polls the kernel to determine if a request is ready for reading (does not block).
+    /// This method is used in the synchronous notifications execution model.
+    pub(crate) fn ready(&self) -> io::Result<bool> {
+        let mut buf = [libc::pollfd {
+            fd: self.0.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        }];
+        let rc = unsafe {
+            libc::poll(
+                buf.as_mut_ptr(),
+                1,
+                0, // ms; Non-blocking poll
+            )
+        };
+        match rc {
+            -1 => {
+                Err(io::Error::last_os_error())
+            }
+            0 => {
+                // Timeout with no events on FUSE FD.
+                Ok(false)
+            }
+            _ => {
+                // ret > 0, events are available
+                if (buf[0].revents & libc::POLLIN) != 0 {
+                    // FUSE FD is ready to read.
+                    Ok(true)
+                } else {
+                    // Handling unexpected events
+                    if (buf[0].revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL)) != 0 {
+                        // Probably very bad
+                        Err(io::Error::other(format!("Poll error, revents: {:#x}.", buf[0].revents)))
+                    } else {
+                        // Probably fine
+                        Ok(false)
+                    }
+                }
+            }
+        }
+    }
+
     /// Returns a sender object for this channel. The sender object can be
     /// used to send to the channel. Multiple sender objects can be used
     /// and they can safely be sent to other threads.

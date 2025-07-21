@@ -1330,7 +1330,11 @@ mod op {
             #[cfg(feature = "abi-7-21")]
             return self.arg.events;
             #[cfg(not(feature = "abi-7-21"))]
-            return 0;
+            // For older ABIs where fuse_poll_in.events is not used or is zero,
+            // the kernel implies interest in basic readiness.
+            // Commonly, this means POLLIN, POLLOUT, and POLLPRI.
+            // POLLRDNORM and POLLWRNORM are often included with POLLIN/POLLOUT.
+            return (libc::POLLIN | libc::POLLRDNORM | libc::POLLOUT | libc::POLLWRNORM | libc::POLLPRI) as u32;
         }
 
         /// The poll request's flags
