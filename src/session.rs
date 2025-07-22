@@ -479,7 +479,10 @@ impl BackgroundSession {
         // Unmount the filesystem
         drop(_mount);
         // Stop the background thread
-        main_loop_guard.join().unwrap().unwrap();
+        let res = main_loop_guard.join()
+            .expect("Failed to join the background thread");
+        // An error is expected, since the thread was active when the unmount occured.
+        info!("Session loop end with result {res:?}.");
     }
 
     /// Returns an object that can be used to send notifications to the kernel
