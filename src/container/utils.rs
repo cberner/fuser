@@ -88,7 +88,7 @@ impl<T: Clone> Container<'_, T> {
         self.len() == 0
     }
 
-    /// Converts the container to an owned Vec<T>.
+    /// Converts the container to an owned `Vec<T>`.
     /// This will most likely be a copy.
     /// Returns an empty vector if the source data is unavailable.
     #[must_use]
