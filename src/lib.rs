@@ -90,7 +90,7 @@ const fn default_init_flags(capabilities: u64) -> u64 {
     }
 }
 
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 /// Target of a `forget` or `batch_forget` operation.
 pub struct Forget {
     /// Inode of the file to be forgotten.
@@ -276,7 +276,7 @@ impl KernelConfig {
     }
 }
 
-#[derive(Debug)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 /// This enum is an optional way for the Filesystem to report its status to a Session thread.
 pub enum FsStatus {
     /// Default may be used when the Filesystem does not implement a status

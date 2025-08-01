@@ -16,7 +16,7 @@ use crate::{
 
 /// Poll event data to be sent to the kernel
 #[cfg(feature = "abi-7-11")]
-#[derive(Debug, Copy, Clone)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 pub struct Poll {
     /// Poll handle: the unique idenifier from a previous poll request
     pub ph: u64,
@@ -26,7 +26,7 @@ pub struct Poll {
 
 /// Invalid entry notification to be sent to the kernel
 #[cfg(feature = "abi-7-12")]
-#[derive(Debug, Clone)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct InvalEntry {
     /// Parent: the inode of the parent of the invalid entry
     pub parent: u64,
@@ -37,7 +37,7 @@ pub struct InvalEntry {
 
 /// Invalid inode notification to be sent to the kernel
 #[cfg(feature = "abi-7-12")]
-#[derive(Debug, Copy, Clone)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 pub struct InvalInode {
     /// Inode with invalid metadata
     pub ino: u64,
@@ -49,7 +49,7 @@ pub struct InvalInode {
 
 /// Store inode notification to be sent to the kernel
 #[cfg(feature = "abi-7-15")]
-#[derive(Debug, Clone)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct Store {
     /// ino: the inode to be updated
     pub ino: u64,
@@ -62,7 +62,7 @@ pub struct Store {
 
 /// Deleted file notification to be sent to the kernel
 #[cfg(feature = "abi-7-18")]
-#[derive(Debug, Clone)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct Delete {
     /// Parent: the inode of the parent directory that contained the deleted entry
     pub parent: u64,
@@ -114,7 +114,7 @@ impl From<Delete>     for Notification {fn from(notification: Delete)     -> Sel
 //TODO: strong typing on fd(u32) and backing_id(u32) to enable From<> trait
 
 /// A handle by which the application can send notifications to the server
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct Notifier(ChannelSender);
 
 impl Notifier {

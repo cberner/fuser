@@ -39,7 +39,7 @@ const BUFFER_SIZE: usize = MAX_WRITE_SIZE + 4096;
 /// This value is used to prevent a busy loop in the synchronous run with notification
 const SYNC_SLEEP_INTERVAL: std::time::Duration = std::time::Duration::from_millis(5);
 
-#[derive(Default, Debug, Eq, PartialEq)]
+#[derive(Default, Eq, PartialEq, Debug)]
 /// How requests should be filtered based on the calling UID.
 pub enum SessionACL {
     /// Allow requests from any user. Corresponds to the `allow_other` mount option.

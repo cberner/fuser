@@ -34,7 +34,7 @@ pub struct Request<'a> {
 }
 
 /// Request metadata structure
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 pub struct RequestMeta {
     /// The unique identifier of this request
     pub unique: u64,

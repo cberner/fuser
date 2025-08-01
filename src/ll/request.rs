@@ -36,7 +36,7 @@ pub enum RequestError {
 /// will send an [Interrupt] request to cancel requests in progress.  It's
 /// important to handle this for any requests that may block indefinitely, like
 /// [`SetLkW`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug)]
 #[cfg_attr(feature = "serializable", derive(Serialize, Deserialize))]
 pub struct RequestId(pub u64);
 impl From<RequestId> for u64 {
@@ -68,7 +68,7 @@ impl From<RequestId> for u64 {
 /// We implement conversion from [`INodeNo`] to [u64] but not vice-versa because
 /// not all [u64]s are valid [`INodeNo`]s, but the reverse is true.  So to produce
 /// a [`INodeNo`] from a [u64] we must be explicit.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug)]
 #[cfg_attr(feature = "serializable", derive(Serialize, Deserialize))]
 pub struct INodeNo(pub u64);
 impl From<INodeNo> for u64 {
@@ -112,7 +112,7 @@ impl From<INodeNo> for u64 {
 /// We implement conversion from `FileHandle` to u64 but not vice-versa because
 /// not all u64s are valid `FileHandles`, but the reverse is true.  So to produce
 /// a `FileHandle` from a u64 we must be explicit.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug)]
 #[cfg_attr(feature = "serializable", derive(Serialize, Deserialize))]
 pub struct FileHandle(pub u64);
 
@@ -131,7 +131,7 @@ impl From<FileHandle> for u64 {
 /// We implement conversion from [`LockOwner`] to [`u64`] but not vice-versa
 /// because all `LockOwners` are valid [`u64`]s, but not vice-versa.  So to produce
 /// a [`LockOwner`] from a [`u64`] we must be explicit.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug)]
 #[cfg_attr(feature = "serializable", derive(Serialize, Deserialize))]
 pub struct LockOwner(pub u64);
 
@@ -141,7 +141,7 @@ impl From<LockOwner> for u64 {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug)]
 pub struct Lock {
     // Unfortunately this can't be a std::ops::Range because Range is not Copy:
     // https://github.com/rust-lang/rfcs/issues/2848
@@ -161,7 +161,7 @@ impl Lock {
 }
 
 /// A newtype for ABI version
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug)]
 #[cfg_attr(feature = "serializable", derive(Serialize, Deserialize))]
 pub struct Version(pub u32, pub u32);
 impl Version {
@@ -179,7 +179,7 @@ impl Display for Version {
 }
 
 /// Represents a filename in a directory
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug)]
 pub struct FilenameInDir<'a> {
     /// The Inode number of the directory
     pub dir: INodeNo,
@@ -1513,7 +1513,7 @@ mod op {
 
     /// Copy the specified range from the source inode to the destination inode
     #[cfg(feature = "abi-7-28")]
-    #[derive(Debug, Clone, Copy)]
+    #[derive(Copy, Clone, Debug)]
     pub struct CopyFileRangeFile {
         pub inode: INodeNo,
         /// The value set by the [`Open`] method. See [`FileHandle`].

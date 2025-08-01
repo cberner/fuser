@@ -86,7 +86,7 @@ impl Drop for ReplyHandler {
 }
 
 /// File types
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Copy, Clone, Hash, Eq, PartialEq, Debug)]
 #[cfg_attr(feature = "serializable", derive(Serialize, Deserialize))]
 pub enum FileType {
     /// Named pipe (`S_IFIFO`)
@@ -106,7 +106,7 @@ pub enum FileType {
 }
 
 /// File attributes
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
 #[cfg_attr(feature = "serializable", derive(Serialize, Deserialize))]
 pub struct FileAttr {
     /// Unique number for this file
@@ -141,7 +141,7 @@ pub struct FileAttr {
     pub flags: u32,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
 #[cfg_attr(feature = "serializable", derive(Serialize, Deserialize))]
 /// An entry in the kernel's file cache
 pub struct Entry {
@@ -157,7 +157,7 @@ pub struct Entry {
     pub attr_ttl: Duration,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
 #[cfg_attr(feature = "serializable", derive(Serialize, Deserialize))]
 /// Open file handle response data
 pub struct Open {
@@ -172,7 +172,7 @@ pub struct Open {
 /// A container for bytes, implementing flexible ownership.
 pub type Bytes<'a> = Container<'a, u8>;
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "serializable", derive(Serialize, Deserialize))]
 /// A single directory entry.
 /// The `'name` lifetime parameter is associated with the `name` field if it is a borrowed value.
@@ -194,7 +194,7 @@ pub type DirentList<'dir, 'name> = Container<'dir, Dirent<'name>>;
 pub type DirentPlusList<'dir, 'name> = Container<'dir, (Dirent<'name>, Entry)>;
 
 #[cfg(target_os = "macos")]
-#[derive(Debug)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 /// Xtimes response data
 pub struct XTimes {
     /// Backup time
@@ -203,7 +203,7 @@ pub struct XTimes {
     pub crtime: SystemTime
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 /// Statfs response data
 pub struct Statfs {
     /// Total blocks (in units of frsize)
@@ -224,7 +224,7 @@ pub struct Statfs {
     pub frsize: u32
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 /// File lock response data
 pub struct Lock {
     /// start of locked byte range
@@ -242,7 +242,7 @@ pub struct Lock {
 /// `Xattr` represents the response for extended attribute operations (`getxattr`, `listxattr`).
 /// It can either indicate the size of the attribute data or provide the data itself
 /// using `Bytes` for flexible ownership.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Xattr<'a> {
     /// Indicates the size of the extended attribute data. Used when the caller
     /// provides a zero-sized buffer to query the required buffer size.
@@ -253,7 +253,7 @@ pub enum Xattr<'a> {
 }
 
 #[cfg(feature = "abi-7-11")]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 /// File io control reponse data
 pub struct Ioctl<'a> {
     /// Result of the ioctl operation
