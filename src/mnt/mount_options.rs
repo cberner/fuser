@@ -91,13 +91,13 @@ pub fn check_option_conflicts(options: &[MountOption]) -> Result<(), io::Error> 
     options_set.extend(options.iter().cloned());
     let conflicting: HashSet<MountOption> = options.iter().flat_map(conflicts_with).collect();
     let intersection: Vec<MountOption> = conflicting.intersection(&options_set).cloned().collect();
-    if !intersection.is_empty() {
+    if intersection.is_empty() {
+        Ok(())
+    } else {
         Err(io::Error::new(
             ErrorKind::InvalidInput,
             format!("Conflicting mount options found: {intersection:?}"),
         ))
-    } else {
-        Ok(())
     }
 }
 
@@ -157,7 +157,7 @@ pub fn option_to_string(option: &MountOption) -> String {
 /// Parses mount command args.
 ///
 /// Input: ["-o", "suid", "-o", "ro,nodev,noexec", "-osync"]
-/// Output Ok([Suid, RO, NoDev, NoExec, Sync])
+/// Output Ok([`Suid`, `RO`, `NoDev`, `NoExec`, `Sync`])
 pub(crate) fn parse_options_from_args(args: &[&OsStr]) -> io::Result<Vec<MountOption>> {
     let err = |x| io::Error::new(ErrorKind::InvalidInput, x);
     let args: Option<Vec<_>> = args.iter().map(|x| x.to_str()).collect();
@@ -174,7 +174,7 @@ pub(crate) fn parse_options_from_args(args: &[&OsStr]) -> io::Result<Vec<MountOp
             Some(x) => return Err(err(format!("Error parsing args: expected -o, got {x}"))),
         };
         for x in opt.split(',') {
-            out.push(MountOption::from_str(x))
+            out.push(MountOption::from_str(x));
         }
     }
     Ok(out)
@@ -194,7 +194,7 @@ mod test {
     #[test]
     fn option_round_trip() {
         use super::MountOption::*;
-        for x in [
+        for x in &[
             FSName("Blah".to_owned()),
             Subtype("Bloo".to_owned()),
             CUSTOM("bongos".to_owned()),
@@ -215,9 +215,8 @@ mod test {
             Sync,
             Async,
         ]
-        .iter()
         {
-            assert_eq!(*x, MountOption::from_str(option_to_string(x).as_ref()))
+            assert_eq!(*x, MountOption::from_str(option_to_string(x).as_ref()));
         }
     }
 

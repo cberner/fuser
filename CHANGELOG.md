@@ -1,5 +1,21 @@
 # FUSE for Rust - Changelog
 
+## release candidate 0.16.0 - 2025-07-21 (pending)
+* **Major API Refactor**: The `Filesystem` trait methods have been refactored to return `Result` instead of using `Reply` objects for callbacks.
+    * All `Filesystem` trait methods that previously accepted a `reply: ReplyT` parameter now return a `Result<T, Errno>`, where `T` is a struct containing the success data for that operation.
+    * The `Request` object passed to `Filesystem` methods has been replaced with `RequestMeta`, a smaller struct containing only the request's metadata (uid, gid, pid, unique id). The full request parsing is now handled internally.
+    * A generic enum `Container` has been implemented to enable flexible ownership models in returned data.
+    * Additional public structs are introduced to simplify handling of request data, response data, and errors.
+    * This change unifies the implementation of `Filesystem` methods and brings them more in line with Idiomatic Rust.
+    * Examples and tests have been updated to match this new API. A few unrelated bugs in examples and tests have been fixed.
+    * Notifications and their results now pass through crossbeam_channels that are safely handled in a synchronous loop.
+    * A new `heartbeat()` operation enables a single-threaded execution model to monitor the passage of time.
+    * Idiomatic implementation of Passthrough and Notify have been completed.
+    * Unit tests have been added to most examples, enabled by the new callback-free API.
+    * Feature gates and clippy configuration are more consistently applied.
+    * Minor fixes for better MacOS support.
+    * Improved documentation throughout.
+
 ## 0.15.1 - 2024-11-27
 * Fix crtime related panic that could occur on MacOS. See PR #322 for details.
 

@@ -34,7 +34,7 @@ for x in $(seq 10); do
     sleep 1
 done
 
-expected="$(sha256sum - < /usr/lib/os-release)"
+expected="$(sha256sum - < /etc/profile)"
 
 # Check that it's equal to the underlying file
 test "$(sha256sum - < "${mnt}/passthrough")" = "${expected}"

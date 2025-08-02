@@ -9,14 +9,13 @@ use std::{
 };
 
 use libc::{c_int, c_void, size_t};
-
-#[cfg(feature = "abi-7-40")]
-use crate::passthrough::BackingId;
 use crate::reply::ReplySender;
+#[cfg(feature = "abi-7-40")]
+use crate::ll::ioctl::{ioctl_close_backing, ioctl_open_backing};
 
 /// A raw communication channel to the FUSE kernel driver
 #[derive(Debug)]
-pub struct Channel(Arc<File>);
+pub(crate) struct Channel(Arc<File>);
 
 impl AsFd for Channel {
     fn as_fd(&self) -> BorrowedFd<'_> {
@@ -33,7 +32,7 @@ impl Channel {
     }
 
     /// Receives data up to the capacity of the given buffer (can block).
-    pub fn receive(&self, buffer: &mut [u8]) -> io::Result<usize> {
+    pub(crate) fn receive(&self, buffer: &mut [u8]) -> io::Result<usize> {
         let rc = unsafe {
             libc::read(
                 self.0.as_raw_fd(),
@@ -48,10 +47,52 @@ impl Channel {
         }
     }
 
+    /// Polls the kernel to determine if a request is ready for reading (does not block).
+    /// This method is used in the synchronous notifications execution model.
+    pub(crate) fn ready(&self) -> io::Result<bool> {
+        let mut buf = [libc::pollfd {
+            fd: self.0.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        }];
+        let rc = unsafe {
+            libc::poll(
+                buf.as_mut_ptr(),
+                1,
+                0, // ms; Non-blocking poll
+            )
+        };
+        match rc {
+            -1 => {
+                Err(io::Error::last_os_error())
+            }
+            0 => {
+                // Timeout with no events on FUSE FD.
+                Ok(false)
+            }
+            _ => {
+                // ret > 0, events are available
+                if (buf[0].revents & libc::POLLIN) != 0 {
+                    // FUSE FD is ready to read.
+                    Ok(true)
+                } else {
+                    // Handling unexpected events
+                    if (buf[0].revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL)) != 0 {
+                        // Probably very bad
+                        Err(io::Error::other(format!("Poll error, revents: {:#x}.", buf[0].revents)))
+                    } else {
+                        // Probably fine
+                        Ok(false)
+                    }
+                }
+            }
+        }
+    }
+
     /// Returns a sender object for this channel. The sender object can be
     /// used to send to the channel. Multiple sender objects can be used
     /// and they can safely be sent to other threads.
-    pub fn sender(&self) -> ChannelSender {
+    pub(crate) fn sender(&self) -> ChannelSender {
         // Since write/writev syscalls are threadsafe, we can simply create
         // a sender by using the same file and use it in other threads.
         ChannelSender(self.0.clone())
@@ -59,14 +100,14 @@ impl Channel {
 }
 
 #[derive(Clone, Debug)]
-pub struct ChannelSender(Arc<File>);
+pub(crate) struct ChannelSender(Arc<File>);
 
 impl ReplySender for ChannelSender {
     fn send(&self, bufs: &[io::IoSlice<'_>]) -> io::Result<()> {
         let rc = unsafe {
             libc::writev(
                 self.0.as_raw_fd(),
-                bufs.as_ptr() as *const libc::iovec,
+                bufs.as_ptr().cast::<libc::iovec>(),
                 bufs.len() as c_int,
             )
         };
@@ -77,9 +118,19 @@ impl ReplySender for ChannelSender {
             Ok(())
         }
     }
+}
 
+impl ChannelSender {
+    /// Registers a file descriptor with the kernel.
+    /// If the kernel accepts, it returns a backing ID.
     #[cfg(feature = "abi-7-40")]
-    fn open_backing(&self, fd: BorrowedFd<'_>) -> std::io::Result<BackingId> {
-        BackingId::create(&self.0, fd)
+    pub fn open_backing(&self, fd: u32) -> std::io::Result<u32> {
+        ioctl_open_backing(&self.0, fd)
+    }
+
+    /// Deregisters a backing ID.
+    #[cfg(feature = "abi-7-40")]
+    pub fn close_backing(&self, backing_id: u32) -> std::io::Result<u32> {
+        ioctl_close_backing(&self.0, backing_id)
     }
 }

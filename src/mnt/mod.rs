@@ -25,7 +25,7 @@ use std::io;
 #[cfg(any(feature = "libfuse", test))]
 use mount_options::MountOption;
 
-/// Helper function to provide options as a fuse_args struct
+/// Helper function to provide options as a `fuse_args` struct
 /// (which contains an argc count and an argv pointer)
 #[cfg(any(feature = "libfuse", test))]
 fn with_fuse_args<T, F: FnOnce(&fuse_args) -> T>(options: &[MountOption], f: F) -> T {
@@ -104,12 +104,11 @@ fn is_mounted(fuse_device: &File) -> bool {
                 let err = io::Error::last_os_error();
                 if err.kind() == io::ErrorKind::Interrupted {
                     continue;
-                } else {
-                    // This should never happen. The fd is guaranteed good as `File` owns it.
-                    // According to man poll ENOMEM is the only error code unhandled, so we panic
-                    // consistent with rust's usual ENOMEM behaviour.
-                    panic!("Poll failed with error {}", err)
                 }
+                // This should never happen. The fd is guaranteed good as `File` owns it.
+                // According to man poll ENOMEM is the only error code unhandled, so we panic
+                // consistent with rust's usual ENOMEM behaviour.
+                panic!("Poll failed with error {err}")
             }
             _ => unreachable!(),
         };

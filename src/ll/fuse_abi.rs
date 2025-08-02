@@ -20,6 +20,8 @@
 
 #![warn(missing_debug_implementations)]
 #![allow(missing_docs)]
+// TODO: fix all these non camel case types
+#![allow(non_camel_case_types)]
 
 #[cfg(feature = "abi-7-9")]
 use crate::consts::{FATTR_ATIME_NOW, FATTR_MTIME_NOW};
@@ -136,10 +138,15 @@ pub struct fuse_kstatfs {
 #[repr(C)]
 #[derive(Debug, IntoBytes, FromBytes, KnownLayout, Immutable)]
 pub struct fuse_file_lock {
+    /// start of locked byte range
     pub start: u64,
+    /// end of locked byte range
     pub end: u64,
     // NOTE: this field is defined as u32 in fuse_kernel.h in libfuse. However, it is treated as signed
+    // TODO enum {F_RDLCK, F_WRLCK, F_UNLCK}
+    /// kind of lock (read and/or write) 
     pub typ: i32,
+    /// PID of process blocking our lock
     pub pid: u32,
 }
 
@@ -530,7 +537,7 @@ pub struct fuse_forget_in {
 
 #[cfg(feature = "abi-7-16")]
 #[repr(C)]
-#[derive(Debug, FromBytes, KnownLayout, Immutable)]
+#[derive(Debug, FromBytes, KnownLayout, Immutable, Clone)]
 pub struct fuse_forget_one {
     pub nodeid: u64,
     pub nlookup: u64,
@@ -731,6 +738,7 @@ pub struct fuse_open_out {
     pub open_flags: u32,
     #[cfg(not(feature = "abi-7-40"))]
     pub padding: u32,
+    /// The `backing_id` field is used to pass a backing file descriptor to the kernel.
     #[cfg(feature = "abi-7-40")]
     pub backing_id: u32,
 }
