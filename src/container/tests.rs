@@ -4,6 +4,8 @@
 
 use crate::container::Container;
 use std::sync::Arc;
+#[cfg(not(feature = "no-rc"))]
+use std::rc::Rc;
 
 #[cfg(test)]
 mod u8 {
@@ -80,7 +82,6 @@ mod u8 {
     fn owned_variants() {
         let data_box_orig: Box<[u8]> = Box::new([1, 2, 3]);
         let data_vec_orig: Vec<u8> = vec![4, 5, 6];
-        let data_rc_orig: std::rc::Rc<[u8]> = std::rc::Rc::new([7, 8, 9]);
         let data_arc_orig: Arc<[u8]> = Arc::new([10, 11, 12]);
 
         // Container::Box
@@ -99,21 +100,28 @@ mod u8 {
         let container_cow_owned_box_as_vec = Container::Cow(std::borrow::Cow::Owned(data_box_orig.to_vec()));
         assert_eq!(&*container_cow_owned_box_as_vec.borrow(), data_box_orig.as_ref());
 
-        // Container::Rc
-        let container_rc = Container::from(data_rc_orig.clone());
-        assert_eq!(&*container_rc.borrow(), data_rc_orig.as_ref());
+        #[cfg(not(feature = "no-rc"))]
+        {
+            // Container::Rc
+            let data_rc_orig: Rc<[u8]> = Rc::new([7, 8, 9]);
+            let container_rc = Container::from(data_rc_orig.clone());
+            assert_eq!(&*container_rc.borrow(), data_rc_orig.as_ref());
+        }
 
         // Container::Arc
         let container_arc = Container::from(data_arc_orig.clone());
         assert_eq!(&*container_arc.borrow(), data_arc_orig.as_ref());
 
-        // Container::RcBox
-        let container_rc_box = Container::RcBox(std::rc::Rc::new(data_box_orig.clone()));
-        assert_eq!(&*container_rc_box.borrow(), data_box_orig.as_ref());
+        #[cfg(not(feature = "no-rc"))]
+        {
+            // Container::RcBox
+            let container_rc_box = Container::RcBox(Rc::new(data_box_orig.clone()));
+            assert_eq!(&*container_rc_box.borrow(), data_box_orig.as_ref());
 
-        // Container::RcVec
-        let container_rc_vec = Container::RcVec(std::rc::Rc::new(data_vec_orig.clone()));
-        assert_eq!(&*container_rc_vec.borrow(), data_vec_orig.as_slice());
+            // Container::RcVec
+            let container_rc_vec = Container::RcVec(Rc::new(data_vec_orig.clone()));
+            assert_eq!(&*container_rc_vec.borrow(), data_vec_orig.as_slice());
+        }
 
         // Container::ArcBox
         let container_arc_box = Container::ArcBox(Arc::new(data_box_orig.clone()));
@@ -128,21 +136,24 @@ mod u8 {
     fn locking_variants_read() {
         let data_box_orig: Box<[u8]> = Box::new([1, 2, 3]);
         let data_vec_orig: Vec<u8> = vec![4, 5, 6];
+        
+        #[cfg(not(feature = "no-rc"))]
+        {
+            // Container::RcRefCellBox
+            let rc_ref_cell_box = Rc::new(std::cell::RefCell::new(data_box_orig.clone()));
+            let container_rc_ref_cell_box: Container<'static, u8> = Container::from(rc_ref_cell_box.clone());
+            match container_rc_ref_cell_box.try_borrow() {
+                Ok(guard) => assert_eq!(&*guard, data_box_orig.as_ref()),
+                Err(_) => panic!("Expected Ok for RcRefCellBox get_slice"),
+            }
 
-        // Container::RcRefCellBox
-        let rc_ref_cell_box = std::rc::Rc::new(std::cell::RefCell::new(data_box_orig.clone()));
-        let container_rc_ref_cell_box: Container<'static, u8> = Container::from(rc_ref_cell_box.clone());
-        match container_rc_ref_cell_box.try_borrow() {
-            Ok(guard) => assert_eq!(&*guard, data_box_orig.as_ref()),
-            Err(_) => panic!("Expected Ok for RcRefCellBox get_slice"),
-        }
-
-        // Container::RcRefCellVec
-        let rc_ref_cell_vec = std::rc::Rc::new(std::cell::RefCell::new(data_vec_orig.clone()));
-        let container_rc_ref_cell_vec: Container<'static, u8> = Container::from(rc_ref_cell_vec.clone());
-        match container_rc_ref_cell_vec.try_borrow() {
-            Ok(guard) => assert_eq!(&*guard, data_vec_orig.as_slice()),
-            Err(_) => panic!("Expected Ok for RcRefCellVec get_slice"),
+            // Container::RcRefCellVec
+            let rc_ref_cell_vec = Rc::new(std::cell::RefCell::new(data_vec_orig.clone()));
+            let container_rc_ref_cell_vec: Container<'static, u8> = Container::from(rc_ref_cell_vec.clone());
+            match container_rc_ref_cell_vec.try_borrow() {
+                Ok(guard) => assert_eq!(&*guard, data_vec_orig.as_slice()),
+                Err(_) => panic!("Expected Ok for RcRefCellVec get_slice"),
+            }; // this weird semicolon is needed because of lifetimes
         }
 
         // Container::ArcMutexBox
@@ -183,15 +194,18 @@ mod u8 {
         let data_box_orig: Box<[u8]> = Box::new([1, 2, 3]);
         let data_vec_orig: Vec<u8> = vec![4, 5, 6];
 
-        // Container::RcRefCellBox
-        let rc_ref_cell_box = std::rc::Rc::new(std::cell::RefCell::new(data_box_orig.clone()));
-        let container_rc_ref_cell_box: Container<'static, u8> = Container::from(rc_ref_cell_box);
-        assert!(container_rc_ref_cell_box.try_as_ref().is_err());
+        #[cfg(not(feature = "no-rc"))]
+        {
+            // Container::RcRefCellBox
+            let rc_ref_cell_box = Rc::new(std::cell::RefCell::new(data_box_orig.clone()));
+            let container_rc_ref_cell_box: Container<'static, u8> = Container::from(rc_ref_cell_box);
+            assert!(container_rc_ref_cell_box.try_as_ref().is_err());
 
-        // Container::RcRefCellVec
-        let rc_ref_cell_vec = std::rc::Rc::new(std::cell::RefCell::new(data_vec_orig.clone()));
-        let container_rc_ref_cell_vec: Container<'static, u8> = Container::from(rc_ref_cell_vec);
-        assert!(container_rc_ref_cell_vec.try_as_ref().is_err());
+            // Container::RcRefCellVec
+            let rc_ref_cell_vec = Rc::new(std::cell::RefCell::new(data_vec_orig.clone()));
+            let container_rc_ref_cell_vec: Container<'static, u8> = Container::from(rc_ref_cell_vec);
+            assert!(container_rc_ref_cell_vec.try_as_ref().is_err());
+        }
 
         // Container::ArcMutexBox
         let arc_mutex_box = Arc::new(std::sync::Mutex::new(data_box_orig.clone()));
@@ -229,7 +243,9 @@ mod string {
     use std::os::unix::ffi::OsStrExt;
     use std::ffi::{OsStr, OsString};
     use std::sync::{Arc, Mutex, RwLock};
+    #[cfg(not(feature = "no-rc"))]
     use std::cell::RefCell;
+    #[cfg(not(feature = "no-rc"))]
     use std::rc::Rc;
     use std::borrow::Cow;
 
@@ -285,6 +301,7 @@ mod string {
             Container::Cow(Cow::Borrowed(bytes)),
             Container::Cow(Cow::Owned(bytes.to_vec())),
             Container::Arc(Arc::from(bytes)),
+            #[cfg(not(feature = "no-rc"))]
             Container::Rc(Rc::from(bytes)),
         ]
     }
@@ -293,6 +310,7 @@ mod string {
         vec![
             Container::ArcMutexVec(Arc::new(Mutex::new(bytes.to_vec()))),
             Container::ArcRwLockVec(Arc::new(RwLock::new(bytes.to_vec()))),
+            #[cfg(not(feature = "no-rc"))]
             Container::RcRefCellVec(Rc::new(RefCell::new(bytes.to_vec()))),
         ]
     }

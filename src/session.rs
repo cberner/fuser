@@ -9,12 +9,14 @@ use libc::{EAGAIN, EINTR, ENODEV, ENOENT};
 #[allow(unused_imports)]
 use log::{debug, info, warn, error};
 use nix::unistd::geteuid;
-use std::fmt;
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::thread::{self, JoinHandle};
 use std::io;
+#[cfg(feature = "threaded")]
+use std::thread::{self, JoinHandle};
+#[cfg(feature = "threaded")]
+use std::fmt;
 
 use crate::ll::fuse_abi as abi;
 use crate::request::Request;
@@ -410,6 +412,7 @@ fn aligned_sub_buf(buf: &mut [u8], alignment: usize) -> &mut [u8] {
 
 /// A session can be run synchronously in the current thread using `run()` or spawned into a
 /// background thread using `spawn()`.
+#[cfg(feature = "threaded")]
 impl<FS: 'static + Filesystem + Send> Session<FS> {
     /// Run the session loop in a background thread
     pub fn spawn(self) -> io::Result<BackgroundSession> {
@@ -431,6 +434,7 @@ impl<FS: Filesystem> Drop for Session<FS> {
 }
 
 /// The background session data structure
+#[cfg(feature = "threaded")]
 pub struct BackgroundSession {
     /// Thread guard of the main session loop
     pub main_loop_guard: JoinHandle<io::Result<()>>,
@@ -441,6 +445,7 @@ pub struct BackgroundSession {
     _mount: Option<Mount>,
 }
 
+#[cfg(feature = "threaded")]
 impl BackgroundSession {
     /// Create a new background session for the given session by running its
     /// session loop in a background thread. If the returned handle is dropped,
@@ -495,6 +500,7 @@ impl BackgroundSession {
 
 // replace with #[derive(Debug)] if Debug ever gets implemented for
 // thread_scoped::JoinGuard
+#[cfg(feature = "threaded")]
 impl fmt::Debug for BackgroundSession {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         let mut builder = f.debug_struct("BackgroundSession");

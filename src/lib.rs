@@ -19,7 +19,9 @@ use std::ffi::OsStr;
 use std::io;
 use std::path::Path;
 use std::time::{Duration, SystemTime};
-use std::{convert::AsRef, io::ErrorKind};
+use std::convert::AsRef;
+#[cfg(feature = "threaded")]
+use std::io::ErrorKind;
 #[allow(clippy::wildcard_imports)] // avoid duplicating feature gates
 use crate::ll::fuse_abi::consts::*;
 pub use crate::ll::fuse_abi::FUSE_ROOT_ID;
@@ -42,9 +44,10 @@ pub use reply::Ioctl;
 pub use reply::XTimes;
 pub use reply::{Bytes, Entry, FileAttr, FileType, Dirent, DirentList, DirentPlusList, Open, Statfs, Xattr, Lock};
 pub use request::RequestMeta;
-pub use session::{BackgroundSession, Session, SessionACL, SessionUnmounter};
+pub use session::{Session, SessionACL, SessionUnmounter};
+#[cfg(feature = "threaded")]
+pub use session::BackgroundSession;
 pub use container::{Container, Borrow};
-
 #[cfg(feature = "abi-7-28")]
 use std::cmp::max;
 #[cfg(feature = "abi-7-13")]
@@ -1052,6 +1055,7 @@ pub fn mount2<FS: Filesystem, P: AsRef<Path>>(
 /// typically starting with `"-o"`. For example: `&[OsStr::new("-o"), OsStr::new("auto_unmount")]`.
 /// # Errors
 /// Error if the session is not started.
+#[cfg(feature = "threaded")]
 #[deprecated(note = "Use `spawn_mount2` instead, which takes a slice of `MountOption` enums for better type safety and clarity.")]
 pub fn spawn_mount<'a, FS: Filesystem + Send + 'static + 'a, P: AsRef<Path>>(
     filesystem: FS,
@@ -1079,6 +1083,7 @@ pub fn spawn_mount<'a, FS: Filesystem + Send + 'static + 'a, P: AsRef<Path>>(
 /// This is the recommended way to mount a FUSE filesystem in the background.
 /// # Errors
 /// Error if the session is not started.
+#[cfg(feature = "threaded")]
 pub fn spawn_mount2<'a, FS: Filesystem + Send + 'static + 'a, P: AsRef<Path>>(
     filesystem: FS,
     mountpoint: P,

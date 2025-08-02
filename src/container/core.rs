@@ -1,10 +1,11 @@
 use std::sync::{Arc,Mutex,RwLock};
+#[cfg(not(feature = "no-rc"))]
 use std::rc::Rc;
 use std::borrow::Cow;
-use std::cell::RefCell;
+#[cfg(not(feature = "no-rc"))]
+use std::cell::{Ref, RefCell};
 use std::ops::Deref;
 use std::sync::{MutexGuard, RwLockReadGuard, PoisonError};
-use std::cell::{Ref};
 
 #[derive(Debug)]
 /// A generic container enum that provides flexible ownership models for unsized data types.
@@ -21,6 +22,7 @@ pub enum Container<'a, T: Clone> {
     Ref(&'a [T]),
     /// A borrowed slice with copy-on-write.
     Cow(Cow<'a, [T]>),
+    #[cfg(not(feature = "no-rc"))]
     /// A reusable, fixed-size slice.
     Rc(Rc<[T]>),
     /// A shared, fixed-size slice.
@@ -35,8 +37,10 @@ pub enum Container<'a, T: Clone> {
     CowBox(Cow<'a, Box<[T]>>),
     /// A borrowed, immutable, heap-allocated vactor, with copy-on-write.
     CowVec(Cow<'a, Vec<T>>),
+    #[cfg(not(feature = "no-rc"))]
     /// A reusable, fixed-size, heap-allocated slice.
     RcBox(Rc<Box<[T]>>),
+    #[cfg(not(feature = "no-rc"))]
     /// A reusable, immutable, heap-allocated vector.
     RcVec(Rc<Vec<T>>),
     /// A shared, fixed-size, heap-allocated slice.
@@ -44,8 +48,10 @@ pub enum Container<'a, T: Clone> {
     /// A shared, immutable, heap-allocated vector.
     ArcVec(Arc<Vec<T>>),
     // ----- Locking Variants -----
+    #[cfg(not(feature = "no-rc"))]
     /// A reusable, replaceable, heap-allocated slice.
     RcRefCellBox(Rc<RefCell<Box<[T]>>>),
+    #[cfg(not(feature = "no-rc"))]
     /// A reusable, growable, heap-allocated vector.
     RcRefCellVec(Rc<RefCell<Vec<T>>>),
     /// A shared, fixed-size, replacable, heap-allocated slice.
@@ -69,8 +75,10 @@ pub enum Borrow<'a, T> {
     /// A borrowed reference to a slice.
     Slice(&'a [T]),
     // ----- Locking Variants -----
+    #[cfg(not(feature = "no-rc"))]
     /// A borrowed reference to a reusable, replaceable, heap-allocated slice.
     RcRefCellBox(Ref<'a, Box<[T]>>),
+    #[cfg(not(feature = "no-rc"))]
     /// A borrowed reference to a reusable, growable, heap-allocated vector.
     RcRefCellVec(Ref<'a, Vec<T>>),
     /// A borrowed reference to a shared, fixed-size, replacable, heap-allocated slice.
@@ -90,7 +98,9 @@ impl<T: Clone> Deref for Borrow<'_, T> {
         match self {
             Borrow::Empty => &[],
             Borrow::Slice(value) => value,
+            #[cfg(not(feature = "no-rc"))]
             Borrow::RcRefCellBox(value) => value,
+            #[cfg(not(feature = "no-rc"))]
             Borrow::RcRefCellVec(value) => value,
             Borrow::ArcMutexBox(value) => value,
             Borrow::ArcMutexVec(value) => value,
@@ -127,6 +137,7 @@ impl<T: Clone> Container<'_, T> {
             Container::Vec(value) => Ok(Borrow::Slice(value.as_ref())),
             Container::Ref(value) => Ok(Borrow::Slice(value)),
             Container::Cow(value) => Ok(Borrow::Slice(value.as_ref())),
+            #[cfg(not(feature = "no-rc"))]
             Container::Rc(value) => Ok(Borrow::Slice(value.as_ref())),
             Container::Arc(value) => Ok(Borrow::Slice(value.as_ref())),
             // ----- Compound Variants -----
@@ -134,12 +145,16 @@ impl<T: Clone> Container<'_, T> {
             Container::RefVec(value) => Ok(Borrow::Slice(value.as_ref())),
             Container::CowBox(value) => Ok(Borrow::Slice(value.as_ref().as_ref())),
             Container::CowVec(value) => Ok(Borrow::Slice(value.as_ref().as_ref())),
+            #[cfg(not(feature = "no-rc"))]
             Container::RcBox(value) => Ok(Borrow::Slice(value.as_ref().as_ref())),
+            #[cfg(not(feature = "no-rc"))]
             Container::RcVec(value) => Ok(Borrow::Slice(value.as_ref().as_ref())),
             Container::ArcBox(value) => Ok(Borrow::Slice(value.as_ref().as_ref())),
             Container::ArcVec(value) => Ok(Borrow::Slice(value.as_ref().as_ref())),
             // ----- Locking Variants -----
+            #[cfg(not(feature = "no-rc"))]
             Container::RcRefCellBox(value) => Ok(Borrow::RcRefCellBox(value.borrow())),
+            #[cfg(not(feature = "no-rc"))]
             Container::RcRefCellVec(value) => Ok(Borrow::RcRefCellVec(value.borrow())),
             Container::ArcMutexBox(value) => Ok(Borrow::ArcMutexBox(value.lock()?)),
             Container::ArcMutexVec(value) => Ok(Borrow::ArcMutexVec(value.lock()?)),
@@ -169,6 +184,7 @@ impl<T: Clone> Container<'_, T> {
             Container::Vec(value) => Ok(value.as_ref()),
             Container::Ref(value) => Ok(value),
             Container::Cow(value) => Ok(value.as_ref()),
+            #[cfg(not(feature = "no-rc"))]
             Container::Rc(value) => Ok(value.as_ref()),
             Container::Arc(value) => Ok(value.as_ref()),
             // ----- Compound Variants -----
@@ -176,7 +192,9 @@ impl<T: Clone> Container<'_, T> {
             Container::RefVec(value) => Ok(value.as_ref()),
             Container::CowBox(value) => Ok(value.as_ref().as_ref()),
             Container::CowVec(value) => Ok(value.as_ref().as_ref()),
+            #[cfg(not(feature = "no-rc"))]
             Container::RcBox(value) => Ok(value.as_ref().as_ref()),
+            #[cfg(not(feature = "no-rc"))]
             Container::RcVec(value) => Ok(value.as_ref().as_ref()),
             Container::ArcBox(value) => Ok(value.as_ref().as_ref()),
             Container::ArcVec(value) => Ok(value.as_ref().as_ref()),

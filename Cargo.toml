@@ -36,7 +36,9 @@ nix = { version = "0.29.0", features = ["poll", "fs", "ioctl"] }
 pkg-config = { version = "0.3.14", optional = true }
 
 [features]
-default = []
+default = ["threaded"]
+threaded = ["no-rc"]
+no-rc = []
 libfuse = ["pkg-config"]
 serializable = ["serde"]
 macfuse-4-compat = []
