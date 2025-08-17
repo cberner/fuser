@@ -18,12 +18,14 @@ export RUST_BACKTRACE=1
 DATA_DIR=$(mktemp --directory)
 DIR=$(mktemp --directory)
 
+cargo build --release --example simple --features=libfuse
 cargo run --release --example simple --features=libfuse -- -vvv --suid --data-dir $DATA_DIR --mount-point $DIR > /tmp/mount.log 2>&1 &
 FUSE_PID=$!
 sleep 0.5
 
 echo "mounting at $DIR"
 # Make sure FUSE was successfully mounted
+mount
 mount | grep fuser
 
 set +e
