@@ -25,7 +25,5 @@ unsafe extern "C" {
     // This function's argument is really a *fuse_session
     pub fn fuse_session_fd(se: *mut c_void) -> c_int;
     // This function's argument is really a *fuse_session
-    pub fn fuse_session_unmount(se: *mut c_void);
-    // This function's argument is really a *fuse_session
     pub fn fuse_session_destroy(se: *mut c_void);
 }
