@@ -336,7 +336,7 @@ mod op {
 
     impl GetAttr<'_> {
         pub fn file_handle(&self) -> Option<FileHandle> {
-            if self.arg.getattr_flags & crate::FUSE_GETATTR_FH != 0 {
+            if self.arg.getattr_flags & crate::consts::FUSE_GETATTR_FH != 0 {
                 Some(FileHandle(self.arg.fh))
             } else {
                 None
