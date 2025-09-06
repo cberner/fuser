@@ -81,7 +81,7 @@ impl ReplyRaw {
         }
     }
     fn send_ll(mut self, response: &ll::Response<'_>) {
-        self.send_ll_mut(response)
+        self.send_ll_mut(response);
     }
 
     /// Reply to a request with the given error code
@@ -371,7 +371,7 @@ impl ReplyStatfs {
     ) {
         self.reply.send_ll(&ll::Response::new_statfs(
             blocks, bfree, bavail, files, ffree, bsize, namelen, frsize,
-        ))
+        ));
     }
 
     /// Reply to a request with the given error code
