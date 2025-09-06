@@ -112,7 +112,7 @@ impl PassthroughFs {
 
         let passthrough_file_attr = FileAttr {
             ino: 2,
-            size: 123456,
+            size: 123_456,
             blocks: 1,
             atime: UNIX_EPOCH, // 1970-01-01 00:00:00
             mtime: UNIX_EPOCH,
