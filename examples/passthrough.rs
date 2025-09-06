@@ -172,7 +172,7 @@ impl Filesystem for PassthroughFs {
         let (fh, id) = self
             .backing_cache
             .get_or(ino, || {
-                let file = File::open("/etc/os-release")?;
+                let file = File::open("/etc/profile")?;
                 reply.open_backing(file)
             })
             .unwrap();
