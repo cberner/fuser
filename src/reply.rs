@@ -1134,6 +1134,95 @@ mod test {
     }
 
     #[test]
+    #[cfg(feature = "abi-7-21")]
+    fn reply_directory_plus() {
+        // prepare the expected file attribute portion of the message
+        // see test::reply_entry() for details
+        let mut entry_bytes = Vec::new();
+        entry_bytes.extend_from_slice(&[
+            0x11, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xaa, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x65, 0x87, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x65, 0x87, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x21, 0x43, 0x00, 0x00, 0x21, 0x43, 0x00, 0x00,
+        ]);
+        let mut attr_bytes = default_attr_bytes!();
+
+        let mut expected = Vec::new();
+
+        expected.extend_from_slice(&[
+            // FUSE header
+            0x50, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xef, 0xbe, 0xad, 0xde, 0x00, 0x00,
+            0x00, 0x00,
+        ]);
+
+        /* ------ file 1 ------- */
+        // entry 1 and attr 1 get a specific ino value
+        entry_bytes[0] = 0xbb;
+        entry_bytes[1] = 0xaa;
+        attr_bytes[0] = 0xbb;
+        attr_bytes[1] = 0xaa;
+        // entry 1 and attr 1 have the directory type
+        let i = if cfg!(target_os = "macos") { 73 } else { 61 };
+        attr_bytes[i] = 0x41;
+        expected.extend_from_slice(&entry_bytes);
+        expected.extend_from_slice(&attr_bytes);
+        // dirent 1
+        // see test::reply_directory() for details
+        expected.extend_from_slice(&[
+            0xbb, 0xaa, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x68, 0x65, 0x6c, 0x6c,
+            0x6f, 0x00, 0x00, 0x00,
+        ]);
+
+        /* ------ file 2 ------- */
+        let mut attr_bytes = default_attr_bytes!();
+        // entry 2 and attr 2 get a specific ino value
+        entry_bytes[0] = 0xdd;
+        entry_bytes[1] = 0xcc;
+        attr_bytes[0] = 0xdd;
+        attr_bytes[1] = 0xcc;
+        expected.extend_from_slice(&entry_bytes);
+        expected.extend_from_slice(&attr_bytes);
+        // dirent 2
+        expected.extend_from_slice(&[
+            0xdd, 0xcc, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x77, 0x6f, 0x72, 0x6c,
+            0x64, 0x2e, 0x72, 0x73,
+        ]);
+        // correct the header
+        expected[0] = (expected.len()) as u8;
+        // test reply will be compared to expected
+        let sender = AssertSender { expected };
+        let mut reply =
+            ReplyDirectoryPlus::new(0xdeadbeef, sender, std::mem::size_of::<u8>() * 4096);
+        let time = UNIX_EPOCH + Duration::new(0x1234, 0x5678);
+        let ttl = Duration::new(0x8765, 0x4321);
+        let attr1 = FileAttr {
+            ino: 0xaabb,
+            size: 0x22,
+            blocks: 0x33,
+            atime: time,
+            mtime: time,
+            ctime: time,
+            crtime: time,
+            kind: FileType::Directory,
+            perm: 0o644,
+            nlink: 0x55,
+            uid: 0x66,
+            gid: 0x77,
+            rdev: 0x88,
+            flags: 0x99,
+            blksize: 0xbb,
+        };
+        let mut attr2 = attr1; //implicit copy
+        attr2.ino = 0xccdd;
+        attr2.kind = FileType::RegularFile;
+        let generation = 0xaa;
+        assert!(!reply.add(0xaabb, 1, "hello", &ttl, &attr1, generation,));
+        assert!(!reply.add(0xccdd, 2, "world.rs", &ttl, &attr2, generation,));
+        reply.ok();
+    }
+
+    #[test]
     fn reply_xattr_size() {
         let sender = AssertSender {
             expected: vec![
