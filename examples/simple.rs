@@ -432,9 +432,8 @@ impl SimpleFS {
         let entries = self.get_directory_content(parent)?;
         if let Some((inode, _)) = entries.get(name.as_bytes()) {
             return self.get_inode(*inode);
-        } else {
-            return Err(libc::ENOENT);
         }
+        return Err(libc::ENOENT);
     }
 
     fn insert_link(
@@ -1964,9 +1963,8 @@ fn as_file_kind(mut mode: u32) -> FileKind {
         return FileKind::Symlink;
     } else if mode == libc::S_IFDIR as u32 {
         return FileKind::Directory;
-    } else {
-        unimplemented!("{mode}");
     }
+    unimplemented!("{mode}");
 }
 
 fn get_groups(pid: u32) -> Vec<u32> {
