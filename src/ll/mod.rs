@@ -226,7 +226,7 @@ impl Errno {
 
     /// Convert libc-style error codes into `fuser::Errno`
     pub fn from_i32(err: i32) -> Errno {
-        err.try_into().ok().map(Errno).unwrap_or(Errno::EIO)
+        err.try_into().ok().map_or(Errno::EIO, Errno)
     }
 }
 impl From<std::io::Error> for Errno {
