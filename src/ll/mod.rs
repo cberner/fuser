@@ -35,6 +35,10 @@ macro_rules! errno {
     };
 }
 
+macro_rules! no_xattr_doc {
+    () => {"Use this as an error return from getxattr/removexattr to indicate that the xattr doesn't exist.  This resolves to the appropriate platform-specific error code."}
+}
+
 /// Represents an error code to be returned to the caller
 #[derive(Debug)]
 pub struct Errno(pub NonZeroI32);
@@ -213,14 +217,14 @@ impl Errno {
     /// No data available
     #[cfg(target_os = "linux")]
     pub const ENODATA: Errno = errno!(libc::ENODATA);
+    #[doc = no_xattr_doc!()]
+    #[cfg(target_os = "linux")]
+    pub const NO_XATTR: Errno = Self::ENODATA;
+
     /// Attribute not found
     #[cfg(not(target_os = "linux"))]
     pub const ENOATTR: Errno = errno!(libc::ENOATTR);
-
-    /// Use this as an error return from getxattr/removexattr to indicate that the xattr doesn't
-    /// exist.  This resolves to the appropriate platform specific error code.
-    #[cfg(target_os = "linux")]
-    pub const NO_XATTR: Errno = Self::ENODATA;
+    #[doc = no_xattr_doc!()]
     #[cfg(not(target_os = "linux"))]
     pub const NO_XATTR: Errno = Self::ENOATTR;
 
