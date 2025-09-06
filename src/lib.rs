@@ -183,7 +183,9 @@ impl KernelConfig {
     ///
     /// The kernel currently has a hard maximum value of 2.  Anything higher won't work.
     ///
-    /// On success, returns the previous value.  On error, returns the nearest value which will succeed.
+    /// On success, returns the previous value.  
+    /// # Errors
+    /// If argument is too large, returns the nearest value which will succeed.
     #[cfg(feature = "abi-7-40")]
     pub fn set_max_stack_depth(&mut self, value: u32) -> Result<u32, u32> {
         // https://lore.kernel.org/linux-fsdevel/CAOYeF9V_n93OEF_uf0Gwtd=+da0ReX8N2aaT6RfEJ9DPvs8O2w@mail.gmail.com/
@@ -202,7 +204,9 @@ impl KernelConfig {
     ///
     /// Must be a power of 10 nanoseconds. i.e. 1s, 0.1s, 0.01s, 1ms, 0.1ms...etc
     ///
-    /// On success returns the previous value. On error returns the nearest value which will succeed
+    /// On success returns the previous value.  
+    /// # Errors
+    /// If the argument does not match any valid granularity, returns the nearest value which will succeed.
     #[cfg(feature = "abi-7-23")]
     pub fn set_time_granularity(&mut self, value: Duration) -> Result<Duration, Duration> {
         if value.as_nanos() == 0 {
@@ -226,7 +230,9 @@ impl KernelConfig {
 
     /// Set the maximum write size for a single request
     ///
-    /// On success returns the previous value. On error returns the nearest value which will succeed
+    /// On success returns the previous value.
+    /// # Errors
+    /// If the argument is too large, returns the nearest value which will succeed.
     pub fn set_max_write(&mut self, value: u32) -> Result<u32, u32> {
         if value == 0 {
             return Err(1);
@@ -241,7 +247,9 @@ impl KernelConfig {
 
     /// Set the maximum readahead size
     ///
-    /// On success returns the previous value. On error returns the nearest value which will succeed
+    /// On success returns the previous value.
+    /// # Errors
+    /// If the argument is too large, returns the nearest value which will succeed.
     pub fn set_max_readahead(&mut self, value: u32) -> Result<u32, u32> {
         if value == 0 {
             return Err(1);
@@ -256,7 +264,8 @@ impl KernelConfig {
 
     /// Add a set of capabilities.
     ///
-    /// On success returns Ok, else return bits of capabilities not supported when capabilities you provided are not all supported by kernel.
+    /// # Errors
+    /// When the argument includes capabilities not supported by the kernel, returns the bits of the capabilities not supported.
     pub fn add_capabilities(&mut self, capabilities_to_add: u64) -> Result<(), u64> {
         if capabilities_to_add & self.capabilities != capabilities_to_add {
             return Err(capabilities_to_add - (capabilities_to_add & self.capabilities));
@@ -267,7 +276,9 @@ impl KernelConfig {
 
     /// Set the maximum number of pending background requests. Such as readahead requests.
     ///
-    /// On success returns the previous value. On error returns the nearest value which will succeed
+    /// On success returns the previous value.
+    /// # Errors
+    /// If the argument is too small, returns the nearest value which will succeed.
     pub fn set_max_background(&mut self, value: u16) -> Result<u16, u16> {
         if value == 0 {
             return Err(1);
@@ -280,7 +291,9 @@ impl KernelConfig {
     /// Set the threshold of background requests at which the kernel will consider the filesystem
     /// request queue congested. (it may then switch to sleeping instead of spin-waiting, for example)
     ///
-    /// On success returns the previous value. On error returns the nearest value which will succeed
+    /// On success returns the previous value.
+    /// # Errors
+    /// If the argument is too small, returns the nearest value which will succeed.
     pub fn set_congestion_threshold(&mut self, value: u16) -> Result<u16, u16> {
         if value == 0 {
             return Err(1);
@@ -952,6 +965,9 @@ pub trait Filesystem {
 /// not return until the filesystem is unmounted.
 ///
 /// Note that you need to lead each option with a separate `"-o"` string.
+/// # Errors
+/// Returns an error if the options are incorrect, or if the fuse device can't be mounted,
+/// and any final error when the session comes to an end.
 #[deprecated(note = "use mount2() instead")]
 pub fn mount<FS: Filesystem, P: AsRef<Path>>(
     filesystem: FS,
@@ -966,6 +982,9 @@ pub fn mount<FS: Filesystem, P: AsRef<Path>>(
 /// not return until the filesystem is unmounted.
 ///
 /// NOTE: This will eventually replace `mount()`, once the API is stable
+/// # Errors
+/// Returns an error if the options are incorrect, or if the fuse device can't be mounted,
+/// and any final error when the session comes to an end.
 pub fn mount2<FS: Filesystem, P: AsRef<Path>>(
     filesystem: FS,
     mountpoint: P,
@@ -980,6 +999,8 @@ pub fn mount2<FS: Filesystem, P: AsRef<Path>>(
 /// and therefore returns immediately. The returned handle should be stored
 /// to reference the mounted filesystem. If it's dropped, the filesystem will
 /// be unmounted.
+/// # Errors
+/// Returns an error if the options are incorrect, or if the fuse device can't be mounted.
 #[deprecated(note = "use spawn_mount2() instead")]
 pub fn spawn_mount<'a, FS: Filesystem + Send + 'static + 'a, P: AsRef<Path>>(
     filesystem: FS,
@@ -1002,6 +1023,8 @@ pub fn spawn_mount<'a, FS: Filesystem + Send + 'static + 'a, P: AsRef<Path>>(
 /// be unmounted.
 ///
 /// NOTE: This is the corresponding function to mount2.
+/// # Errors
+/// Returns an error if the options are incorrect, or if the fuse device can't be mounted.
 pub fn spawn_mount2<'a, FS: Filesystem + Send + 'static + 'a, P: AsRef<Path>>(
     filesystem: FS,
     mountpoint: P,
