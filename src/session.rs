@@ -284,6 +284,7 @@ impl BackgroundSession {
         })
     }
     /// Unmount the filesystem and join the background thread.
+    /// Logs any final error when the session ends.
     /// # Panics
     /// Panics if the background thread can't be recovered.
     pub fn join(self) {
@@ -293,7 +294,9 @@ impl BackgroundSession {
             mount,
         } = self;
         drop(mount);
-        guard.join().unwrap().unwrap();
+        let res = guard.join().expect("Failed to join the background thread");
+        // An error is expected, since the thread was active when the unmount occured.
+        info!("Session loop end with result {res:?}.");
     }
 
     /// Returns an object that can be used to send notifications to the kernel
