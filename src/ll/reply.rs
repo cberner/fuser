@@ -257,6 +257,7 @@ impl<'a> Response<'a> {
         Self::from_struct(&r)
     }
 
+    #[cfg(feature = "abi-7-24")]
     pub(crate) fn new_lseek(offset: i64) -> Self {
         let r = abi::fuse_lseek_out { offset };
         Self::from_struct(&r)
@@ -437,6 +438,7 @@ impl DirEntList {
     }
 }
 
+#[cfg(feature = "abi-7-21")]
 #[derive(Debug)]
 pub struct DirEntryPlus<T: AsRef<Path>> {
     #[allow(unused)] // We use `attr.ino` instead
@@ -449,6 +451,7 @@ pub struct DirEntryPlus<T: AsRef<Path>> {
     attr_valid: Duration,
 }
 
+#[cfg(feature = "abi-7-21")]
 impl<T: AsRef<Path>> DirEntryPlus<T> {
     pub fn new(
         ino: INodeNo,
@@ -472,8 +475,11 @@ impl<T: AsRef<Path>> DirEntryPlus<T> {
 }
 
 /// Data buffer used to respond to [`ReaddirPlus`] requests.
+#[cfg(feature = "abi-7-21")]
 #[derive(Debug)]
 pub struct DirEntPlusList(EntListBuf);
+
+#[cfg(feature = "abi-7-21")]
 impl From<DirEntPlusList> for Response<'_> {
     fn from(l: DirEntPlusList) -> Self {
         assert!(l.0.buf.len() <= l.0.max_size);
@@ -481,6 +487,7 @@ impl From<DirEntPlusList> for Response<'_> {
     }
 }
 
+#[cfg(feature = "abi-7-21")]
 impl DirEntPlusList {
     pub(crate) fn new(max_size: usize) -> Self {
         Self(EntListBuf::new(max_size))

@@ -29,15 +29,27 @@ pub use mnt::mount_options::MountOption;
 pub use notify::{Notifier, PollHandle};
 #[cfg(feature = "abi-7-40")]
 pub use passthrough::BackingId;
+pub use reply::Reply;
+pub use reply::ReplyAttr;
+pub use reply::ReplyBmap;
+pub use reply::ReplyCreate;
+pub use reply::ReplyData;
+pub use reply::ReplyDirectory;
+#[cfg(feature = "abi-7-21")]
+pub use reply::ReplyDirectoryPlus;
+pub use reply::ReplyEmpty;
+pub use reply::ReplyEntry;
+pub use reply::ReplyIoctl;
+pub use reply::ReplyLock;
+#[cfg(feature = "abi-7-24")]
+pub use reply::ReplyLseek;
+pub use reply::ReplyOpen;
 pub use reply::ReplyPoll;
+pub use reply::ReplyStatfs;
+pub use reply::ReplyWrite;
 #[cfg(target_os = "macos")]
 pub use reply::ReplyXTimes;
 pub use reply::ReplyXattr;
-pub use reply::{Reply, ReplyAttr, ReplyData, ReplyEmpty, ReplyEntry, ReplyOpen};
-pub use reply::{
-    ReplyBmap, ReplyCreate, ReplyDirectory, ReplyDirectoryPlus, ReplyIoctl, ReplyLock, ReplyLseek,
-    ReplyStatfs, ReplyWrite,
-};
 pub use request::Request;
 pub use session::{BackgroundSession, Session, SessionACL, SessionUnmounter};
 #[cfg(feature = "abi-7-28")]
@@ -643,6 +655,7 @@ pub trait Filesystem {
     /// requested size. Send an empty buffer on end of stream. fh will contain the
     /// value set by the opendir method, or will be undefined if the opendir method
     /// didn't set any value.
+    #[cfg(feature = "abi-7-21")]
     fn readdirplus(
         &mut self,
         req: &Request<'_>,
@@ -881,6 +894,7 @@ pub trait Filesystem {
     }
 
     /// Reposition read/write file offset
+    #[cfg(feature = "abi-7-24")]
     fn lseek(
         &mut self,
         req: &Request<'_>,
