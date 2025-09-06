@@ -194,7 +194,7 @@ mod test {
     #[test]
     fn option_round_trip() {
         use super::MountOption::*;
-        for x in [
+        for x in &[
             FSName("Blah".to_owned()),
             Subtype("Bloo".to_owned()),
             CUSTOM("bongos".to_owned()),
@@ -214,10 +214,8 @@ mod test {
             DirSync,
             Sync,
             Async,
-        ]
-        .iter()
-        {
-            assert_eq!(*x, MountOption::from_str(option_to_string(x).as_ref()))
+        ] {
+            assert_eq!(*x, MountOption::from_str(option_to_string(x).as_ref()));
         }
     }
 
