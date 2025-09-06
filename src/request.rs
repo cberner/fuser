@@ -482,18 +482,17 @@ impl<'a> Request<'a> {
             ll::Operation::IoCtl(x) => {
                 if x.unrestricted() {
                     return Err(Errno::ENOSYS);
-                } else {
-                    se.filesystem.ioctl(
-                        self,
-                        self.request.nodeid().into(),
-                        x.file_handle().into(),
-                        x.flags(),
-                        x.command(),
-                        x.in_data(),
-                        x.out_size(),
-                        self.reply(),
-                    );
                 }
+                se.filesystem.ioctl(
+                    self,
+                    self.request.nodeid().into(),
+                    x.file_handle().into(),
+                    x.flags(),
+                    x.command(),
+                    x.in_data(),
+                    x.out_size(),
+                    self.reply(),
+                );
             }
             ll::Operation::Poll(x) => {
                 let ph = PollHandle::new(se.ch.sender(), x.kernel_handle());
