@@ -954,9 +954,9 @@ mod op {
         pub fn capabilities(&self) -> u64 {
             #[cfg(feature = "abi-7-36")]
             if self.arg.flags & (FUSE_INIT_EXT as u32) != 0 {
-                return (self.arg.flags as u64) | ((self.arg.flags2 as u64) << 32);
+                return u64::from(self.arg.flags) | (u64::from(self.arg.flags2) << 32);
             }
-            self.arg.flags as u64
+            u64::from(self.arg.flags)
         }
         pub fn max_readahead(&self) -> u32 {
             self.arg.max_readahead
