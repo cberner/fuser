@@ -45,7 +45,7 @@ nix::ioctl_write_ptr!(
 /// make that call (if the channel hasn't already been closed).
 #[derive(Debug)]
 pub struct BackingId {
-    channel: Weak<File>,
+    pub(crate) channel: Weak<File>,
     /// The `backing_id` field passed to and from the kernel
     pub(crate) backing_id: u32,
 }
