@@ -276,6 +276,8 @@ impl Reply for ReplyOpen {
 
 impl ReplyOpen {
     /// Reply to a request with the given open result
+    /// # Panics
+    /// When attempting to use kernel passthrough. Use `opened_passthrough()` instead.
     pub fn opened(self, fh: u64, flags: u32) {
         #[cfg(feature = "abi-7-40")]
         assert_eq!(flags & FOPEN_PASSTHROUGH, 0);
@@ -396,6 +398,8 @@ impl Reply for ReplyCreate {
 
 impl ReplyCreate {
     /// Reply to a request with the given entry
+    /// # Panics
+    /// When attempting to use kernel passthrough. Use `opened_passthrough()` instead.
     pub fn created(self, ttl: &Duration, attr: &FileAttr, generation: u64, fh: u64, flags: u32) {
         #[cfg(feature = "abi-7-40")]
         assert_eq!(flags & FOPEN_PASSTHROUGH, 0);
