@@ -1259,7 +1259,7 @@ mod test {
     }
 
     #[test]
-    fn async_reply() {
+    fn threaded_reply() {
         let (tx, rx) = sync_channel::<()>(1);
         let reply: ReplyEmpty = Reply::new(0xdeadbeef, tx);
         thread::spawn(move || {
