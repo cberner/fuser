@@ -156,7 +156,7 @@ impl Filesystem for ClockFS<'_> {
             reply.error(EINVAL);
             return;
         };
-        let Ok(end) = (offset + size as i64).min(dlen).try_into() else {
+        let Ok(end) = (offset + i64::from(size)).min(dlen).try_into() else {
             reply.error(EINVAL);
             return;
         };
