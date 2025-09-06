@@ -98,7 +98,7 @@ impl Filesystem for FiocFS {
         reply: ReplyData,
     ) {
         if ino == 2 {
-            reply.data(&self.content[offset as usize..])
+            reply.data(&self.content[offset as usize..]);
         } else {
             reply.error(ENOENT);
         }

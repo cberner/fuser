@@ -174,7 +174,7 @@ pub(crate) fn parse_options_from_args(args: &[&OsStr]) -> io::Result<Vec<MountOp
             Some(x) => return Err(err(format!("Error parsing args: expected -o, got {x}"))),
         };
         for x in opt.split(',') {
-            out.push(MountOption::from_str(x))
+            out.push(MountOption::from_str(x));
         }
     }
     Ok(out)

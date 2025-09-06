@@ -85,7 +85,7 @@ impl ReplyRaw {
         }
     }
     fn send_ll(mut self, response: &ll::Response<'_>) {
-        self.send_ll_mut(response)
+        self.send_ll_mut(response);
     }
 
     /// Reply to a request with the given error code
@@ -280,7 +280,7 @@ impl ReplyOpen {
         #[cfg(feature = "abi-7-40")]
         assert_eq!(flags & FOPEN_PASSTHROUGH, 0);
         self.reply
-            .send_ll(&ll::Response::new_open(ll::FileHandle(fh), flags, 0))
+            .send_ll(&ll::Response::new_open(ll::FileHandle(fh), flags, 0));
     }
 
     /// Registers a fd for passthrough, returning a `BackingId`.  Once you have the backing ID,
@@ -300,7 +300,7 @@ impl ReplyOpen {
             ll::FileHandle(fh),
             flags | FOPEN_PASSTHROUGH,
             backing_id.backing_id,
-        ))
+        ));
     }
 
     /// Reply to a request with the given error code
@@ -328,7 +328,7 @@ impl Reply for ReplyWrite {
 impl ReplyWrite {
     /// Reply to a request with the given open result
     pub fn written(self, size: u32) {
-        self.reply.send_ll(&ll::Response::new_write(size))
+        self.reply.send_ll(&ll::Response::new_write(size));
     }
 
     /// Reply to a request with the given error code
@@ -369,7 +369,7 @@ impl ReplyStatfs {
     ) {
         self.reply.send_ll(&ll::Response::new_statfs(
             blocks, bfree, bavail, files, ffree, bsize, namelen, frsize,
-        ))
+        ));
     }
 
     /// Reply to a request with the given error code
@@ -406,7 +406,7 @@ impl ReplyCreate {
             ll::FileHandle(fh),
             flags,
             0,
-        ))
+        ));
     }
 
     /// Reply to a request with the given error code
@@ -438,7 +438,7 @@ impl ReplyLock {
             range: (start, end),
             typ,
             pid,
-        }))
+        }));
     }
 
     /// Reply to a request with the given error code
@@ -466,7 +466,7 @@ impl Reply for ReplyBmap {
 impl ReplyBmap {
     /// Reply to a request with the given open result
     pub fn bmap(self, block: u64) {
-        self.reply.send_ll(&ll::Response::new_bmap(block))
+        self.reply.send_ll(&ll::Response::new_bmap(block));
     }
 
     /// Reply to a request with the given error code
@@ -523,7 +523,7 @@ impl Reply for ReplyPoll {
 impl ReplyPoll {
     /// Reply to a request with the given poll result
     pub fn poll(self, revents: u32) {
-        self.reply.send_ll(&ll::Response::new_poll(revents))
+        self.reply.send_ll(&ll::Response::new_poll(revents));
     }
 
     /// Reply to a request with the given error code
@@ -647,12 +647,12 @@ impl Reply for ReplyXattr {
 impl ReplyXattr {
     /// Reply to a request with the size of the xattr.
     pub fn size(self, size: u32) {
-        self.reply.send_ll(&ll::Response::new_xattr_size(size))
+        self.reply.send_ll(&ll::Response::new_xattr_size(size));
     }
 
     /// Reply to a request with the data in the xattr.
     pub fn data(self, data: &[u8]) {
-        self.reply.send_ll(&ll::Response::new_slice(data))
+        self.reply.send_ll(&ll::Response::new_slice(data));
     }
 
     /// Reply to a request with the given error code.
@@ -680,7 +680,7 @@ impl Reply for ReplyLseek {
 impl ReplyLseek {
     /// Reply to a request with seeked offset
     pub fn offset(self, offset: i64) {
-        self.reply.send_ll(&ll::Response::new_lseek(offset))
+        self.reply.send_ll(&ll::Response::new_lseek(offset));
     }
 
     /// Reply to a request with the given error code
@@ -736,7 +736,7 @@ mod test {
         fn send(&self, data: &[IoSlice<'_>]) -> std::io::Result<()> {
             let mut v = vec![];
             for x in data {
-                v.extend_from_slice(x)
+                v.extend_from_slice(x);
             }
             assert_eq!(self.expected, v);
             Ok(())
