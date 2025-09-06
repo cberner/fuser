@@ -1,6 +1,6 @@
 // This example requires fuse 7.11 or later. Run with:
 //
-//   cargo run --example ioctl /tmp/foobar
+//   cargo run --example ioctl DIR
 
 use clap::{Arg, ArgAction, Command, crate_version};
 use fuser::{
