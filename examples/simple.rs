@@ -1442,7 +1442,7 @@ impl Filesystem for SimpleFS {
         offset: i64,
         data: &[u8],
         _write_flags: u32,
-        #[allow(unused_variables)] flags: i32,
+        _flags: i32,
         _lock_owner: Option<u64>,
         reply: ReplyWrite,
     ) {
