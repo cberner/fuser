@@ -72,5 +72,8 @@ name = "notify_inval_inode"
 name = "ioctl"
 
 [[example]]
+name = "ioctl_client"
+
+[[example]]
 name = "passthrough"
 required-features = ["abi-7-40"]
