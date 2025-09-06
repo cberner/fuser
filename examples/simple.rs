@@ -33,7 +33,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{env, fs, io};
 
-const BLOCK_SIZE: u64 = 512;
+const BLOCK_SIZE: u32 = 512;
 const MAX_NAME_LENGTH: u32 = 255;
 const MAX_FILE_SIZE: u64 = 1024 * 1024 * 1024 * 1024;
 
@@ -221,7 +221,7 @@ impl From<InodeAttributes> for fuser::FileAttr {
         fuser::FileAttr {
             ino: attrs.inode,
             size: attrs.size,
-            blocks: attrs.size.div_ceil(BLOCK_SIZE),
+            blocks: attrs.size.div_ceil(u64::from(BLOCK_SIZE)),
             atime: system_time_from_time(attrs.last_accessed.0, attrs.last_accessed.1),
             mtime: system_time_from_time(attrs.last_modified.0, attrs.last_modified.1),
             ctime: system_time_from_time(
@@ -235,7 +235,7 @@ impl From<InodeAttributes> for fuser::FileAttr {
             uid: attrs.uid,
             gid: attrs.gid,
             rdev: 0,
-            blksize: BLOCK_SIZE as u32,
+            blksize: BLOCK_SIZE,
             flags: 0,
         }
     }
@@ -900,7 +900,7 @@ impl Filesystem for SimpleFS {
         let attrs = InodeAttributes {
             inode,
             open_file_handles: 0,
-            size: BLOCK_SIZE,
+            size: u64::from(BLOCK_SIZE),
             last_accessed: time_now(),
             last_modified: time_now(),
             last_metadata_changed: time_now(),
@@ -1596,9 +1596,9 @@ impl Filesystem for SimpleFS {
             10_000,
             1,
             10_000,
-            BLOCK_SIZE as u32,
+            BLOCK_SIZE,
             MAX_NAME_LENGTH,
-            BLOCK_SIZE as u32,
+            BLOCK_SIZE,
         );
     }
 
