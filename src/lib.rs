@@ -747,7 +747,7 @@ pub trait Filesystem {
     }
 
     /// Check file access permissions.
-    /// This will be called for the `access()` system call. If the '`default_permissions`'
+    /// This will be called for the `access()` system call. If the `default_permissions`
     /// mount option is given, this method is not called. This method is not called
     /// under Linux kernel versions 2.4.x
     fn access(&mut self, req: &Request<'_>, ino: u64, mask: i32, reply: ReplyEmpty) {
