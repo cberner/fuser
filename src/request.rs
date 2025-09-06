@@ -187,7 +187,7 @@ impl<'a> Request<'a> {
                 se.filesystem
                     .forget(self, self.request.nodeid().into(), x.nlookup()); // no reply
             }
-            ll::Operation::GetAttr(_attr) => {
+            ll::Operation::GetAttr(x) => {
                 se.filesystem.getattr(
                     self,
                     self.request.nodeid().into(),
