@@ -234,7 +234,7 @@ impl<'a> Response<'a> {
         // TODO: Don't copy this data
         let mut v: ResponseBuf = ResponseBuf::from_slice(r.as_bytes());
         for x in data {
-            v.extend_from_slice(x)
+            v.extend_from_slice(x);
         }
         Self::Data(v)
     }
