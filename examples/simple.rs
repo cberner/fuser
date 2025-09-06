@@ -277,10 +277,10 @@ impl SimpleFS {
     }
 
     fn creation_mode(&self, mode: u32) -> u16 {
-        if !self.suid_support {
-            (mode & !(libc::S_ISUID | libc::S_ISGID) as u32) as u16
-        } else {
+        if self.suid_support {
             mode as u16
+        } else {
+            (mode & !(libc::S_ISUID | libc::S_ISGID) as u32) as u16
         }
     }
 

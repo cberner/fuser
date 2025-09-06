@@ -228,7 +228,8 @@ impl<'a> Response<'a> {
             // these fields are only needed for unrestricted ioctls
             flags: 0,
             in_iovs: 1,
-            out_iovs: if !data.is_empty() { 1 } else { 0 },
+            // boolean to integer
+            out_iovs: u32::from(!data.is_empty()),
         };
         // TODO: Don't copy this data
         let mut v: ResponseBuf = ResponseBuf::from_slice(r.as_bytes());

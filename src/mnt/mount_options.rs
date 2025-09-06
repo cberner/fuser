@@ -91,13 +91,13 @@ pub fn check_option_conflicts(options: &[MountOption]) -> Result<(), io::Error> 
     options_set.extend(options.iter().cloned());
     let conflicting: HashSet<MountOption> = options.iter().flat_map(conflicts_with).collect();
     let intersection: Vec<MountOption> = conflicting.intersection(&options_set).cloned().collect();
-    if !intersection.is_empty() {
+    if intersection.is_empty() {
+        Ok(())
+    } else {
         Err(io::Error::new(
             ErrorKind::InvalidInput,
             format!("Conflicting mount options found: {intersection:?}"),
         ))
-    } else {
-        Ok(())
     }
 }
 
