@@ -293,7 +293,7 @@ impl KernelConfig {
     fn congestion_threshold(&self) -> u16 {
         match self.congestion_threshold {
             // Default to a threshold of 3/4 of the max background threads
-            None => (self.max_background as u32 * 3 / 4) as u16,
+            None => (u32::from(self.max_background) * 3 / 4) as u16,
             Some(value) => min(value, self.max_background),
         }
     }
