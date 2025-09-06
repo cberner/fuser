@@ -349,6 +349,7 @@ impl From<crate::FileAttr> for Attr {
 }
 
 #[derive(Debug)]
+/// A generic data buffer
 struct EntListBuf {
     max_size: usize,
     buf: ResponseBuf,
