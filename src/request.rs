@@ -191,7 +191,7 @@ impl<'a> Request<'a> {
                 se.filesystem.getattr(
                     self,
                     self.request.nodeid().into(),
-                    _attr.file_handle().map(|fh| fh.into()),
+                    _attr.file_handle().map(std::convert::Into::into),
                     self.reply(),
                 );
             }
@@ -206,7 +206,7 @@ impl<'a> Request<'a> {
                     x.atime(),
                     x.mtime(),
                     x.ctime(),
-                    x.file_handle().map(|fh| fh.into()),
+                    x.file_handle().map(std::convert::Into::into),
                     x.crtime(),
                     x.chgtime(),
                     x.bkuptime(),
@@ -296,7 +296,7 @@ impl<'a> Request<'a> {
                     x.offset(),
                     x.size(),
                     x.flags(),
-                    x.lock_owner().map(|l| l.into()),
+                    x.lock_owner().map(std::convert::Into::into),
                     self.reply(),
                 );
             }
@@ -309,7 +309,7 @@ impl<'a> Request<'a> {
                     x.data(),
                     x.write_flags(),
                     x.flags(),
-                    x.lock_owner().map(|l| l.into()),
+                    x.lock_owner().map(std::convert::Into::into),
                     self.reply(),
                 );
             }
@@ -328,7 +328,7 @@ impl<'a> Request<'a> {
                     self.request.nodeid().into(),
                     x.file_handle().into(),
                     x.flags(),
-                    x.lock_owner().map(|x| x.into()),
+                    x.lock_owner().map(std::convert::Into::into),
                     x.flush(),
                     self.reply(),
                 );
