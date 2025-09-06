@@ -34,6 +34,7 @@ impl Channel {
 
     /// Receives data up to the capacity of the given buffer (can block).
     pub fn receive(&self, buffer: &mut [u8]) -> io::Result<usize> {
+        #[allow(clippy::ptr_as_ptr)] // explicit mut libc pointer
         let rc = unsafe {
             libc::read(
                 self.0.as_raw_fd(),
@@ -41,6 +42,7 @@ impl Channel {
                 buffer.len() as size_t,
             )
         };
+        #[allow(clippy::cast_sign_loss)] // explicitly handle negative values
         if rc < 0 {
             Err(io::Error::last_os_error())
         } else {
@@ -63,6 +65,7 @@ pub struct ChannelSender(Arc<File>);
 
 impl ReplySender for ChannelSender {
     fn send(&self, bufs: &[io::IoSlice<'_>]) -> io::Result<()> {
+        #[allow(clippy::ptr_as_ptr)] // explicit const libc pointer
         let rc = unsafe {
             libc::writev(
                 self.0.as_raw_fd(),
@@ -70,6 +73,7 @@ impl ReplySender for ChannelSender {
                 bufs.len() as c_int,
             )
         };
+        #[allow(clippy::cast_sign_loss)] // explicitly handle negative values
         if rc < 0 {
             Err(io::Error::last_os_error())
         } else {

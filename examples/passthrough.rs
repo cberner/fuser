@@ -195,6 +195,12 @@ impl Filesystem for PassthroughFs {
         reply.ok();
     }
 
+    // cast is safe because the sign of an offset has no meaning
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_possible_wrap
+    )]
     fn readdir(
         &mut self,
         _req: &Request,

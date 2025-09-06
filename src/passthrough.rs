@@ -51,6 +51,7 @@ pub struct BackingId {
 }
 
 impl BackingId {
+    #[allow(clippy::cast_sign_loss)] // the sign of an fd or id has no meaning
     pub(crate) fn create(channel: &Arc<File>, fd: impl AsFd) -> std::io::Result<Self> {
         let map = fuse_backing_map {
             fd: fd.as_fd().as_raw_fd() as u32,

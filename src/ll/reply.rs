@@ -188,6 +188,7 @@ impl<'a> Response<'a> {
     }
 
     // TODO: Can flags be more strongly typed?
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_create(
         ttl: &Duration,
         attr: &Attr,
@@ -268,6 +269,7 @@ impl<'a> Response<'a> {
     }
 }
 
+#[allow(clippy::cast_possible_wrap)] // See abi::fuse_attr
 pub(crate) fn time_from_system_time(system_time: &SystemTime) -> (i64, u32) {
     // Convert to signed 64-bit time with epoch at 0
     match system_time.duration_since(UNIX_EPOCH) {
@@ -520,10 +522,13 @@ impl DirEntPlusList {
 }
 
 #[cfg(test)]
+#[allow(clippy::cast_possible_truncation)] // these byte literals are not in danger of being truncated
+#[allow(clippy::unreadable_literal)] // test literals don't need to be beautiful
 mod test {
     use std::num::NonZeroI32;
 
     use super::super::test::ioslice_to_vec;
+    #[allow(clippy::wildcard_imports)]
     use super::*;
 
     #[test]

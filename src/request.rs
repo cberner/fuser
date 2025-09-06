@@ -67,6 +67,7 @@ impl<'a> Request<'a> {
         }
     }
 
+    #[allow(clippy::too_many_lines)] // Very long match statement
     fn dispatch_req<FS: Filesystem>(
         &self,
         se: &mut Session<FS>,

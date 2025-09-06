@@ -20,6 +20,8 @@
 
 #![warn(missing_debug_implementations)]
 #![allow(missing_docs)]
+// TODO: fix all these non camel case types
+#![allow(non_camel_case_types)]
 
 use crate::consts::{FATTR_ATIME_NOW, FATTR_MTIME_NOW};
 use std::convert::TryFrom;

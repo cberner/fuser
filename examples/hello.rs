@@ -66,6 +66,8 @@ impl Filesystem for HelloFS {
         }
     }
 
+    // cast is safe because max read < max usize
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     fn read(
         &mut self,
         _req: &Request,
@@ -84,6 +86,12 @@ impl Filesystem for HelloFS {
         }
     }
 
+    // cast is safe because the sign of an offset has no meaning
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_possible_wrap
+    )]
     fn readdir(
         &mut self,
         _req: &Request,

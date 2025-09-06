@@ -20,6 +20,7 @@ use std::time::SystemTime;
 use std::{convert::AsRef, io::ErrorKind};
 
 pub use crate::ll::fuse_abi::FUSE_ROOT_ID;
+#[allow(clippy::wildcard_imports)] // to avoid many feature gates
 use crate::ll::fuse_abi::consts::*;
 pub use crate::ll::{TimeOrNow, fuse_abi::consts};
 use crate::mnt::mount_options::check_option_conflicts;
@@ -165,6 +166,7 @@ pub struct KernelConfig {
     max_stack_depth: u32,
 }
 
+#[allow(clippy::cast_possible_truncation)] // truncation is used to prevent too-large values
 impl KernelConfig {
     fn new(capabilities: u64, max_readahead: u32) -> Self {
         Self {
@@ -337,6 +339,7 @@ impl KernelConfig {
 /// nothing.
 #[allow(clippy::too_many_arguments)]
 #[allow(unused_variables)] // This is the main API, so variables are named without the underscore for generality.
+#[allow(clippy::missing_errors_doc)] // These default implementations do not define the conditions under which errors could occur.
 pub trait Filesystem {
     /// Initialize filesystem.
     /// Called before any other filesystem method.

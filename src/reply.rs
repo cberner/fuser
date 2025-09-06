@@ -699,7 +699,10 @@ impl ReplyLseek {
 }
 
 #[cfg(test)]
+#[allow(clippy::unreadable_literal)] // ugly hardcoded literals for testing
+#[allow(clippy::cast_possible_truncation)] // predetermined literals will not be truncated
 mod test {
+    #[allow(clippy::wildcard_imports)]
     use super::*;
     use crate::{FileAttr, FileType};
     use std::io::IoSlice;

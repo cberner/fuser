@@ -264,6 +264,8 @@ macro_rules! impl_request {
     };
 }
 
+#[allow(clippy::cast_possible_truncation)] // some builtin types have excess capacity
+#[allow(clippy::unused_self)] // many functions are feature-gated into trivial functions
 mod op {
     use crate::ll::Response;
 
@@ -271,6 +273,7 @@ mod op {
         super::{TimeOrNow, argument::ArgumentIterator},
         FilenameInDir, Request,
     };
+    #[allow(clippy::wildcard_imports)]
     use super::{
         FileHandle, INodeNo, Lock, LockOwner, Operation, RequestId, abi::consts::*, abi::*,
     };
@@ -951,6 +954,7 @@ mod op {
     }
     impl_request!(Init<'a>);
     impl<'a> Init<'a> {
+        #[allow(clippy::cast_possible_truncation)] // truncation is a feature of this computation
         pub fn capabilities(&self) -> u64 {
             #[cfg(feature = "abi-7-36")]
             if self.arg.flags & (FUSE_INIT_EXT as u32) != 0 {
@@ -1613,6 +1617,7 @@ mod op {
     }
     impl_request!(CuseInit<'a>);
 
+    #[allow(clippy::cast_possible_wrap, clippy::cast_sign_loss)] // See abi::fuse_attr
     fn system_time_from_time(secs: i64, nsecs: u32) -> SystemTime {
         if secs >= 0 {
             SystemTime::UNIX_EPOCH + Duration::new(secs as u64, nsecs)
@@ -1620,6 +1625,7 @@ mod op {
             SystemTime::UNIX_EPOCH - Duration::new((-secs) as u64, nsecs)
         }
     }
+    #[allow(clippy::too_many_lines)] // Very long match statement
     pub(crate) fn parse<'a>(
         header: &'a fuse_in_header,
         opcode: &fuse_opcode,
@@ -1854,6 +1860,7 @@ mod op {
         })
     }
 }
+#[allow(clippy::wildcard_imports)]
 use op::*;
 
 /// Filesystem operation (and arguments) the kernel driver wants us to perform. The fields of each
@@ -1926,6 +1933,7 @@ pub enum Operation<'a> {
     CuseInit(CuseInit<'a>),
 }
 
+#[allow(clippy::too_many_lines)] // Very long match statement
 impl fmt::Display for Operation<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

@@ -1,5 +1,8 @@
 #![allow(clippy::needless_return)]
 #![allow(clippy::unnecessary_cast)] // libc::S_* are u16 or u32 depending on the platform
+#![allow(clippy::cast_possible_truncation)] // u32 -> u16 without error handling
+#![allow(clippy::cast_sign_loss)] // i64 -> u32 without error handling
+#![allow(clippy::cast_possible_wrap)] // i64 -> usize without error handling
 
 use clap::{Arg, ArgAction, Command, crate_version};
 use fuser::consts::FOPEN_DIRECT_IO;
@@ -542,6 +545,7 @@ impl Filesystem for SimpleFS {
         }
     }
 
+    #[allow(clippy::too_many_lines)] // To-do: refactor very long function
     fn setattr(
         &mut self,
         req: &Request,
@@ -1127,6 +1131,7 @@ impl Filesystem for SimpleFS {
         reply.entry(&Duration::new(0, 0), &attrs.into(), 0);
     }
 
+    #[allow(clippy::too_many_lines)] // To-do: refactor very long function
     fn rename(
         &mut self,
         req: &Request,
@@ -1417,6 +1422,7 @@ impl Filesystem for SimpleFS {
         }
     }
 
+    // cast is safe because max read < max usize
     fn read(
         &mut self,
         _req: &Request,
@@ -1559,6 +1565,7 @@ impl Filesystem for SimpleFS {
         }
     }
 
+    // cast is safe because the sign of an offset has no meaning
     fn readdir(
         &mut self,
         _req: &Request,
@@ -1946,6 +1953,8 @@ impl Filesystem for SimpleFS {
     }
 }
 
+#[must_use]
+#[allow(clippy::similar_names)]
 pub fn check_access(
     file_uid: u32,
     file_gid: u32,

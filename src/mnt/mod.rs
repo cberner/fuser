@@ -39,6 +39,9 @@ fn with_fuse_args<T, F: FnOnce(&fuse_args) -> T>(options: &[MountOption], f: F) 
         ]);
     }
     let argptrs: Vec<_> = args.iter().map(|s| s.as_ptr()).collect();
+    // Max args < max i32
+    #[allow(clippy::cast_possible_truncation)]
+    #[allow(clippy::cast_possible_wrap)]
     f(&fuse_args {
         argc: argptrs.len() as i32,
         argv: argptrs.as_ptr(),

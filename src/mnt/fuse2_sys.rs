@@ -5,6 +5,8 @@
 
 #![warn(missing_debug_implementations)]
 #![allow(missing_docs)]
+// TODO: fix all these non camel case types
+#![allow(non_camel_case_types)]
 
 use libc::{c_char, c_int};
 
