@@ -24,7 +24,7 @@ use std::io;
 #[cfg(any(feature = "libfuse", test))]
 use mount_options::MountOption;
 
-/// Helper function to provide options as a fuse_args struct
+/// Helper function to provide options as a `fuse_args` struct
 /// (which contains an argc count and an argv pointer)
 #[cfg(any(feature = "libfuse", test))]
 fn with_fuse_args<T, F: FnOnce(&fuse_args) -> T>(options: &[MountOption], f: F) -> T {

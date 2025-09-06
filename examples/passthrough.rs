@@ -16,20 +16,20 @@ use std::time::{Duration, UNIX_EPOCH};
 
 const TTL: Duration = Duration::from_secs(1); // 1 second
 
-/// BackingCache is an example of how a filesystem might manage BackingId objects for fd
-/// passthrough.  The idea is to avoid creating more than one BackingId object per file at a time.
+/// `BackingCache` is an example of how a filesystem might manage `BackingId` objects for fd
+/// passthrough.  The idea is to avoid creating more than one `BackingId` object per file at a time.
 ///
-/// We do this by keeping a weak "by inode" hash table mapping inode numbers to BackingId.  If a
-/// BackingId already exists, we use it.  Otherwise, we create it.  This is not enough to keep the
-/// BackingId alive, though.  For each Filesystem::open() request we allocate a fresh 'fh'
-/// (monotonically increasing u64, next_fh, never recycled) and use that to keep a *strong*
-/// reference on the BackingId for that open.  We drop it from the table on Filesystem::release(),
-/// which means the BackingId will be dropped in the kernel when the last user of it closes.
+/// We do this by keeping a weak "by inode" hash table mapping inode numbers to `BackingId`.  If a
+/// `BackingId` already exists, we use it.  Otherwise, we create it.  This is not enough to keep the
+/// `BackingId` alive, though.  For each `Filesystem::open()` request we allocate a fresh 'fh'
+/// (monotonically increasing u64, `next_fh`, never recycled) and use that to keep a *strong*
+/// reference on the `BackingId` for that open.  We drop it from the table on `Filesystem::release()`,
+/// which means the `BackingId` will be dropped in the kernel when the last user of it closes.
 ///
 /// In this way, if a request to open a file comes in and the file is already open, we'll reuse the
-/// BackingId, but as soon as all references are closed, the BackingId will be dropped.
+/// `BackingId`, but as soon as all references are closed, the `BackingId` will be dropped.
 ///
-/// It's left as an exercise to the reader to implement an active cleanup of the by_inode table, if
+/// It's left as an exercise to the reader to implement an active cleanup of the `by_inode` table, if
 /// desired, but our little example filesystem only contains one file. :)
 #[derive(Debug, Default)]
 struct BackingCache {
@@ -44,9 +44,9 @@ impl BackingCache {
         self.next_fh
     }
 
-    /// Gets the existing BackingId for `ino` if it exists, or calls `callback` to create it.
+    /// Gets the existing `BackingId` for `ino` if it exists, or calls `callback` to create it.
     ///
-    /// Returns a unique file handle and the BackingID (possibly shared, possibly new).  The
+    /// Returns a unique file handle and the `BackingID` (possibly shared, possibly new).  The
     /// returned file handle should be `put()` when you're done with it.
     fn get_or(
         &mut self,
@@ -70,7 +70,7 @@ impl BackingCache {
     }
 
     /// Releases a file handle previously obtained from `get_or()`.  If this was a last user of a
-    /// particular BackingId then it will be dropped.
+    /// particular `BackingId` then it will be dropped.
     fn put(&mut self, fh: u64) {
         eprintln!("Put fh {fh}");
         match self.by_handle.remove(&fh) {

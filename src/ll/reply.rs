@@ -293,7 +293,7 @@ pub(crate) fn mode_from_kind_and_perm(kind: FileType, perm: u16) -> u32 {
     }) as u32
         | perm as u32
 }
-/// Returns a fuse_attr from FileAttr
+/// Returns a `fuse_attr` from `FileAttr`
 pub(crate) fn fuse_attr_from_attr(attr: &crate::FileAttr) -> abi::fuse_attr {
     let (atime_secs, atime_nanos) = time_from_system_time(&attr.atime);
     let (mtime_secs, mtime_nanos) = time_from_system_time(&attr.mtime);

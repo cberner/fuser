@@ -85,19 +85,19 @@ const fn default_init_flags(#[allow(unused_variables)] capabilities: u64) -> u64
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[cfg_attr(feature = "serializable", derive(Serialize, Deserialize))]
 pub enum FileType {
-    /// Named pipe (S_IFIFO)
+    /// Named pipe (`S_IFIFO`)
     NamedPipe,
-    /// Character device (S_IFCHR)
+    /// Character device (`S_IFCHR`)
     CharDevice,
-    /// Block device (S_IFBLK)
+    /// Block device (`S_IFBLK`)
     BlockDevice,
-    /// Directory (S_IFDIR)
+    /// Directory (`S_IFDIR`)
     Directory,
-    /// Regular file (S_IFREG)
+    /// Regular file (`S_IFREG`)
     RegularFile,
-    /// Symbolic link (S_IFLNK)
+    /// Symbolic link (`S_IFLNK`)
     Symlink,
-    /// Unix domain socket (S_IFSOCK)
+    /// Unix domain socket (`S_IFSOCK`)
     Socket,
 }
 
@@ -177,8 +177,8 @@ impl KernelConfig {
     /// This has to be at least 1 to support passthrough to backing files.  Setting this to 0 (the
     /// default) effectively disables support for passthrough.
     ///
-    /// With max_stack_depth > 1, the backing files can be on a stacked fs (e.g. overlayfs)
-    /// themselves and with max_stack_depth == 1, this FUSE filesystem can be stacked as the
+    /// With `max_stack_depth` > 1, the backing files can be on a stacked fs (e.g. overlayfs)
+    /// themselves and with `max_stack_depth` == 1, this FUSE filesystem can be stacked as the
     /// underlying fs of a stacked fs (e.g. overlayfs).
     ///
     /// The kernel currently has a hard maximum value of 2.  Anything higher won't work.
@@ -307,14 +307,14 @@ impl KernelConfig {
 /// Filesystem trait.
 ///
 /// This trait must be implemented to provide a userspace filesystem via FUSE.
-/// These methods correspond to fuse_lowlevel_ops in libfuse. Reasonable default
+/// These methods correspond to `fuse_lowlevel_ops` in libfuse. Reasonable default
 /// implementations are provided here to get a mountable filesystem that does
 /// nothing.
 #[allow(clippy::too_many_arguments)]
 pub trait Filesystem {
     /// Initialize filesystem.
     /// Called before any other filesystem method.
-    /// The kernel module connection can be configured using the KernelConfig object
+    /// The kernel module connection can be configured using the `KernelConfig` object
     fn init(&mut self, _req: &Request<'_>, _config: &mut KernelConfig) -> Result<(), c_int> {
         Ok(())
     }
@@ -480,13 +480,13 @@ pub trait Filesystem {
     }
 
     /// Open a file.
-    /// Open flags (with the exception of O_CREAT, O_EXCL, O_NOCTTY and O_TRUNC) are
+    /// Open flags (with the exception of `O_CREAT`, `O_EXCL`, `O_NOCTTY` and `O_TRUNC`) are
     /// available in flags. Filesystem may store an arbitrary file handle (pointer, index,
     /// etc) in fh, and use this in other all other file operations (read, write, flush,
     /// release, fsync). Filesystem may also implement stateless file I/O and not store
-    /// anything in fh. There are also some flags (direct_io, keep_cache) which the
-    /// filesystem may set, to change the way the file is opened. See fuse_file_info
-    /// structure in <fuse_common.h> for more details.
+    /// anything in fh. There are also some flags (`direct_io`, `keep_cache`) which the
+    /// filesystem may set, to change the way the file is opened. See `fuse_file_info`
+    /// structure in <`fuse_common.h`> for more details.
     fn open(&mut self, _req: &Request<'_>, _ino: u64, _flags: i32, reply: ReplyOpen) {
         reply.opened(0, 0);
     }
@@ -494,13 +494,13 @@ pub trait Filesystem {
     /// Read data.
     /// Read should send exactly the number of bytes requested except on EOF or error,
     /// otherwise the rest of the data will be substituted with zeroes. An exception to
-    /// this is when the file has been opened in 'direct_io' mode, in which case the
+    /// this is when the file has been opened in `direct_io` mode, in which case the
     /// return value of the read system call will reflect the return value of this
     /// operation. fh will contain the value set by the open method, or will be undefined
     /// if the open method didn't set any value.
     ///
-    /// flags: these are the file flags, such as O_SYNC. Only supported with ABI >= 7.9
-    /// lock_owner: only supported with ABI >= 7.9
+    /// flags: these are the file flags, such as `O_SYNC`. Only supported with ABI >= 7.9
+    /// `lock_owner`: only supported with ABI >= 7.9
     fn read(
         &mut self,
         _req: &Request<'_>,
@@ -521,16 +521,16 @@ pub trait Filesystem {
 
     /// Write data.
     /// Write should return exactly the number of bytes requested except on error. An
-    /// exception to this is when the file has been opened in 'direct_io' mode, in
+    /// exception to this is when the file has been opened in `direct_io` mode, in
     /// which case the return value of the write system call will reflect the return
     /// value of this operation. fh will contain the value set by the open method, or
     /// will be undefined if the open method didn't set any value.
     ///
-    /// write_flags: will contain FUSE_WRITE_CACHE, if this write is from the page cache. If set,
+    /// `write_flags`: will contain `FUSE_WRITE_CACHE`, if this write is from the page cache. If set,
     /// the pid, uid, gid, and fh may not match the value that would have been sent if write cachin
     /// is disabled
-    /// flags: these are the file flags, such as O_SYNC. Only supported with ABI >= 7.9
-    /// lock_owner: only supported with ABI >= 7.9
+    /// flags: these are the file flags, such as `O_SYNC`. Only supported with ABI >= 7.9
+    /// `lock_owner`: only supported with ABI >= 7.9
     fn write(
         &mut self,
         _req: &Request<'_>,
@@ -553,7 +553,7 @@ pub trait Filesystem {
     }
 
     /// Flush method.
-    /// This is called on each close() of the opened file. Since file descriptors can
+    /// This is called on each `close()` of the opened file. Since file descriptors can
     /// be duplicated (dup, dup2, fork), for one open call there may be many flush
     /// calls. Filesystems shouldn't assume that flush will always be called after some
     /// writes, or that if will be called at all. fh will contain the value set by the
@@ -561,7 +561,7 @@ pub trait Filesystem {
     /// NOTE: the name of the method is misleading, since (unlike fsync) the filesystem
     /// is not forced to flush pending writes. One reason to flush data, is if the
     /// filesystem wants to return write errors. If the filesystem supports file locking
-    /// operations (setlk, getlk) it should remove all locks belonging to 'lock_owner'.
+    /// operations (`setlk`, `getlk`) it should remove all locks belonging to `lock_owner`.
     fn flush(&mut self, _req: &Request<'_>, ino: u64, fh: u64, lock_owner: u64, reply: ReplyEmpty) {
         warn!("[Not Implemented] flush(ino: {ino:#x?}, fh: {fh}, lock_owner: {lock_owner:?})");
         reply.error(ENOSYS);
@@ -571,7 +571,7 @@ pub trait Filesystem {
     /// Release is called when there are no more references to an open file: all file
     /// descriptors are closed and all memory mappings are unmapped. For every open
     /// call there will be exactly one release call. The filesystem may reply with an
-    /// error, but error values are not returned to close() or munmap() which triggered
+    /// error, but error values are not returned to `close()` or `munmap()` which triggered
     /// the release. fh will contain the value set by the open method, or will be undefined
     /// if the open method didn't set any value. flags will contain the same flags as for
     /// open.
@@ -608,7 +608,7 @@ pub trait Filesystem {
     }
 
     /// Read directory.
-    /// Send a buffer filled using buffer.fill(), with size not exceeding the
+    /// Send a buffer filled using `buffer.fill()`, with size not exceeding the
     /// requested size. Send an empty buffer on end of stream. fh will contain the
     /// value set by the opendir method, or will be undefined if the opendir method
     /// didn't set any value.
@@ -625,7 +625,7 @@ pub trait Filesystem {
     }
 
     /// Read directory.
-    /// Send a buffer filled using buffer.fill(), with size not exceeding the
+    /// Send a buffer filled using `buffer.fill()`, with size not exceeding the
     /// requested size. Send an empty buffer on end of stream. fh will contain the
     /// value set by the opendir method, or will be undefined if the opendir method
     /// didn't set any value.
@@ -727,7 +727,7 @@ pub trait Filesystem {
     }
 
     /// Check file access permissions.
-    /// This will be called for the access() system call. If the 'default_permissions'
+    /// This will be called for the `access()` system call. If the '`default_permissions`'
     /// mount option is given, this method is not called. This method is not called
     /// under Linux kernel versions 2.4.x
     fn access(&mut self, _req: &Request<'_>, ino: u64, mask: i32, reply: ReplyEmpty) {
@@ -737,14 +737,14 @@ pub trait Filesystem {
 
     /// Create and open a file.
     /// If the file does not exist, first create it with the specified mode, and then
-    /// open it. You can use any open flags in the flags parameter except O_NOCTTY.
+    /// open it. You can use any open flags in the flags parameter except `O_NOCTTY`.
     /// The filesystem can store any type of file handle (such as a pointer or index)
     /// in fh, which can then be used across all subsequent file operations including
     /// read, write, flush, release, and fsync. Additionally, the filesystem may set
-    /// certain flags like direct_io and keep_cache to change the way the file is
-    /// opened. See fuse_file_info structure in <fuse_common.h> for more details. If
+    /// certain flags like `direct_io` and `keep_cache` to change the way the file is
+    /// opened. See `fuse_file_info` structure in <`fuse_common.h`> for more details. If
     /// this method is not implemented or under Linux kernel versions earlier than
-    /// 2.6.15, the mknod() and open() methods will be called instead.
+    /// 2.6.15, the `mknod()` and `open()` methods will be called instead.
     fn create(
         &mut self,
         _req: &Request<'_>,
@@ -785,8 +785,8 @@ pub trait Filesystem {
     /// Acquire, modify or release a POSIX file lock.
     /// For POSIX threads (NPTL) there's a 1-1 relation between pid and owner, but
     /// otherwise this is not always the case.  For checking lock ownership,
-    /// 'fi->owner' must be used. The l_pid field in 'struct flock' should only be
-    /// used to fill in this field in getlk(). Note: if the locking methods are not
+    /// 'fi->owner' must be used. The `l_pid` field in 'struct flock' should only be
+    /// used to fill in this field in `getlk()`. Note: if the locking methods are not
     /// implemented, the kernel will still allow file locking to work locally.
     /// Hence these are only interesting for network filesystems and similar.
     fn setlk(
@@ -912,8 +912,8 @@ pub trait Filesystem {
         reply.error(ENOSYS);
     }
 
-    /// macOS only: Rename the volume. Set fuse_init_out.flags during init to
-    /// FUSE_VOL_RENAME to enable
+    /// macOS only: Rename the volume. Set `fuse_init_out.flags` during init to
+    /// `FUSE_VOL_RENAME` to enable
     #[cfg(target_os = "macos")]
     fn setvolname(&mut self, _req: &Request<'_>, name: &OsStr, reply: ReplyEmpty) {
         warn!("[Not Implemented] setvolname(name: {name:?})");
@@ -939,8 +939,8 @@ pub trait Filesystem {
         reply.error(ENOSYS);
     }
 
-    /// macOS only: Query extended times (bkuptime and crtime). Set fuse_init_out.flags
-    /// during init to FUSE_XTIMES to enable
+    /// macOS only: Query extended times (`bkuptime` and `crtime`). Set `fuse_init_out.flags`
+    /// during init to `FUSE_XTIMES` to enable
     #[cfg(target_os = "macos")]
     fn getxtimes(&mut self, _req: &Request<'_>, ino: u64, reply: ReplyXTimes) {
         warn!("[Not Implemented] getxtimes(ino: {ino:#x?})");
@@ -965,7 +965,7 @@ pub fn mount<FS: Filesystem, P: AsRef<Path>>(
 /// Mount the given filesystem to the given mountpoint. This function will
 /// not return until the filesystem is unmounted.
 ///
-/// NOTE: This will eventually replace mount(), once the API is stable
+/// NOTE: This will eventually replace `mount()`, once the API is stable
 pub fn mount2<FS: Filesystem, P: AsRef<Path>>(
     filesystem: FS,
     mountpoint: P,
