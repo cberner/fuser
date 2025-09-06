@@ -103,13 +103,14 @@ pub fn check_option_conflicts(options: &[MountOption]) -> Result<(), io::Error> 
 
 fn conflicts_with(option: &MountOption) -> Vec<MountOption> {
     match option {
-        MountOption::FSName(_) => vec![],
-        MountOption::Subtype(_) => vec![],
-        MountOption::CUSTOM(_) => vec![],
+        MountOption::FSName(_)
+        | MountOption::Subtype(_)
+        | MountOption::CUSTOM(_)
+        | MountOption::DirSync
+        | MountOption::AutoUnmount
+        | MountOption::DefaultPermissions => vec![],
         MountOption::AllowOther => vec![MountOption::AllowRoot],
         MountOption::AllowRoot => vec![MountOption::AllowOther],
-        MountOption::AutoUnmount => vec![],
-        MountOption::DefaultPermissions => vec![],
         MountOption::Dev => vec![MountOption::NoDev],
         MountOption::NoDev => vec![MountOption::Dev],
         MountOption::Suid => vec![MountOption::NoSuid],
@@ -120,7 +121,6 @@ fn conflicts_with(option: &MountOption) -> Vec<MountOption> {
         MountOption::NoExec => vec![MountOption::Exec],
         MountOption::Atime => vec![MountOption::NoAtime],
         MountOption::NoAtime => vec![MountOption::Atime],
-        MountOption::DirSync => vec![],
         MountOption::Sync => vec![MountOption::Async],
         MountOption::Async => vec![MountOption::Sync],
     }
@@ -133,10 +133,10 @@ pub fn option_to_string(option: &MountOption) -> String {
         MountOption::Subtype(subtype) => format!("subtype={subtype}"),
         MountOption::CUSTOM(value) => value.to_string(),
         MountOption::AutoUnmount => "auto_unmount".to_string(),
-        MountOption::AllowOther => "allow_other".to_string(),
+        MountOption::AllowRoot |
         // AllowRoot is implemented by allowing everyone access and then restricting to
         // root + owner within fuser
-        MountOption::AllowRoot => "allow_other".to_string(),
+        MountOption::AllowOther => "allow_other".to_string(),
         MountOption::DefaultPermissions => "default_permissions".to_string(),
         MountOption::Dev => "dev".to_string(),
         MountOption::NoDev => "nodev".to_string(),
