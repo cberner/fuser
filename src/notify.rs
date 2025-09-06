@@ -1,7 +1,5 @@
+use std::ffi::OsStr;
 use std::io;
-
-#[allow(unused)]
-use std::{convert::TryInto, ffi::OsStr};
 
 use crate::{
     channel::ChannelSender,
@@ -105,7 +103,6 @@ impl Notifier {
         self.send_inval(notify_code::FUSE_NOTIFY_DELETE, &notif)
     }
 
-    #[allow(unused)]
     fn send_inval(&self, code: notify_code, notification: &Notification<'_>) -> io::Result<()> {
         match self.send(code, notification) {
             // ENOENT is harmless for an invalidation (the
