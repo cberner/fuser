@@ -30,6 +30,8 @@ impl PollHandle {
     }
 
     /// Notify the kernel that the associated file handle is ready to be polled.
+    /// # Errors
+    /// Propagates errors due to communicating with the fuse device.
     pub fn notify(self) -> io::Result<()> {
         self.notifier.poll(self.handle)
     }
@@ -57,12 +59,17 @@ impl Notifier {
     }
 
     /// Notify poll clients of I/O readiness
+    /// # Errors
+    /// Propagates errors due to communicating with the fuse device.
     pub fn poll(&self, kh: u64) -> io::Result<()> {
         let notif = Notification::new_poll(kh);
         self.send(notify_code::FUSE_POLL, &notif)
     }
 
     /// Invalidate the kernel cache for a given directory entry
+    /// # Errors
+    /// Returns an error if the notification data is too large.
+    /// Propagates errors due to communicating with the fuse device.
     pub fn inval_entry(&self, parent: u64, name: &OsStr) -> io::Result<()> {
         let notif = Notification::new_inval_entry(parent, name).map_err(Self::too_big_err)?;
         self.send_inval(notify_code::FUSE_NOTIFY_INVAL_ENTRY, &notif)
@@ -70,12 +77,17 @@ impl Notifier {
 
     /// Invalidate the kernel cache for a given inode (metadata and
     /// data in the given range)
+    /// # Errors
+    /// Propagates errors due to communicating with the fuse device.
     pub fn inval_inode(&self, ino: u64, offset: i64, len: i64) -> io::Result<()> {
         let notif = Notification::new_inval_inode(ino, offset, len);
         self.send_inval(notify_code::FUSE_NOTIFY_INVAL_INODE, &notif)
     }
 
     /// Update the kernel's cached copy of a given inode's data
+    /// # Errors
+    /// Returns an error if the notification data is too large.
+    /// Propagates errors due to communicating with the fuse device.
     pub fn store(&self, ino: u64, offset: u64, data: &[u8]) -> io::Result<()> {
         let notif = Notification::new_store(ino, offset, data).map_err(Self::too_big_err)?;
         // Not strictly an invalidate, but the inode we're operating
@@ -85,6 +97,9 @@ impl Notifier {
 
     /// Invalidate the kernel cache for a given directory entry and inform
     /// inotify watchers of a file deletion.
+    /// # Errors
+    /// Returns an error if the notification data is too large.
+    /// Propagates errors due to communicating with the fuse device.
     pub fn delete(&self, parent: u64, child: u64, name: &OsStr) -> io::Result<()> {
         let notif = Notification::new_delete(parent, child, name).map_err(Self::too_big_err)?;
         self.send_inval(notify_code::FUSE_NOTIFY_DELETE, &notif)

@@ -276,6 +276,8 @@ impl Reply for ReplyOpen {
 
 impl ReplyOpen {
     /// Reply to a request with the given open result
+    /// # Panics
+    /// When attempting to use kernel passthrough. Use `opened_passthrough()` instead.
     pub fn opened(self, fh: u64, flags: u32) {
         #[cfg(feature = "abi-7-40")]
         assert_eq!(flags & FOPEN_PASSTHROUGH, 0);
@@ -287,6 +289,10 @@ impl ReplyOpen {
     /// you can pass it as the 3rd parameter of `OpenReply::opened_passthrough()`.  This is done in
     /// two separate steps because it may make sense to reuse backing IDs (to avoid having to
     /// repeatedly reopen the underlying file or potentially keep thousands of fds open).
+    /// # Errors
+    /// Propagates errors due to communicating with the fuse device.
+    /// # Panics
+    /// Panics if this reply object has already been used.
     #[cfg(feature = "abi-7-40")]
     pub fn open_backing(&self, fd: impl std::os::fd::AsFd) -> std::io::Result<BackingId> {
         self.reply.sender.as_ref().unwrap().open_backing(fd.as_fd())
@@ -396,6 +402,8 @@ impl Reply for ReplyCreate {
 
 impl ReplyCreate {
     /// Reply to a request with the given entry
+    /// # Panics
+    /// When attempting to use kernel passthrough. Use `opened_passthrough()` instead.
     pub fn created(self, ttl: &Duration, attr: &FileAttr, generation: u64, fh: u64, flags: u32) {
         #[cfg(feature = "abi-7-40")]
         assert_eq!(flags & FOPEN_PASSTHROUGH, 0);
