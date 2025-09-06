@@ -247,7 +247,7 @@ impl<'a> Response<'a> {
         Self::from_struct(&r)
     }
 
-    fn new_directory(list: EntListBuf) -> Self {
+    pub(crate) fn new_directory(list: EntListBuf) -> Self {
         assert!(list.buf.len() <= list.max_size);
         Self::Data(list.buf)
     }
@@ -263,7 +263,7 @@ impl<'a> Response<'a> {
         Self::from_struct(&r)
     }
 
-    fn from_struct<T: IntoBytes + Immutable + ?Sized>(data: &T) -> Self {
+    pub(crate) fn from_struct<T: IntoBytes + Immutable + ?Sized>(data: &T) -> Self {
         Self::Data(SmallVec::from_slice(data.as_bytes()))
     }
 }
@@ -351,12 +351,12 @@ impl From<crate::FileAttr> for Attr {
 
 #[derive(Debug)]
 /// A generic data buffer
-struct EntListBuf {
+pub(crate) struct EntListBuf {
     max_size: usize,
     buf: ResponseBuf,
 }
 impl EntListBuf {
-    fn new(max_size: usize) -> Self {
+    pub(crate) fn new(max_size: usize) -> Self {
         Self {
             max_size,
             buf: ResponseBuf::new(),
@@ -367,7 +367,7 @@ impl EntListBuf {
     /// A transparent offset value can be provided for each entry. The kernel uses these
     /// value to request the next entries in further readdir calls
     #[must_use]
-    fn push(&mut self, ent: [&[u8]; 2]) -> bool {
+    pub(crate) fn push(&mut self, ent: [&[u8]; 2]) -> bool {
         let entlen = ent[0].len() + ent[1].len();
         let entsize = (entlen + size_of::<u64>() - 1) & !(size_of::<u64>() - 1); // 64bit align
         if self.buf.len() + entsize > self.max_size {
