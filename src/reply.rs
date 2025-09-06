@@ -328,7 +328,7 @@ impl Reply for ReplyWrite {
 }
 
 impl ReplyWrite {
-    /// Reply to a request with the given open result
+    /// Reply to a request with the number of bytes written
     pub fn written(self, size: u32) {
         self.reply.send_ll(&ll::Response::new_write(size));
     }
@@ -356,7 +356,7 @@ impl Reply for ReplyStatfs {
 }
 
 impl ReplyStatfs {
-    /// Reply to a request with the given open result
+    /// Reply to a statfs request with filesystem information
     #[allow(clippy::too_many_arguments)]
     pub fn statfs(
         self,
@@ -397,7 +397,7 @@ impl Reply for ReplyCreate {
 }
 
 impl ReplyCreate {
-    /// Reply to a request with the given entry
+    /// Reply to a request with a newly created file entry and its newly open file handle
     /// # Panics
     /// When attempting to use kernel passthrough. Use `opened_passthrough()` instead.
     pub fn created(self, ttl: &Duration, attr: &FileAttr, generation: u64, fh: u64, flags: u32) {
@@ -436,7 +436,7 @@ impl Reply for ReplyLock {
 }
 
 impl ReplyLock {
-    /// Reply to a request with the given open result
+    /// Reply to a request with a file lock
     pub fn locked(self, start: u64, end: u64, typ: i32, pid: u32) {
         self.reply.send_ll(&ll::Response::new_lock(&ll::Lock {
             range: (start, end),
@@ -468,7 +468,7 @@ impl Reply for ReplyBmap {
 }
 
 impl ReplyBmap {
-    /// Reply to a request with the given open result
+    /// Reply to a request with a bmap
     pub fn bmap(self, block: u64) {
         self.reply.send_ll(&ll::Response::new_bmap(block));
     }
@@ -496,7 +496,7 @@ impl Reply for ReplyIoctl {
 }
 
 impl ReplyIoctl {
-    /// Reply to a request with the given open result
+    /// Reply to a request with an ioctl
     pub fn ioctl(self, result: i32, data: &[u8]) {
         self.reply
             .send_ll(&ll::Response::new_ioctl(result, &[IoSlice::new(data)]));
@@ -525,7 +525,7 @@ impl Reply for ReplyPoll {
 }
 
 impl ReplyPoll {
-    /// Reply to a request with the given poll result
+    /// Reply to a request with ready poll events
     pub fn poll(self, revents: u32) {
         self.reply.send_ll(&ll::Response::new_poll(revents));
     }
@@ -649,12 +649,12 @@ impl Reply for ReplyXattr {
 }
 
 impl ReplyXattr {
-    /// Reply to a request with the size of the xattr.
+    /// Reply to a request with the size of an extended attribute
     pub fn size(self, size: u32) {
         self.reply.send_ll(&ll::Response::new_xattr_size(size));
     }
 
-    /// Reply to a request with the data in the xattr.
+    /// Reply to a request with the data of an extended attribute
     pub fn data(self, data: &[u8]) {
         self.reply.send_ll(&ll::Response::new_slice(data));
     }
