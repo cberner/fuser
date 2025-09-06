@@ -316,11 +316,11 @@ impl SimpleFS {
         fh
     }
 
-    fn check_file_handle_read(&self, file_handle: u64) -> bool {
+    fn check_file_handle_read(file_handle: u64) -> bool {
         (file_handle & FILE_HANDLE_READ_BIT) != 0
     }
 
-    fn check_file_handle_write(&self, file_handle: u64) -> bool {
+    fn check_file_handle_write(file_handle: u64) -> bool {
         (file_handle & FILE_HANDLE_WRITE_BIT) != 0
     }
 
@@ -653,7 +653,7 @@ impl Filesystem for SimpleFS {
                 // This is important as it preserves the semantic that a file handle opened
                 // with W_OK will never fail to truncate, even if the file has been subsequently
                 // chmod'ed
-                if self.check_file_handle_write(handle) {
+                if Self::check_file_handle_write(handle) {
                     if let Err(error_code) = self.truncate(inode, size, 0, 0) {
                         reply.error(error_code);
                         return;
@@ -1408,7 +1408,7 @@ impl Filesystem for SimpleFS {
     ) {
         debug!("read() called on {inode:?} offset={offset:?} size={size:?}");
         assert!(offset >= 0);
-        if !self.check_file_handle_read(fh) {
+        if !Self::check_file_handle_read(fh) {
             reply.error(libc::EACCES);
             return;
         }
@@ -1444,7 +1444,7 @@ impl Filesystem for SimpleFS {
     ) {
         debug!("write() called with {:?} size={:?}", inode, data.len());
         assert!(offset >= 0);
-        if !self.check_file_handle_write(fh) {
+        if !Self::check_file_handle_write(fh) {
             reply.error(libc::EACCES);
             return;
         }
@@ -1872,11 +1872,11 @@ impl Filesystem for SimpleFS {
         debug!(
             "copy_file_range() called with src=({src_fh}, {src_inode}, {src_offset}) dest=({dest_fh}, {dest_inode}, {dest_offset}) size={size}"
         );
-        if !self.check_file_handle_read(src_fh) {
+        if !Self::check_file_handle_read(src_fh) {
             reply.error(libc::EACCES);
             return;
         }
-        if !self.check_file_handle_write(dest_fh) {
+        if !Self::check_file_handle_write(dest_fh) {
             reply.error(libc::EACCES);
             return;
         }
