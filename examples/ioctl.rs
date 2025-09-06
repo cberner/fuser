@@ -14,6 +14,9 @@ use std::time::{Duration, UNIX_EPOCH};
 
 const TTL: Duration = Duration::from_secs(1); // 1 second
 
+const FIOC_GET_SIZE: u64 = nix::request_code_read!('E', 0, std::mem::size_of::<usize>());
+const FIOC_SET_SIZE: u64 = nix::request_code_write!('E', 1, std::mem::size_of::<usize>());
+
 struct FiocFS {
     content: Vec<u8>,
     root_attr: FileAttr,
@@ -147,9 +150,6 @@ impl Filesystem for FiocFS {
             reply.error(EINVAL);
             return;
         }
-
-        const FIOC_GET_SIZE: u64 = nix::request_code_read!('E', 0, std::mem::size_of::<usize>());
-        const FIOC_SET_SIZE: u64 = nix::request_code_write!('E', 1, std::mem::size_of::<usize>());
 
         match cmd.into() {
             FIOC_GET_SIZE => {
