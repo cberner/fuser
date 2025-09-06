@@ -16,10 +16,8 @@ use fuser::{
     ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen, ReplyStatfs, ReplyWrite, ReplyXattr,
     Request, TimeOrNow,
 };
-#[cfg(feature = "abi-7-26")]
-use log::info;
-use log::{LevelFilter, error};
-use log::{debug, warn};
+#[allow(unused_imports)]
+use log::{LevelFilter, debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::cmp::min;
 use std::collections::BTreeMap;
