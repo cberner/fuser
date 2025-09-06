@@ -300,6 +300,7 @@ impl BackgroundSession {
     }
 
     /// Returns an object that can be used to send notifications to the kernel
+    #[must_use]
     pub fn notifier(&self) -> Notifier {
         Notifier::new(self.sender.clone())
     }
