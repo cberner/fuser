@@ -158,13 +158,11 @@ impl<FS: Filesystem> Session<FS> {
                     None => break,
                 },
                 Err(err) => match err.raw_os_error() {
-                    // Operation interrupted. Accordingly to FUSE, this is safe to retry
-                    Some(ENOENT) => continue,
-                    // Interrupted system call, retry
-                    Some(EINTR) => continue,
-                    // Explicitly try again
-                    Some(EAGAIN) => continue,
-                    // Filesystem was unmounted, quit the loop
+                    Some(
+                          ENOENT // Operation interrupted. Accordingly to FUSE, this is safe to retry
+                        | EINTR // Interrupted system call, retry
+                        | EAGAIN // Explicitly instructed to try again
+                    ) => continue,
                     Some(ENODEV) => break,
                     // Unhandled error
                     _ => return Err(err),
