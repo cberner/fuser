@@ -131,7 +131,7 @@ impl PassthroughFs {
         Self {
             root_attr,
             passthrough_file_attr,
-            backing_cache: Default::default(),
+            backing_cache: BackingCache::default(),
         }
     }
 }
