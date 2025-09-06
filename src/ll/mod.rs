@@ -11,7 +11,7 @@ use std::{convert::TryInto, num::NonZeroI32, time::SystemTime};
 pub use reply::Response;
 pub use request::{AnyRequest, FileHandle, INodeNo, Lock, Operation, Request, RequestId, Version};
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Copy, Clone, Hash, Eq, PartialEq, Debug)]
 /// Possible input arguments for atime & mtime, which can either be set to a specified time,
 /// or to the current time
 pub enum TimeOrNow {
@@ -40,7 +40,7 @@ macro_rules! no_xattr_doc {
 }
 
 /// Represents an error code to be returned to the caller
-#[derive(Debug)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 pub struct Errno(pub NonZeroI32);
 impl Errno {
     /// Operation not permitted
@@ -267,7 +267,7 @@ impl From<Errno> for i32 {
 /// mount time). So if the file system reuses an inode after it has been
 /// deleted, it must assign a new, previously unused generation number to the
 /// inode at the same time.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug)]
 pub struct Generation(pub u64);
 impl From<Generation> for u64 {
     fn from(fh: Generation) -> Self {

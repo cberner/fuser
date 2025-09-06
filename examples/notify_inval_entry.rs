@@ -129,7 +129,7 @@ fn now_filename() -> String {
     format!("Time_is_{}", d.as_secs())
 }
 
-#[derive(Parser)]
+#[derive(Parser, Debug)]
 struct Options {
     /// Mount demo filesystem at given path
     mount_point: String,
