@@ -165,10 +165,10 @@ impl Lock {
 #[cfg_attr(feature = "serializable", derive(Serialize, Deserialize))]
 pub struct Version(pub u32, pub u32);
 impl Version {
-    pub fn major(&self) -> u32 {
+    pub fn major(self) -> u32 {
         self.0
     }
-    pub fn minor(&self) -> u32 {
+    pub fn minor(self) -> u32 {
         self.1
     }
 }
