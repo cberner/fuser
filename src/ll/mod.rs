@@ -4,7 +4,7 @@ mod argument;
 pub mod fuse_abi;
 pub(crate) mod notify;
 pub(crate) mod reply;
-mod request;
+pub(crate) mod request;
 
 use std::{convert::TryInto, num::NonZeroI32, time::SystemTime};
 
