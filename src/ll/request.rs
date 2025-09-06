@@ -823,7 +823,7 @@ mod op {
         pub fn flags(&self) -> i32 {
             self.arg.flags
         }
-        /// This will always be 0 except on MacOS.  It's recommended that
+        /// This will always be 0 except on `MacOS`.  It's recommended that
         /// implementations return EINVAL if this is not 0.
         pub fn position(&self) -> u32 {
             #[cfg(target_os = "macos")]
