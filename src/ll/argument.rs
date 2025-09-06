@@ -86,7 +86,6 @@ impl<'a> ArgumentIterator<'a> {
 
 #[cfg(test)]
 pub mod tests {
-    use std::ops::Deref;
 
     use super::super::test::AlignedData;
     use super::*;
@@ -105,7 +104,7 @@ pub mod tests {
 
     #[test]
     fn all_data() {
-        let mut it = ArgumentIterator::new(TEST_DATA.deref());
+        let mut it = ArgumentIterator::new(&*TEST_DATA);
         it.fetch_str().unwrap();
         let arg = it.fetch_all();
         assert_eq!(arg, [0x62, 0x61, 0x72, 0x00, 0x62, 0x61]);
@@ -113,7 +112,7 @@ pub mod tests {
 
     #[test]
     fn generic_argument() {
-        let mut it = ArgumentIterator::new(TEST_DATA.deref());
+        let mut it = ArgumentIterator::new(&*TEST_DATA);
         let arg: &TestArgument = it.fetch().unwrap();
         assert_eq!(arg.p1, 0x66);
         assert_eq!(arg.p2, 0x6f);
@@ -127,7 +126,7 @@ pub mod tests {
 
     #[test]
     fn string_argument() {
-        let mut it = ArgumentIterator::new(TEST_DATA.deref());
+        let mut it = ArgumentIterator::new(&*TEST_DATA);
         let arg = it.fetch_str().unwrap();
         assert_eq!(arg, "foo");
         let arg = it.fetch_str().unwrap();
@@ -137,7 +136,7 @@ pub mod tests {
 
     #[test]
     fn mixed_arguments() {
-        let mut it = ArgumentIterator::new(TEST_DATA.deref());
+        let mut it = ArgumentIterator::new(&*TEST_DATA);
         let arg: &TestArgument = it.fetch().unwrap();
         assert_eq!(arg.p1, 0x66);
         assert_eq!(arg.p2, 0x6f);
@@ -150,7 +149,7 @@ pub mod tests {
 
     #[test]
     fn out_of_data() {
-        let mut it = ArgumentIterator::new(TEST_DATA.deref());
+        let mut it = ArgumentIterator::new(&*TEST_DATA);
         it.fetch::<u64>().unwrap();
         let arg: Option<&TestArgument> = it.fetch();
         assert!(arg.is_none());
