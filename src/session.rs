@@ -28,7 +28,7 @@ use crate::{channel::ChannelSender, notify::Notifier};
 pub const MAX_WRITE_SIZE: usize = 16 * 1024 * 1024;
 
 /// Size of the buffer for reading a request from the kernel. Since the kernel may send
-/// up to MAX_WRITE_SIZE bytes in a write request, we use that value plus some extra space.
+/// up to `MAX_WRITE_SIZE` bytes in a write request, we use that value plus some extra space.
 const BUFFER_SIZE: usize = MAX_WRITE_SIZE + 4096;
 
 #[derive(Default, Debug, Eq, PartialEq)]
@@ -53,7 +53,7 @@ pub struct Session<FS: Filesystem> {
     /// Handle to the mount.  Dropping this unmounts.
     mount: Arc<Mutex<Option<(PathBuf, Mount)>>>,
     /// Whether to restrict access to owner, root + owner, or unrestricted
-    /// Used to implement allow_root and auto_unmount
+    /// Used to implement `allow_root` and `auto_unmount`
     pub(crate) allowed: SessionACL,
     /// User that launched the fuser process
     pub(crate) session_owner: u32,

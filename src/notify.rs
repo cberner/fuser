@@ -13,7 +13,7 @@ use crate::{
     reply::ReplySender,
 };
 
-/// A handle to a pending poll() request. Can be saved and used to notify the
+/// A handle to a pending `poll()` request. Can be saved and used to notify the
 /// kernel when a poll is ready.
 #[derive(Clone)]
 pub struct PollHandle {

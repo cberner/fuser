@@ -185,7 +185,7 @@ struct Options {
     #[clap(short, long)]
     no_notify: bool,
 
-    /// Use notify_store() instead of notify_inval_inode()
+    /// Use `notify_store()` instead of `notify_inval_inode()`
     #[clap(short = 's', long)]
     notify_store: bool,
 }

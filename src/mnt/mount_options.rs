@@ -156,8 +156,8 @@ pub fn option_to_string(option: &MountOption) -> String {
 
 /// Parses mount command args.
 ///
-/// Input: ["-o", "suid", "-o", "ro,nodev,noexec", "-osync"]
-/// Output Ok([Suid, RO, NoDev, NoExec, Sync])
+/// Input: `"-o", "suid", "-o", "ro,nodev,noexec", "-osync"`
+/// Output Ok([`Suid`, `RO`, `NoDev`, `NoExec`, `Sync`])
 pub(crate) fn parse_options_from_args(args: &[&OsStr]) -> io::Result<Vec<MountOption>> {
     let err = |x| io::Error::new(ErrorKind::InvalidInput, x);
     let args: Option<Vec<_>> = args.iter().map(|x| x.to_str()).collect();
