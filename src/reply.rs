@@ -3,8 +3,8 @@
 //! A reply is passed to filesystem operation implementations and must be used to send back the
 //! result of an operation. The reply can optionally be sent to another thread to asynchronously
 //! work on an operation and provide the result later. Also it allows replying with a block of
-//! data without cloning the data. A reply *must always* be used (by calling either ok() or
-//! error() exactly once).
+//! data without cloning the data. A reply *must always* be used (by calling either `ok()` or
+//! `error()` exactly once).
 
 use crate::ll::{
     self, Generation,
@@ -292,7 +292,7 @@ impl ReplyOpen {
         self.reply.sender.as_ref().unwrap().open_backing(fd.as_fd())
     }
 
-    /// Reply to a request with an opened backing id.  Call ReplyOpen::open_backing() to get one of
+    /// Reply to a request with an opened backing id.  Call `ReplyOpen::open_backing()` to get one of
     /// these.
     #[cfg(feature = "abi-7-40")]
     pub fn opened_passthrough(self, fh: u64, flags: u32, backing_id: &BackingId) {
@@ -542,7 +542,7 @@ pub struct ReplyDirectory {
 }
 
 impl ReplyDirectory {
-    /// Creates a new ReplyDirectory with a specified buffer size.
+    /// Creates a new `ReplyDirectory` with a specified buffer size.
     pub fn new<S: ReplySender>(unique: u64, sender: S, size: usize) -> ReplyDirectory {
         ReplyDirectory {
             reply: Reply::new(unique, sender),
@@ -576,7 +576,7 @@ impl ReplyDirectory {
 }
 
 ///
-/// DirectoryPlus reply
+/// `DirectoryPlus` reply
 ///
 #[derive(Debug)]
 pub struct ReplyDirectoryPlus {
@@ -585,7 +585,7 @@ pub struct ReplyDirectoryPlus {
 }
 
 impl ReplyDirectoryPlus {
-    /// Creates a new ReplyDirectory with a specified buffer size.
+    /// Creates a new `ReplyDirectory` with a specified buffer size.
     pub fn new<S: ReplySender>(unique: u64, sender: S, size: usize) -> ReplyDirectoryPlus {
         ReplyDirectoryPlus {
             reply: Reply::new(unique, sender),
