@@ -4,6 +4,7 @@
 * Add support for passthrough file descriptors
 * Change `KernelConfig` capabilities flags parameters to `u64`
 * Remove feature flags `abi-7-9` through `abi-7-18`
+* Remove `libfuse` feature flag from defaults. Linking with libfuse can be enabled with the `libfuse` feature flag
 * Improve macfuse compatibility (note that macfuse remains untested)
 * Fix unsound behavior when linking with libfuse3
 * Performance optimizations
