@@ -102,7 +102,13 @@ fn fuse_unmount_pure(mountpoint: &CStr) {
             return;
         }
     }
-    #[cfg(target_os = "macos")]
+    #[cfg(any(
+        target_os = "macos",
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "openbsd",
+        target_os = "netbsd"
+    ))]
     unsafe {
         let result = libc::unmount(mountpoint.as_ptr(), libc::MNT_FORCE);
         if result == 0 {
@@ -380,7 +386,13 @@ fn fuse_mount_sys(mountpoint: &OsStr, options: &[MountOption]) -> Result<Option<
         {
             flags |= libc::MS_NOSUID;
         }
-        #[cfg(target_os = "macos")]
+        #[cfg(any(
+            target_os = "macos",
+            target_os = "freebsd",
+            target_os = "dragonfly",
+            target_os = "openbsd",
+            target_os = "netbsd"
+        ))]
         {
             flags |= libc::MNT_NOSUID;
         }
@@ -423,11 +435,17 @@ fn fuse_mount_sys(mountpoint: &OsStr, options: &[MountOption]) -> Result<Option<
                 c_options.as_ptr() as *const libc::c_void,
             )
         }
-        #[cfg(target_os = "macos")]
+        #[cfg(any(
+            target_os = "macos",
+            target_os = "freebsd",
+            target_os = "dragonfly",
+            target_os = "openbsd",
+            target_os = "netbsd"
+        ))]
         {
             let mut c_options = CString::new(mount_options.clone()).unwrap();
             libc::mount(
-                c_source.as_ptr(),
+                "fusefs",
                 c_mountpoint.as_ptr(),
                 flags,
                 c_options.as_ptr() as *mut libc::c_void,
@@ -506,6 +524,28 @@ pub fn option_to_flag(option: &MountOption) -> libc::c_int {
     match option {
         MountOption::Dev => 0, // There is no option for dev. It's the absence of NoDev
         MountOption::NoDev => libc::MNT_NODEV,
+        MountOption::Suid => 0,
+        MountOption::NoSuid => libc::MNT_NOSUID,
+        MountOption::RW => 0,
+        MountOption::RO => libc::MNT_RDONLY,
+        MountOption::Exec => 0,
+        MountOption::NoExec => libc::MNT_NOEXEC,
+        MountOption::Atime => 0,
+        MountOption::NoAtime => libc::MNT_NOATIME,
+        MountOption::Async => 0,
+        MountOption::Sync => libc::MNT_SYNCHRONOUS,
+        _ => unreachable!(),
+    }
+}
+
+#[cfg(any(
+    target_os = "freebsd",
+    target_os = "dragonfly",
+    target_os = "openbsd",
+    target_os = "netbsd"
+))]
+pub fn option_to_flag(option: &MountOption) -> libc::c_int {
+    match option {
         MountOption::Suid => 0,
         MountOption::NoSuid => libc::MNT_NOSUID,
         MountOption::RW => 0,

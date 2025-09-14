@@ -5,8 +5,8 @@ fn main() {
         "cargo:rustc-check-cfg=cfg(fuser_mount_impl, values(\"pure-rust\", \"libfuse2\", \"libfuse3\"))"
     );
 
-    #[cfg(all(not(feature = "libfuse"), not(target_os = "linux")))]
-    unimplemented!("Building without libfuse is only supported on Linux");
+    #[cfg(all(not(feature = "libfuse"), not(any(target_os = "linux", target_os = "freebsd"))))]
+    unimplemented!("Building without libfuse is only supported on Linux and FreeBSD");
 
     #[cfg(not(feature = "libfuse"))]
     {
