@@ -1983,6 +1983,77 @@ fn get_groups(pid: u32) -> Vec<u32> {
         }
     }
 
+    #[cfg(target_os = "freebsd")]
+    {
+        // Use libprocstat to query the kernel for the process's groups.
+        // Link with: #[link(name = "procstat")]
+        use libc::{c_int, c_uint, gid_t};
+
+        #[repr(C)]
+        struct procstat {
+            _priv: [u8; 0],
+        }
+        #[repr(C)]
+        struct kinfo_proc {
+            _priv: [u8; 0],
+        }
+
+        #[link(name = "procstat")]
+        unsafe extern "C" {
+            fn procstat_open_sysctl() -> *mut procstat;
+            fn procstat_close(ps: *mut procstat);
+
+            fn procstat_getprocs(
+                ps: *mut procstat,
+                what: c_int,
+                arg: c_int,
+                count: *mut c_uint,
+            ) -> *mut kinfo_proc;
+            fn procstat_freeprocs(ps: *mut procstat, kp: *mut kinfo_proc);
+
+            fn procstat_getgroups(
+                ps: *mut procstat,
+                kp: *mut kinfo_proc,
+                count: *mut c_uint,
+            ) -> *mut gid_t;
+            fn procstat_freegroups(ps: *mut procstat, groups: *mut gid_t);
+        }
+
+        // From sys/sysctl.h (KERN_PROC_PID == 1)
+        // https://fxr-style headers and manpages document this constant.
+        const KERN_PROC_PID: c_int = 1;
+
+        unsafe {
+            let ps = procstat_open_sysctl();
+            if ps.is_null() {
+                return vec![];
+            }
+
+            let mut nprocs: c_uint = 0;
+            let kps = procstat_getprocs(ps, KERN_PROC_PID, pid as c_int, &mut nprocs);
+            if kps.is_null() || nprocs == 0 {
+                procstat_close(ps);
+                return vec![];
+            }
+
+            let mut ngroups: c_uint = 0;
+            let groups_ptr = procstat_getgroups(ps, kps, &mut ngroups);
+
+            let mut out = Vec::new();
+            if !groups_ptr.is_null() && ngroups > 0 {
+                let slice = std::slice::from_raw_parts(groups_ptr, ngroups as usize);
+                out.extend(slice.iter().map(|&g| g as u32));
+                procstat_freegroups(ps, groups_ptr);
+            }
+
+            procstat_freeprocs(ps, kps);
+            procstat_close(ps);
+
+            return out;
+        }
+    }
+
+    #[cfg(not(target_os = "freebsd"))]
     vec![]
 }
 
