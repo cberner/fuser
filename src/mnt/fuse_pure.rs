@@ -413,7 +413,7 @@ fn fuse_mount_sys(mountpoint: &OsStr, options: &[MountOption]) -> Result<Option<
     let result = unsafe {
         #[cfg(target_os = "linux")]
         {
-            let c_options = CString::new(mount_options).unwrap();
+            let c_options = CString::new(mount_options.clone()).unwrap();
             let c_type = CString::new("fuse").unwrap();
             libc::mount(
                 c_source.as_ptr(),
@@ -425,7 +425,7 @@ fn fuse_mount_sys(mountpoint: &OsStr, options: &[MountOption]) -> Result<Option<
         }
         #[cfg(target_os = "macos")]
         {
-            let mut c_options = CString::new(mount_options).unwrap();
+            let mut c_options = CString::new(mount_options.clone()).unwrap();
             libc::mount(
                 c_source.as_ptr(),
                 c_mountpoint.as_ptr(),
@@ -441,7 +441,7 @@ fn fuse_mount_sys(mountpoint: &OsStr, options: &[MountOption]) -> Result<Option<
         } else {
             return Err(Error::new(
                 err.kind(),
-                format!("Error calling mount() at {mountpoint:?}: {err}"),
+                format!("Error calling mount() at {mountpoint:?} with {mount_options:?} and flags={flags}: {err}"),
             ));
         }
     }
