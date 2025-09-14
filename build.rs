@@ -15,22 +15,13 @@ fn main() {
     #[cfg(feature = "libfuse")]
     {
         if cfg!(target_os = "macos") {
-            if pkg_config::Config::new()
+            pkg_config::Config::new()
                 .atleast_version("2.6.0")
                 .probe("fuse") // for macFUSE 4.x
                 .map_err(|e| eprintln!("{e}"))
-                .is_ok()
-            {
-                println!("cargo:rustc-cfg=fuser_mount_impl=\"libfuse2\"");
-                println!("cargo:rustc-cfg=feature=\"macfuse-4-compat\"");
-            } else {
-                pkg_config::Config::new()
-                    .atleast_version("2.6.0")
-                    .probe("osxfuse") // for osxfuse 3.x
-                    .map_err(|e| eprintln!("{e}"))
-                    .unwrap();
-                println!("cargo:rustc-cfg=fuser_mount_impl=\"libfuse2\"");
-            }
+                .unwrap();
+            println!("cargo:rustc-cfg=fuser_mount_impl=\"libfuse2\"");
+            println!("cargo:rustc-cfg=feature=\"macfuse-4-compat\"");
         } else {
             // First try to link with libfuse3
             if pkg_config::Config::new()
