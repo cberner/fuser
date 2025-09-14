@@ -2173,6 +2173,8 @@ fn main() {
         if e.kind() == ErrorKind::PermissionDenied {
             error!("{e}");
             std::process::exit(2);
+        } else {
+            error!("{e}");
         }
     }
 }
