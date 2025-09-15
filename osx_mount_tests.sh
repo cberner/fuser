@@ -16,8 +16,8 @@ RED="\e[31m"
 
 function run_test {
   DIR=$(mktemp -d)
-  cargo build --example hello $1 > /dev/null 2>&1
-  cargo run --example hello $1 -- $DIR $3 &
+  cargo build --example hello > /dev/null 2>&1
+  cargo run --example hello -- $DIR $2 &
   FUSE_PID=$!
   sleep 2
 
@@ -26,9 +26,9 @@ function run_test {
   mount | grep hello || exit 1
 
   if [[ $(cat ${DIR}/hello.txt) = "Hello World!" ]]; then
-      echo -e "$GREEN OK $2 $3 $NC"
+      echo -e "$GREEN OK $1 $2 $NC"
   else
-      echo -e "$RED FAILED $2 $3 $NC"
+      echo -e "$RED FAILED $1 $2 $NC"
       export TEST_EXIT_STATUS=1
       exit 1
   fi
@@ -37,7 +37,7 @@ function run_test {
   wait $FUSE_PID
 }
 
-run_test --features=libfuse 'with libfuse'
+run_test 'with libfuse'
 
 # TODO: re-enable this test. It seems to hang on OSX
 #run_test --features=libfuse 'with libfuse' --auto_unmount

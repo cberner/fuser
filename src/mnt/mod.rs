@@ -4,7 +4,7 @@
 
 #[cfg(fuser_mount_impl = "libfuse2")]
 mod fuse2;
-#[cfg(any(feature = "libfuse", test))]
+#[cfg(any(test, fuser_mount_impl = "libfuse2", fuser_mount_impl = "libfuse3"))]
 mod fuse2_sys;
 #[cfg(fuser_mount_impl = "libfuse3")]
 mod fuse3;
@@ -15,18 +15,18 @@ mod fuse3_sys;
 mod fuse_pure;
 pub mod mount_options;
 
-#[cfg(any(test, feature = "libfuse"))]
+#[cfg(any(test, fuser_mount_impl = "libfuse2", fuser_mount_impl = "libfuse3"))]
 use fuse2_sys::fuse_args;
-#[cfg(any(test, not(feature = "libfuse")))]
+#[cfg(any(test, fuser_mount_impl = "pure-rust"))]
 use std::fs::File;
 use std::io;
 
-#[cfg(any(feature = "libfuse", test))]
+#[cfg(any(test, fuser_mount_impl = "libfuse2", fuser_mount_impl = "libfuse3"))]
 use mount_options::MountOption;
 
 /// Helper function to provide options as a `fuse_args` struct
 /// (which contains an argc count and an argv pointer)
-#[cfg(any(feature = "libfuse", test))]
+#[cfg(any(test, fuser_mount_impl = "libfuse2", fuser_mount_impl = "libfuse3"))]
 fn with_fuse_args<T, F: FnOnce(&fuse_args) -> T>(options: &[MountOption], f: F) -> T {
     use mount_options::option_to_string;
     use std::ffi::CString;
