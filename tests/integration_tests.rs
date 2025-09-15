@@ -18,7 +18,7 @@ fn unmount_no_send() {
     let mut unmounter = session.unmount_callable();
     thread::spawn(move || {
         thread::sleep(Duration::from_secs(1));
-        unmounter.unmount().unwrap();
+        unmounter.unmount();
     });
     session.run().unwrap();
 }

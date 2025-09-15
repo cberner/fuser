@@ -202,9 +202,8 @@ pub struct SessionUnmounter {
 
 impl SessionUnmounter {
     /// Unmount the filesystem
-    pub fn unmount(&mut self) -> io::Result<()> {
+    pub fn unmount(&mut self) {
         drop(std::mem::take(&mut *self.mount.lock().unwrap()));
-        Ok(())
     }
 }
 
@@ -219,7 +218,7 @@ fn aligned_sub_buf(buf: &mut [u8], alignment: usize) -> &mut [u8] {
 
 impl<FS: 'static + Filesystem + Send> Session<FS> {
     /// Run the session loop in a background thread
-    pub fn spawn(self) -> io::Result<BackgroundSession> {
+    pub fn spawn(self) -> BackgroundSession {
         BackgroundSession::new(self)
     }
 }
@@ -251,7 +250,7 @@ impl BackgroundSession {
     /// Create a new background session for the given session by running its
     /// session loop in a background thread. If the returned handle is dropped,
     /// the filesystem is unmounted and the given session ends.
-    pub fn new<FS: Filesystem + Send + 'static>(se: Session<FS>) -> io::Result<BackgroundSession> {
+    pub fn new<FS: Filesystem + Send + 'static>(se: Session<FS>) -> BackgroundSession {
         let sender = se.ch.sender();
         // Take the fuse_session, so that we can unmount it
         let mount = std::mem::take(&mut *se.mount.lock().unwrap()).map(|(_, mount)| mount);
@@ -259,11 +258,11 @@ impl BackgroundSession {
             let mut se = se;
             se.run()
         });
-        Ok(BackgroundSession {
+        BackgroundSession {
             guard,
             sender,
             _mount: mount,
-        })
+        }
     }
     /// Unmount the filesystem and join the background thread.
     /// # Panics

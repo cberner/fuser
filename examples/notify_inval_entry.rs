@@ -164,7 +164,7 @@ fn main() {
 
     let session = fuser::Session::new(fs, opts.mount_point, &options).unwrap();
     let notifier = session.notifier();
-    let _bg = session.spawn().unwrap();
+    let _bg = session.spawn();
 
     loop {
         let mut fname = fname.lock().unwrap();
