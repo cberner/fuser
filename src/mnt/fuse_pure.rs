@@ -444,8 +444,9 @@ fn fuse_mount_sys(mountpoint: &OsStr, options: &[MountOption]) -> Result<Option<
         ))]
         {
             let mut c_options = CString::new(mount_options.clone()).unwrap();
+            let c_type = CString::new("fusefs").unwrap();
             libc::mount(
-                "fusefs",
+                c_type.as_ptr(),
                 c_mountpoint.as_ptr(),
                 flags,
                 c_options.as_ptr() as *mut libc::c_void,
