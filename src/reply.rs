@@ -6,14 +6,10 @@
 //! data without cloning the data. A reply *must always* be used (by calling either `ok()` or
 //! `error()` exactly once).
 
-use crate::ll::{
-    self, Generation,
-    reply::{DirEntPlusList, DirEntryPlus},
-};
-use crate::ll::{
-    INodeNo,
-    reply::{DirEntList, DirEntOffset, DirEntry},
-};
+use crate::ll; // too many structs to list
+use crate::ll::reply::{DirEntList, DirEntOffset, DirEntry};
+#[cfg(feature = "abi-7-21")]
+use crate::ll::reply::{DirEntPlusList, DirEntryPlus};
 #[cfg(feature = "abi-7-40")]
 use crate::{consts::FOPEN_PASSTHROUGH, passthrough::BackingId};
 use libc::c_int;
@@ -561,7 +557,7 @@ impl ReplyDirectory {
     pub fn add<T: AsRef<OsStr>>(&mut self, ino: u64, offset: i64, kind: FileType, name: T) -> bool {
         let name = name.as_ref();
         self.data.push(&DirEntry::new(
-            INodeNo(ino),
+            ll::INodeNo(ino),
             DirEntOffset(offset),
             kind,
             name,
@@ -582,12 +578,14 @@ impl ReplyDirectory {
 ///
 /// `DirectoryPlus` reply
 ///
+#[cfg(feature = "abi-7-21")]
 #[derive(Debug)]
 pub struct ReplyDirectoryPlus {
     reply: ReplyRaw,
     buf: DirEntPlusList,
 }
 
+#[cfg(feature = "abi-7-21")]
 impl ReplyDirectoryPlus {
     /// Creates a new `ReplyDirectory` with a specified buffer size.
     pub fn new<S: ReplySender>(unique: u64, sender: S, size: usize) -> ReplyDirectoryPlus {
@@ -611,8 +609,8 @@ impl ReplyDirectoryPlus {
     ) -> bool {
         let name = name.as_ref();
         self.buf.push(&DirEntryPlus::new(
-            INodeNo(ino),
-            Generation(generation),
+            ll::INodeNo(ino),
+            ll::Generation(generation),
             DirEntOffset(offset),
             name,
             *ttl,
@@ -668,11 +666,13 @@ impl ReplyXattr {
 ///
 /// Lseek Reply
 ///
+#[cfg(feature = "abi-7-24")]
 #[derive(Debug)]
 pub struct ReplyLseek {
     reply: ReplyRaw,
 }
 
+#[cfg(feature = "abi-7-24")]
 impl Reply for ReplyLseek {
     fn new<S: ReplySender>(unique: u64, sender: S) -> ReplyLseek {
         ReplyLseek {
@@ -681,6 +681,7 @@ impl Reply for ReplyLseek {
     }
 }
 
+#[cfg(feature = "abi-7-24")]
 impl ReplyLseek {
     /// Reply to a request with seeked offset
     pub fn offset(self, offset: i64) {
