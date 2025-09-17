@@ -37,9 +37,9 @@ function run_test {
   wait $FUSE_PID
 }
 
-run_test --features=libfuse 'with libfuse'
+run_test 'with libfuse'
 
 # TODO: auto unmount doesn't seem to be supported on FreeBSD
-# run_test --features=libfuse 'with libfuse' --auto_unmount
+# run_test 'with libfuse' --auto_unmount
 
 export TEST_EXIT_STATUS=0

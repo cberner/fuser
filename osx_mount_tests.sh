@@ -37,7 +37,7 @@ function run_test {
   wait $FUSE_PID
 }
 
-run_test --features=libfuse 'with libfuse'
+run_test 'with libfuse'
 
 # TODO: re-enable this test. It seems to hang on OSX
 #run_test --features=libfuse 'with libfuse' --auto_unmount
