@@ -178,7 +178,12 @@ impl<FS: Filesystem> Session<FS> {
 
     /// Unmount the filesystem
     pub fn unmount(&mut self) {
-        drop(std::mem::take(&mut *self.mount.lock().unwrap()));
+        drop(std::mem::take(&mut *self.mount.lock().unwrap_or_else(
+            |poisoned| {
+                warn!("Ignored poisoned mount lock");
+                poisoned.into_inner()
+            },
+        )));
     }
 
     /// Returns a thread-safe object that can be used to unmount the Filesystem
@@ -203,7 +208,12 @@ pub struct SessionUnmounter {
 impl SessionUnmounter {
     /// Unmount the filesystem
     pub fn unmount(&mut self) {
-        drop(std::mem::take(&mut *self.mount.lock().unwrap()));
+        drop(std::mem::take(&mut *self.mount.lock().unwrap_or_else(
+            |poisoned| {
+                warn!("Ignored poisoned mount lock");
+                poisoned.into_inner()
+            },
+        )));
     }
 }
 
@@ -230,7 +240,12 @@ impl<FS: Filesystem> Drop for Session<FS> {
             self.destroyed = true;
         }
 
-        if let Some((mountpoint, _mount)) = std::mem::take(&mut *self.mount.lock().unwrap()) {
+        if let Some((mountpoint, _mount)) =
+            std::mem::take(&mut *self.mount.lock().unwrap_or_else(|poisoned| {
+                warn!("Ignored poisoned mount lock");
+                poisoned.into_inner()
+            }))
+        {
             info!("unmounting session at {}", mountpoint.display());
         }
     }
@@ -253,7 +268,11 @@ impl BackgroundSession {
     pub fn new<FS: Filesystem + Send + 'static>(se: Session<FS>) -> BackgroundSession {
         let sender = se.ch.sender();
         // Take the fuse_session, so that we can unmount it
-        let mount = std::mem::take(&mut *se.mount.lock().unwrap()).map(|(_, mount)| mount);
+        let mount = std::mem::take(&mut *se.mount.lock().unwrap_or_else(|poisoned| {
+            warn!("Ignored poisoned mount lock");
+            poisoned.into_inner()
+        }))
+        .map(|(_, mount)| mount);
         let guard = thread::spawn(move || {
             let mut se = se;
             se.run()
