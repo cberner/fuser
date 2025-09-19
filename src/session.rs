@@ -75,6 +75,8 @@ impl<FS: Filesystem> AsFd for Session<FS> {
 
 impl<FS: Filesystem> Session<FS> {
     /// Create a new session by mounting the given filesystem to the given mountpoint
+    /// # Errors
+    /// Returns an error if the options are incorrect, or if the fuse device can't be mounted.
     pub fn new<P: AsRef<Path>>(
         filesystem: FS,
         mountpoint: P,
@@ -142,6 +144,8 @@ impl<FS: Filesystem> Session<FS> {
     /// calls into the filesystem. This read-dispatch-loop is non-concurrent to prevent
     /// having multiple buffers (which take up much memory), but the filesystem methods
     /// may run concurrent by spawning threads.
+    /// # Errors
+    /// Returns any final error when the session comes to an end.
     pub fn run(&mut self) -> io::Result<()> {
         // Buffer for receiving requests from the kernel. Only one is allocated and
         // it is reused immediately after dispatching to conserve memory and allocations.
@@ -262,6 +266,8 @@ impl BackgroundSession {
         })
     }
     /// Unmount the filesystem and join the background thread.
+    /// # Panics
+    /// Panics if the background thread can't be recovered (e.g., because it panicked).
     pub fn join(self) {
         let Self {
             guard,

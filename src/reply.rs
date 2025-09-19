@@ -6,14 +6,10 @@
 //! data without cloning the data. A reply *must always* be used (by calling either `ok()` or
 //! `error()` exactly once).
 
-use crate::ll::{
-    self, Generation,
-    reply::{DirEntPlusList, DirEntryPlus},
-};
-use crate::ll::{
-    INodeNo,
-    reply::{DirEntList, DirEntOffset, DirEntry},
-};
+use crate::ll; // too many structs to list
+use crate::ll::reply::{DirEntList, DirEntOffset, DirEntry};
+#[cfg(feature = "abi-7-21")]
+use crate::ll::reply::{DirEntPlusList, DirEntryPlus};
 #[cfg(feature = "abi-7-40")]
 use crate::{consts::FOPEN_PASSTHROUGH, passthrough::BackingId};
 use libc::c_int;
@@ -276,6 +272,8 @@ impl Reply for ReplyOpen {
 
 impl ReplyOpen {
     /// Reply to a request with the given open result
+    /// # Panics
+    /// When attempting to use kernel passthrough. Use `opened_passthrough()` instead.
     pub fn opened(self, fh: u64, flags: u32) {
         #[cfg(feature = "abi-7-40")]
         assert_eq!(flags & FOPEN_PASSTHROUGH, 0);
@@ -326,7 +324,7 @@ impl Reply for ReplyWrite {
 }
 
 impl ReplyWrite {
-    /// Reply to a request with the given open result
+    /// Reply to a request with the number of bytes written
     pub fn written(self, size: u32) {
         self.reply.send_ll(&ll::Response::new_write(size));
     }
@@ -354,7 +352,7 @@ impl Reply for ReplyStatfs {
 }
 
 impl ReplyStatfs {
-    /// Reply to a request with the given open result
+    /// Reply to a statfs request with filesystem information
     #[allow(clippy::too_many_arguments)]
     pub fn statfs(
         self,
@@ -395,7 +393,9 @@ impl Reply for ReplyCreate {
 }
 
 impl ReplyCreate {
-    /// Reply to a request with the given entry
+    /// Reply to a request with a newly created file entry and its newly open file handle
+    /// # Panics
+    /// When attempting to use kernel passthrough. Use `opened_passthrough()` instead.
     pub fn created(self, ttl: &Duration, attr: &FileAttr, generation: u64, fh: u64, flags: u32) {
         #[cfg(feature = "abi-7-40")]
         assert_eq!(flags & FOPEN_PASSTHROUGH, 0);
@@ -432,7 +432,7 @@ impl Reply for ReplyLock {
 }
 
 impl ReplyLock {
-    /// Reply to a request with the given open result
+    /// Reply to a request with a file lock
     pub fn locked(self, start: u64, end: u64, typ: i32, pid: u32) {
         self.reply.send_ll(&ll::Response::new_lock(&ll::Lock {
             range: (start, end),
@@ -464,7 +464,7 @@ impl Reply for ReplyBmap {
 }
 
 impl ReplyBmap {
-    /// Reply to a request with the given open result
+    /// Reply to a request with a bmap
     pub fn bmap(self, block: u64) {
         self.reply.send_ll(&ll::Response::new_bmap(block));
     }
@@ -492,7 +492,7 @@ impl Reply for ReplyIoctl {
 }
 
 impl ReplyIoctl {
-    /// Reply to a request with the given open result
+    /// Reply to a request with an ioctl
     pub fn ioctl(self, result: i32, data: &[u8]) {
         self.reply
             .send_ll(&ll::Response::new_ioctl(result, &[IoSlice::new(data)]));
@@ -521,7 +521,7 @@ impl Reply for ReplyPoll {
 }
 
 impl ReplyPoll {
-    /// Reply to a request with the given poll result
+    /// Reply to a request with ready poll events
     pub fn poll(self, revents: u32) {
         self.reply.send_ll(&ll::Response::new_poll(revents));
     }
@@ -557,7 +557,7 @@ impl ReplyDirectory {
     pub fn add<T: AsRef<OsStr>>(&mut self, ino: u64, offset: i64, kind: FileType, name: T) -> bool {
         let name = name.as_ref();
         self.data.push(&DirEntry::new(
-            INodeNo(ino),
+            ll::INodeNo(ino),
             DirEntOffset(offset),
             kind,
             name,
@@ -578,12 +578,14 @@ impl ReplyDirectory {
 ///
 /// `DirectoryPlus` reply
 ///
+#[cfg(feature = "abi-7-21")]
 #[derive(Debug)]
 pub struct ReplyDirectoryPlus {
     reply: ReplyRaw,
     buf: DirEntPlusList,
 }
 
+#[cfg(feature = "abi-7-21")]
 impl ReplyDirectoryPlus {
     /// Creates a new `ReplyDirectory` with a specified buffer size.
     pub fn new<S: ReplySender>(unique: u64, sender: S, size: usize) -> ReplyDirectoryPlus {
@@ -607,8 +609,8 @@ impl ReplyDirectoryPlus {
     ) -> bool {
         let name = name.as_ref();
         self.buf.push(&DirEntryPlus::new(
-            INodeNo(ino),
-            Generation(generation),
+            ll::INodeNo(ino),
+            ll::Generation(generation),
             DirEntOffset(offset),
             name,
             *ttl,
@@ -645,12 +647,12 @@ impl Reply for ReplyXattr {
 }
 
 impl ReplyXattr {
-    /// Reply to a request with the size of the xattr.
+    /// Reply to a request with the size of an extended attribute
     pub fn size(self, size: u32) {
         self.reply.send_ll(&ll::Response::new_xattr_size(size));
     }
 
-    /// Reply to a request with the data in the xattr.
+    /// Reply to a request with the data of an extended attribute
     pub fn data(self, data: &[u8]) {
         self.reply.send_ll(&ll::Response::new_slice(data));
     }
@@ -664,11 +666,13 @@ impl ReplyXattr {
 ///
 /// Lseek Reply
 ///
+#[cfg(feature = "abi-7-24")]
 #[derive(Debug)]
 pub struct ReplyLseek {
     reply: ReplyRaw,
 }
 
+#[cfg(feature = "abi-7-24")]
 impl Reply for ReplyLseek {
     fn new<S: ReplySender>(unique: u64, sender: S) -> ReplyLseek {
         ReplyLseek {
@@ -677,6 +681,7 @@ impl Reply for ReplyLseek {
     }
 }
 
+#[cfg(feature = "abi-7-24")]
 impl ReplyLseek {
     /// Reply to a request with seeked offset
     pub fn offset(self, offset: i64) {
