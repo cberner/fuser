@@ -1012,8 +1012,7 @@ pub fn spawn_mount<'a, FS: Filesystem + Send + 'static + 'a, P: AsRef<Path>>(
         .map(|x| Some(MountOption::from_str(x.to_str()?)))
         .collect();
     let options = options.ok_or(ErrorKind::InvalidData)?;
-    Session::new(filesystem, mountpoint.as_ref(), options.as_ref())
-        .and_then(session::Session::spawn)
+    Session::new(filesystem, mountpoint.as_ref(), options.as_ref()).map(session::Session::spawn)
 }
 
 /// Mount the given filesystem to the given mountpoint. This function spawns
@@ -1031,5 +1030,5 @@ pub fn spawn_mount2<'a, FS: Filesystem + Send + 'static + 'a, P: AsRef<Path>>(
     options: &[MountOption],
 ) -> io::Result<BackgroundSession> {
     check_option_conflicts(options)?;
-    Session::new(filesystem, mountpoint.as_ref(), options).and_then(session::Session::spawn)
+    Session::new(filesystem, mountpoint.as_ref(), options).map(session::Session::spawn)
 }

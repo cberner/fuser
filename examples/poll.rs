@@ -338,7 +338,7 @@ fn main() {
 
     let mntpt = std::env::args().nth(1).unwrap();
     let session = fuser::Session::new(fs, mntpt, &options).unwrap();
-    let bg = session.spawn().unwrap();
+    let bg = session.spawn();
 
     producer(&data, &bg.notifier());
 }
