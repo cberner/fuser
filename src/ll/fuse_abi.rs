@@ -518,6 +518,7 @@ pub struct fuse_rename_in {
     pub padding: u32,
 }
 
+#[allow(dead_code)]
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
 pub struct fuse_rename2_in {
@@ -805,6 +806,7 @@ pub struct fuse_init_out {
     pub reserved: [u32; 6],
 }
 
+#[allow(dead_code)]
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
 pub struct cuse_init_in {
@@ -814,6 +816,7 @@ pub struct cuse_init_in {
     pub flags: u32,
 }
 
+#[allow(dead_code)]
 #[repr(C)]
 #[derive(Debug, KnownLayout, Immutable)]
 pub struct cuse_init_out {
@@ -859,6 +862,7 @@ pub struct fuse_ioctl_in {
     pub out_size: u32,
 }
 
+#[allow(dead_code)]
 #[repr(C)]
 #[derive(Debug, KnownLayout, Immutable)]
 pub struct fuse_ioctl_iovec {
@@ -987,6 +991,7 @@ pub struct fuse_notify_store_out {
     pub padding: u32,
 }
 
+#[allow(dead_code)]
 #[repr(C)]
 #[derive(Debug, KnownLayout, Immutable)]
 pub struct fuse_notify_retrieve_out {
@@ -997,6 +1002,7 @@ pub struct fuse_notify_retrieve_out {
     pub padding: u32,
 }
 
+#[allow(dead_code)]
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
 pub struct fuse_notify_retrieve_in {
@@ -1009,6 +1015,7 @@ pub struct fuse_notify_retrieve_in {
     pub dummy4: u64,
 }
 
+#[allow(dead_code)]
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
 pub struct fuse_lseek_in {
@@ -1025,6 +1032,7 @@ pub struct fuse_lseek_out {
     pub offset: i64,
 }
 
+#[allow(dead_code)]
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
 pub struct fuse_copy_file_range_in {

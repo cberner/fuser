@@ -55,3 +55,5 @@ test_passthrough:
 
 test: pre mount_tests pjdfs_tests xfstests
 	cargo test
+osx_copy_tests:
+	bash ./osx_copy_tests.sh

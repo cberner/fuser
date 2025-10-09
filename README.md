@@ -84,6 +84,8 @@ When using `nix` it is required that you specify `PKG_CONFIG_PATH` environment v
 export PKG_CONFIG_PATH=${HOME}/.nix-profile/lib/pkgconfig
 ```
 
+Run `make osx_copy_tests` to mount the simple example filesystem and exercise copy operations on macOS FUSE mounts.
+
 ### FreeBSD
 
 Install packages `fusefs-libs` and `pkgconf`.

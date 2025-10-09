@@ -2,23 +2,23 @@
 #![allow(clippy::unnecessary_cast)] // libc::S_* are u16 or u32 depending on the platform
 
 use clap::{Arg, ArgAction, Command, crate_version};
-use fuser::consts::FOPEN_DIRECT_IO;
 #[cfg(feature = "abi-7-26")]
 use fuser::consts::FUSE_HANDLE_KILLPRIV;
+use fuser::consts::{FOPEN_DIRECT_IO, FUSE_IOCTL_DIR};
 // #[cfg(feature = "abi-7-31")]
 // use fuser::consts::FUSE_WRITE_KILL_PRIV;
 use fuser::TimeOrNow::Now;
 use fuser::{
     FUSE_ROOT_ID, Filesystem, KernelConfig, MountOption, ReplyAttr, ReplyCreate, ReplyData,
-    ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen, ReplyStatfs, ReplyWrite, ReplyXattr,
-    Request, TimeOrNow,
+    ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyIoctl, ReplyOpen, ReplyStatfs, ReplyWrite,
+    ReplyXattr, Request, TimeOrNow,
 };
 #[cfg(feature = "abi-7-26")]
 use log::info;
 use log::{LevelFilter, error};
 use log::{debug, warn};
 use serde::{Deserialize, Serialize};
-use std::cmp::min;
+use std::cmp::{max, min};
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::fs::{File, OpenOptions};
@@ -26,6 +26,7 @@ use std::io::{BufRead, BufReader, ErrorKind, Read, Seek, SeekFrom, Write};
 use std::os::raw::c_int;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::FileExt;
+use std::os::unix::io::AsRawFd;
 #[cfg(target_os = "linux")]
 use std::os::unix::io::IntoRawFd;
 use std::path::{Path, PathBuf};
@@ -314,6 +315,10 @@ impl SimpleFS {
         }
 
         fh
+    }
+
+    fn io_error_to_errno(err: &io::Error) -> c_int {
+        err.raw_os_error().unwrap_or(libc::EIO)
     }
 
     fn check_file_handle_read(file_handle: u64) -> bool {
@@ -666,6 +671,16 @@ impl Filesystem for SimpleFS {
                 reply.error(error_code);
                 return;
             }
+
+            match self.get_inode(inode) {
+                Ok(updated) => {
+                    reply.attr(&Duration::new(0, 0), &updated.into());
+                }
+                Err(error_code) => {
+                    reply.error(error_code);
+                }
+            }
+            return;
         }
 
         let now = time_now();
@@ -1478,6 +1493,39 @@ impl Filesystem for SimpleFS {
         }
     }
 
+    fn flush(&mut self, _req: &Request, inode: u64, fh: u64, lock_owner: u64, reply: ReplyEmpty) {
+        debug!("flush() called on inode={inode:#x}, fh={fh}, lock_owner={lock_owner:#x}",);
+
+        let path = self.content_path(inode);
+        let mut options = OpenOptions::new();
+        options.read(true);
+        if Self::check_file_handle_write(fh) {
+            options.write(true);
+        }
+
+        let file = match options.open(&path) {
+            Ok(file) => file,
+            Err(err) => {
+                reply.error(Self::io_error_to_errno(&err));
+                return;
+            }
+        };
+
+        if Self::check_file_handle_write(fh) {
+            if let Err(err) = file.sync_data() {
+                reply.error(Self::io_error_to_errno(&err));
+                return;
+            }
+        }
+
+        if let Ok(mut attrs) = self.get_inode(inode) {
+            attrs.last_accessed = time_now();
+            self.write_inode(&attrs);
+        }
+
+        reply.ok();
+    }
+
     fn release(
         &mut self,
         _req: &Request<'_>,
@@ -1492,6 +1540,78 @@ impl Filesystem for SimpleFS {
             attrs.open_file_handles -= 1;
         }
         reply.ok();
+    }
+
+    fn ioctl(
+        &mut self,
+        _req: &Request,
+        inode: u64,
+        fh: u64,
+        flags: u32,
+        cmd: u32,
+        in_data: &[u8],
+        out_size: u32,
+        reply: ReplyIoctl,
+    ) {
+        debug!(
+            "ioctl() invoked (inode={inode:#x}, fh={fh}, flags={flags:#x}, cmd={cmd:#x}, in_len={}, out_size={out_size})",
+            in_data.len()
+        );
+
+        if (flags & FUSE_IOCTL_DIR) != 0 {
+            reply.error(libc::ENOTTY);
+            return;
+        }
+
+        let path = self.content_path(inode);
+        let mut options = OpenOptions::new();
+        options.read(true);
+        if Self::check_file_handle_write(fh) {
+            options.write(true);
+        }
+
+        let file = match options.open(&path) {
+            Ok(file) => file,
+            Err(err) => {
+                reply.error(Self::io_error_to_errno(&err));
+                return;
+            }
+        };
+
+        let fd = file.as_raw_fd();
+
+        let buffer_len = max(in_data.len(), out_size as usize);
+        let mut buffer = vec![0_u8; buffer_len];
+        if !in_data.is_empty() {
+            buffer[..in_data.len()].copy_from_slice(in_data);
+        }
+
+        let result = unsafe {
+            if buffer.is_empty() {
+                libc::ioctl(fd, cmd as libc::c_ulong, 0 as libc::c_ulong)
+            } else {
+                libc::ioctl(
+                    fd,
+                    cmd as libc::c_ulong,
+                    buffer.as_mut_ptr() as *mut libc::c_void,
+                )
+            }
+        };
+
+        if result == -1 {
+            let err = io::Error::last_os_error();
+            reply.error(Self::io_error_to_errno(&err));
+            return;
+        }
+
+        let bytes_to_return = std::cmp::min(out_size as usize, buffer.len());
+        let data = if bytes_to_return > 0 {
+            &buffer[..bytes_to_return]
+        } else {
+            &[]
+        };
+
+        reply.ioctl(result, data);
     }
 
     fn opendir(&mut self, req: &Request, inode: u64, flags: i32, reply: ReplyOpen) {
@@ -1588,7 +1708,7 @@ impl Filesystem for SimpleFS {
     }
 
     fn statfs(&mut self, _req: &Request, _ino: u64, reply: ReplyStatfs) {
-        warn!("statfs() implementation is a stub");
+        debug!("statfs() called");
         // TODO: real implementation of this
         reply.statfs(
             10_000,
@@ -2058,13 +2178,18 @@ fn get_groups(pid: u32) -> Vec<u32> {
 }
 
 fn fuse_allow_other_enabled() -> io::Result<bool> {
-    let file = File::open("/etc/fuse.conf")?;
-    for line in BufReader::new(file).lines() {
-        if line?.trim_start().starts_with("user_allow_other") {
-            return Ok(true);
+    match File::open("/etc/fuse.conf") {
+        Ok(file) => {
+            for line in BufReader::new(file).lines() {
+                if line?.trim_start().starts_with("user_allow_other") {
+                    return Ok(true);
+                }
+            }
+            Ok(false)
         }
+        Err(err) if err.kind() == ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(err),
     }
-    Ok(false)
 }
 
 fn main() {
@@ -2143,12 +2268,10 @@ fn main() {
     if matches.get_flag("auto-unmount") {
         options.push(MountOption::AutoUnmount);
     }
-    if let Ok(enabled) = fuse_allow_other_enabled() {
-        if enabled {
-            options.push(MountOption::AllowOther);
-        }
-    } else {
-        eprintln!("Unable to read /etc/fuse.conf");
+    match fuse_allow_other_enabled() {
+        Ok(true) => options.push(MountOption::AllowOther),
+        Ok(false) => {}
+        Err(err) => eprintln!("Unable to read /etc/fuse.conf: {err}"),
     }
 
     let data_dir = matches.get_one::<String>("data-dir").unwrap().to_string();
