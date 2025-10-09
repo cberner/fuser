@@ -5,13 +5,13 @@ fn main() {
         "cargo:rustc-check-cfg=cfg(fuser_mount_impl, values(\"pure-rust\", \"libfuse2\", \"libfuse3\"))"
     );
 
-    #[cfg(all(not(feature = "libfuse"), target_os = "linux"))]
-    {
+    let target_os =
+        std::env::var("CARGO_CFG_TARGET_OS").expect("CARGO_CFG_TARGET_OS should be set");
+
+    if target_os == "linux" && cfg!(not(feature = "libfuse")) {
         println!("cargo:rustc-cfg=fuser_mount_impl=\"pure-rust\"");
-    }
-    #[cfg(any(feature = "libfuse", not(target_os = "linux")))]
-    {
-        if cfg!(target_os = "macos") {
+    } else {
+        if target_os == "macos" {
             pkg_config::Config::new()
                 .atleast_version("2.6.0")
                 .probe("fuse") // for macFUSE 4.x
