@@ -32,15 +32,12 @@ serde = { version = "1.0.102", features = ["std", "derive"] }
 tempfile = "3.10.1"
 nix = { version = "0.29.0", features = ["poll", "fs", "ioctl"] }
 
-[target.'cfg(target_os = "linux")'.build-dependencies]
-pkg-config = { version = "0.3.14", optional = true }
-
-[target.'cfg(not(target_os = "linux"))'.build-dependencies]
+[build-dependencies]
 pkg-config = "0.3.14"
 
 [features]
 default = []
-libfuse = ["pkg-config"]
+libfuse = []
 serializable = ["serde"]
 macfuse-4-compat = []
 abi-7-19 = []
