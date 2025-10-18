@@ -5,38 +5,36 @@ fn main() {
         "cargo:rustc-check-cfg=cfg(fuser_mount_impl, values(\"pure-rust\", \"libfuse2\", \"libfuse3\"))"
     );
 
-    #[cfg(all(not(feature = "libfuse"), target_os = "linux"))]
-    {
+    let target_os =
+        std::env::var("CARGO_CFG_TARGET_OS").expect("CARGO_CFG_TARGET_OS should be set");
+
+    if target_os == "linux" && cfg!(not(feature = "libfuse")) {
         println!("cargo:rustc-cfg=fuser_mount_impl=\"pure-rust\"");
-    }
-    #[cfg(any(feature = "libfuse", not(target_os = "linux")))]
-    {
-        if cfg!(target_os = "macos") {
+    } else if target_os == "macos" {
+        pkg_config::Config::new()
+            .atleast_version("2.6.0")
+            .probe("fuse") // for macFUSE 4.x
+            .map_err(|e| eprintln!("{e}"))
+            .unwrap();
+        println!("cargo:rustc-cfg=fuser_mount_impl=\"libfuse2\"");
+        println!("cargo:rustc-cfg=feature=\"macfuse-4-compat\"");
+    } else {
+        // First try to link with libfuse3
+        if pkg_config::Config::new()
+            .atleast_version("3.0.0")
+            .probe("fuse3")
+            .map_err(|e| eprintln!("{e}"))
+            .is_ok()
+        {
+            println!("cargo:rustc-cfg=fuser_mount_impl=\"libfuse3\"");
+        } else {
+            // Fallback to libfuse
             pkg_config::Config::new()
                 .atleast_version("2.6.0")
-                .probe("fuse") // for macFUSE 4.x
+                .probe("fuse")
                 .map_err(|e| eprintln!("{e}"))
                 .unwrap();
             println!("cargo:rustc-cfg=fuser_mount_impl=\"libfuse2\"");
-            println!("cargo:rustc-cfg=feature=\"macfuse-4-compat\"");
-        } else {
-            // First try to link with libfuse3
-            if pkg_config::Config::new()
-                .atleast_version("3.0.0")
-                .probe("fuse3")
-                .map_err(|e| eprintln!("{e}"))
-                .is_ok()
-            {
-                println!("cargo:rustc-cfg=fuser_mount_impl=\"libfuse3\"");
-            } else {
-                // Fallback to libfuse
-                pkg_config::Config::new()
-                    .atleast_version("2.6.0")
-                    .probe("fuse")
-                    .map_err(|e| eprintln!("{e}"))
-                    .unwrap();
-                println!("cargo:rustc-cfg=fuser_mount_impl=\"libfuse2\"");
-            }
         }
     }
 }
