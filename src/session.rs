@@ -29,9 +29,9 @@ pub const MAX_WRITE_SIZE: usize = 16 * 1024 * 1024;
 
 /// Size of the buffer for reading a request from the kernel. Since the kernel may send
 /// up to `MAX_WRITE_SIZE` bytes in a write request, we use that value plus some extra space.
-const BUFFER_SIZE: usize = MAX_WRITE_SIZE + 4096;
+pub(crate) const BUFFER_SIZE: usize = MAX_WRITE_SIZE + 4096;
 
-#[derive(Default, Debug, Eq, PartialEq)]
+#[derive(Default, Debug, Clone, Copy, Eq, PartialEq)]
 /// How requests should be filtered based on the calling UID.
 pub enum SessionACL {
     /// Allow requests from any user. Corresponds to the `allow_other` mount option.
@@ -51,7 +51,7 @@ pub struct Session<FS: Filesystem> {
     /// Communication channel to the kernel driver
     pub(crate) ch: Channel,
     /// Handle to the mount.  Dropping this unmounts.
-    mount: Arc<Mutex<Option<(PathBuf, Mount)>>>,
+    pub(crate) mount: Arc<Mutex<Option<(PathBuf, Mount)>>>,
     /// Whether to restrict access to owner, root + owner, or unrestricted
     /// Used to implement `allow_root` and `auto_unmount`
     pub(crate) allowed: SessionACL,
@@ -208,7 +208,7 @@ impl SessionUnmounter {
     }
 }
 
-fn aligned_sub_buf(buf: &mut [u8], alignment: usize) -> &mut [u8] {
+pub(crate) fn aligned_sub_buf(buf: &mut [u8], alignment: usize) -> &mut [u8] {
     let off = alignment - (buf.as_ptr() as usize) % alignment;
     if off == alignment {
         buf

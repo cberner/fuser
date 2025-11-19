@@ -40,6 +40,7 @@ pub use reply::{
 };
 pub use request::Request;
 pub use session::{BackgroundSession, Session, SessionACL, SessionUnmounter};
+pub use session_mt::{MtSession, SessionConfig};
 #[cfg(feature = "abi-7-28")]
 use std::cmp::max;
 use std::cmp::min;
@@ -53,6 +54,7 @@ mod passthrough;
 mod reply;
 mod request;
 mod session;
+mod session_mt;
 
 /// We generally support async reads
 #[cfg(not(target_os = "macos"))]
