@@ -144,7 +144,14 @@ fn main() {
                 .short('t')
                 .value_name("NUM")
                 .default_value("10")
-                .help("Maximum number of worker threads"),
+                .help("Maximum number of worker threads (1 for single-threaded mode)"),
+        )
+        .arg(
+            Arg::new("single-threaded")
+                .long("single-threaded")
+                .short('s')
+                .action(ArgAction::SetTrue)
+                .help("Run in single-threaded mode (equivalent to --threads=1)"),
         )
         .arg(
             Arg::new("clone-fd")
@@ -157,11 +164,18 @@ fn main() {
     env_logger::init();
 
     let mountpoint = matches.get_one::<String>("MOUNT_POINT").unwrap();
-    let max_threads: usize = matches
-        .get_one::<String>("threads")
-        .unwrap()
-        .parse()
-        .expect("Invalid number of threads");
+
+    // Determine number of threads
+    let max_threads: usize = if matches.get_flag("single-threaded") {
+        1
+    } else {
+        matches
+            .get_one::<String>("threads")
+            .unwrap()
+            .parse()
+            .expect("Invalid number of threads")
+    };
+
     let clone_fd = matches.get_flag("clone-fd");
 
     let mut options = vec![MountOption::RO, MountOption::FSName("hello_mt".to_string())];
@@ -172,9 +186,18 @@ fn main() {
         options.push(MountOption::AllowRoot);
     }
 
-    log::info!("Mounting multi-threaded FUSE filesystem");
+    let mode = if max_threads == 1 {
+        "single-threaded"
+    } else {
+        "multi-threaded"
+    };
+
+    log::info!("=== {} FUSE Filesystem ===", mode.to_uppercase());
+    log::info!("Mountpoint: {}", mountpoint);
+    log::info!("Mode: {}", mode);
     log::info!("Max threads: {}", max_threads);
     log::info!("Clone FD: {}", clone_fd);
+    log::info!("");
 
     // Create a regular session
     let session = Session::new(HelloFS, mountpoint, &options)
@@ -189,7 +212,7 @@ fn main() {
     let mut mt_session = MtSession::from_session(session, config)
         .expect("Failed to create multi-threaded session");
 
-    // Run the multi-threaded session loop
-    log::info!("Starting multi-threaded session loop");
+    // Run the session loop
+    log::info!("Starting {} session loop", mode);
     mt_session.run().expect("Session failed");
 }

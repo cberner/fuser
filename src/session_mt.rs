@@ -91,6 +91,11 @@ impl SessionConfig {
         }
         Ok(())
     }
+
+    /// Check if running in single-threaded mode
+    pub fn is_single_threaded(&self) -> bool {
+        self.max_threads == 1
+    }
 }
 
 /// Worker thread state
@@ -269,14 +274,19 @@ impl<FS: Filesystem + Send + Sync + 'static> MtSession<FS> {
 
     /// Run the multi-threaded session loop
     pub fn run(&mut self) -> io::Result<()> {
-        info!("Starting multi-threaded FUSE session with max {} threads", self.config.max_threads);
+        let mode = if self.config.is_single_threaded() {
+            "single-threaded"
+        } else {
+            "multi-threaded"
+        };
+        info!(
+            "Starting {} FUSE session (max {} threads)",
+            mode, self.config.max_threads
+        );
 
-        // Pre-create all worker threads so they can all wait on receive()
-        // This is essential for true parallelism - multiple threads must be
-        // waiting in receive() to handle concurrent requests from the kernel
-        for _ in 0..self.config.max_threads {
-            self.start_worker()?;
-        }
+        // Start with exactly ONE worker thread, like libfuse does
+        // Additional threads will be created on-demand when all workers are busy
+        self.start_worker()?;
 
         // Wait for workers to finish
         let (lock, cvar) = &*self.state;
@@ -292,7 +302,7 @@ impl<FS: Filesystem + Send + Sync + 'static> MtSession<FS> {
             Ok(())
         };
 
-        info!("Multi-threaded FUSE session ended");
+        info!("{} FUSE session ended", mode);
         result
     }
 
@@ -350,9 +360,8 @@ impl<FS: Filesystem + Send + Sync + 'static> MtSession<FS> {
         let mut state = lock.lock().unwrap();
         state.workers.push(Worker::new(worker_id, thread));
         state.num_workers += 1;
-        state.num_available += 1;
 
-        debug!("Started worker thread {} (total: {})", worker_id, state.num_workers);
+        debug!("Worker {} started", worker_id);
         Ok(())
     }
 }
@@ -374,8 +383,6 @@ fn worker_main<FS: Filesystem + Send + Sync + 'static>(
     worker_counter: Arc<AtomicUsize>,
     master_channel: Channel,
 ) {
-    debug!("Worker {} started", worker_id);
-
     // Each worker has its own buffer to avoid contention
     let mut buffer = vec![0u8; BUFFER_SIZE];
     let (lock, cvar) = &*state;
@@ -385,21 +392,18 @@ fn worker_main<FS: Filesystem + Send + Sync + 'static>(
         {
             let state = lock.lock().unwrap();
             if state.exit {
-                debug!("Worker {} exiting due to session exit", worker_id);
+                debug!("Worker {} exiting (session exit)", worker_id);
                 break;
             }
-        }
-
-        // Mark as available before blocking on receive
-        {
-            let mut state = lock.lock().unwrap();
-            state.num_available += 1;
         }
 
         // Align buffer for fuse headers
         let buf = aligned_sub_buf(&mut buffer, std::mem::align_of::<crate::ll::fuse_abi::fuse_in_header>());
 
         // Receive request from kernel (this blocks)
+        // IMPORTANT: Do NOT increase num_available before receive() like we did before!
+        // This is the key to making dynamic thread expansion work.
+        // The thread is NOT available while blocking in receive().
         let size = match channel.receive(buf) {
             Ok(size) => size,
             Err(err) => {
@@ -410,17 +414,14 @@ fn worker_main<FS: Filesystem + Send + Sync + 'static>(
                         | EINTR // Interrupted system call, retry
                         | EAGAIN // Explicitly instructed to try again
                     ) => {
-                        // Decrease available count and continue
-                        let mut state = lock.lock().unwrap();
-                        state.num_available -= 1;
+                        // Just continue, no state change needed
                         continue;
                     }
                     Some(ENODEV) => {
                         // Device not available, exit
-                        debug!("Worker {} received ENODEV, exiting", worker_id);
+                        debug!("Worker {} exiting (ENODEV)", worker_id);
                         let mut state = lock.lock().unwrap();
                         state.exit = true;
-                        state.num_available -= 1;
                         cvar.notify_all();
                         break;
                     }
@@ -430,7 +431,6 @@ fn worker_main<FS: Filesystem + Send + Sync + 'static>(
                         let mut state = lock.lock().unwrap();
                         state.error = Some(err);
                         state.exit = true;
-                        state.num_available -= 1;
                         cvar.notify_all();
                         break;
                     }
@@ -438,10 +438,10 @@ fn worker_main<FS: Filesystem + Send + Sync + 'static>(
             }
         };
 
-        // Mark as busy after receiving
-        let should_spawn_thread = {
+        // Now that we received a request, check if we need to spawn a new thread
+        // This is done BEFORE processing to ensure new threads are available for next request
+        let (should_spawn_thread, is_forget) = {
             let mut state = lock.lock().unwrap();
-            state.num_available -= 1;
 
             // Check if we should spawn a new thread
             // Don't spawn for FORGET operations to avoid thread explosion
@@ -455,10 +455,29 @@ fn worker_main<FS: Filesystem + Send + Sync + 'static>(
                 false
             };
 
-            !is_forget
+            // For non-FORGET operations, decrease availability since we're about to process
+            if !is_forget {
+                state.num_available = state.num_available.saturating_sub(1);
+            }
+
+            // Check if we need to spawn a new thread
+            let should_spawn = !is_forget
                 && state.num_available == 0
                 && state.num_workers < config.max_threads
-                && initialized.load(Ordering::SeqCst)
+                && initialized.load(Ordering::SeqCst);
+
+            if should_spawn {
+                // Reserve the worker slot immediately to prevent race conditions
+                state.num_workers += 1;
+                debug!(
+                    "Worker {} spawning new thread (total will be: {}/{})",
+                    worker_id,
+                    state.num_workers,
+                    config.max_threads
+                );
+            }
+
+            (should_spawn, is_forget)
         };
 
         // Spawn new worker if needed (outside the lock)
@@ -513,12 +532,15 @@ fn worker_main<FS: Filesystem + Send + Sync + 'static>(
                     let (lock, _) = &*state;
                     let mut mt_state = lock.lock().unwrap();
                     mt_state.workers.push(Worker::new(new_worker_id, thread));
-                    mt_state.num_workers += 1;
-                    mt_state.num_available += 1;
-                    debug!("Spawned new worker thread {} (total: {})", new_worker_id, mt_state.num_workers);
+                    // num_workers already incremented above to prevent race condition
+                    debug!("Worker {} spawned successfully", new_worker_id);
                 }
                 Err(e) => {
                     error!("Failed to spawn worker thread {}: {}", new_worker_id, e);
+                    // Rollback the worker count increment
+                    let (lock, _) = &*state;
+                    let mut mt_state = lock.lock().unwrap();
+                    mt_state.num_workers -= 1;
                 }
             }
         }
@@ -582,19 +604,26 @@ fn worker_main<FS: Filesystem + Send + Sync + 'static>(
             std::mem::forget(temp_session);
         }
 
-        // Check for idle thread cleanup
-        // Note: availability is restored at the start of the next loop iteration
+        // After processing, restore availability (for non-FORGET operations)
         {
             let mut state = lock.lock().unwrap();
-            // Temporarily increment to check idle condition
-            let current_available = state.num_available + 1; // +1 for this thread about to become available
+            if !is_forget {
+                state.num_available += 1;
+            }
+        }
+
+        // Check for idle thread cleanup
+        {
+            let mut state = lock.lock().unwrap();
 
             if config.max_idle_threads != -1
-                && current_available > config.max_idle_threads as usize
+                && state.num_available > config.max_idle_threads as usize
                 && state.num_workers > 1
             {
-                debug!("Worker {} exiting (idle cleanup)", worker_id);
+                debug!("Worker {} exiting (idle threads: {} > max: {})",
+                       worker_id, state.num_available, config.max_idle_threads);
                 state.num_workers -= 1;
+                state.num_available -= 1;
                 break;
             }
         }
@@ -602,7 +631,6 @@ fn worker_main<FS: Filesystem + Send + Sync + 'static>(
 
     // Notify that this worker is done
     cvar.notify_all();
-    debug!("Worker {} finished", worker_id);
 }
 
 impl<FS: Filesystem> Drop for MtSession<FS> {
