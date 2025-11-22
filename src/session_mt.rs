@@ -526,40 +526,43 @@ fn worker_main<FS: Filesystem + Send + Sync + 'static>(
 
         // Process the Request
         if let Some(req) = Request::new(channel.sender(), &buf[..size]) {
-            let fs_ptr = filesystem.get();
-            let fs_value = unsafe { std::ptr::read(fs_ptr) };
+            // SAFE: FS implements Sync, so multiple &mut FS from different threads are safe
+            // because FS uses interior mutability (Mutex/RwLock) to protect its state.
+            let fs_ref = unsafe { &mut *filesystem.get() };
 
-            let temp_mount = Arc::new(Mutex::new(None));
-            let mut temp_session = Session {
-                filesystem: fs_value,
-                ch: channel.clone(),
-                mount: temp_mount,
-                allowed: allowed.clone(),
+            // Get the current state (we need a lock for proto versions)
+            let mut proto_major_value = *proto_major.lock().unwrap();
+            let mut proto_minor_value = *proto_minor.lock().unwrap();
+            let mut initialized_value = initialized.load(Ordering::Relaxed);
+            let destroyed_value = destroyed.load(Ordering::Relaxed);
+
+            // Dispatch the request with explicit context
+            req.dispatch_with_context(
+                fs_ref,
+                &allowed,
                 session_owner,
-                proto_major: *proto_major.lock().unwrap(),
-                proto_minor: *proto_minor.lock().unwrap(),
-                initialized: initialized.load(Ordering::Relaxed),
-                destroyed: destroyed.load(Ordering::Relaxed),
-            };
+                &mut proto_major_value,
+                &mut proto_minor_value,
+                &mut initialized_value,
+                destroyed_value,
+            );
 
-            req.dispatch(&mut temp_session);
-
-            let fs_back = unsafe { std::ptr::read(&temp_session.filesystem as *const FS) };
-            unsafe { std::ptr::write(fs_ptr, fs_back); }
-
-            // Update session state if changed
-            if temp_session.proto_major != *proto_major.lock().unwrap() {
-                *proto_major.lock().unwrap() = temp_session.proto_major;
+            // Update the shared state if it was modified during dispatch
+            {
+                let mut proto_major_lock = proto_major.lock().unwrap();
+                if proto_major_value != *proto_major_lock {
+                    *proto_major_lock = proto_major_value;
+                }
             }
-            if temp_session.proto_minor != *proto_minor.lock().unwrap() {
-                *proto_minor.lock().unwrap() = temp_session.proto_minor;
+            {
+                let mut proto_minor_lock = proto_minor.lock().unwrap();
+                if proto_minor_value != *proto_minor_lock {
+                    *proto_minor_lock = proto_minor_value;
+                }
             }
-            if temp_session.initialized != initialized.load(Ordering::Relaxed) {
-                initialized.store(temp_session.initialized, Ordering::SeqCst);
+            if initialized_value != initialized.load(Ordering::Relaxed) {
+                initialized.store(initialized_value, Ordering::SeqCst);
             }
-
-            // Prevent Drop
-            std::mem::forget(temp_session);
         }
 
         // Idle thread cleanup logic (Optional / Debounced)
