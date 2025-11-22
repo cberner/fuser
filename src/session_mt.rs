@@ -8,7 +8,7 @@ use log::{debug, error, info, warn};
 use std::cell::UnsafeCell;
 use std::io;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 
@@ -185,8 +185,8 @@ pub struct MtSession<FS: Filesystem> {
     channel: Channel,
     mount: Arc<Mutex<Option<(PathBuf, Mount)>>>,
     session_owner: u32,
-    proto_major: Arc<Mutex<u32>>,
-    proto_minor: Arc<Mutex<u32>>,
+    proto_major: Arc<AtomicU32>,
+    proto_minor: Arc<AtomicU32>,
     allowed: SessionACL,
     initialized: Arc<AtomicBool>,
     destroyed: Arc<AtomicBool>,
@@ -272,8 +272,8 @@ impl<FS: Filesystem + Send + Sync + 'static> MtSession<FS> {
             channel,
             mount,
             session_owner,
-            proto_major: Arc::new(Mutex::new(proto_major)),
-            proto_minor: Arc::new(Mutex::new(proto_minor)),
+            proto_major: Arc::new(AtomicU32::new(proto_major)),
+            proto_minor: Arc::new(AtomicU32::new(proto_minor)),
             allowed,
             initialized: Arc::new(AtomicBool::new(initialized)),
             destroyed: Arc::new(AtomicBool::new(false)),
@@ -319,7 +319,7 @@ impl<FS: Filesystem + Send + Sync + 'static> MtSession<FS> {
 
     /// Start a new worker thread
     fn start_worker(&self) -> io::Result<()> {
-        let worker_id = self.worker_counter.fetch_add(1, Ordering::SeqCst);
+        let worker_id = self.worker_counter.fetch_add(1, Ordering::Relaxed);
 
         // Increment total count BEFORE spawning to reserve the slot
         self.state.num_workers.fetch_add(1, Ordering::SeqCst);
@@ -395,8 +395,8 @@ fn worker_main<FS: Filesystem + Send + Sync + 'static>(
     filesystem: Arc<SyncUnsafeCell<FS>>,
     channel: Channel,
     session_owner: u32,
-    proto_major: Arc<Mutex<u32>>,
-    proto_minor: Arc<Mutex<u32>>,
+    proto_major: Arc<AtomicU32>,
+    proto_minor: Arc<AtomicU32>,
     allowed: SessionACL,
     initialized: Arc<AtomicBool>,
     destroyed: Arc<AtomicBool>,
@@ -530,9 +530,9 @@ fn worker_main<FS: Filesystem + Send + Sync + 'static>(
             // because FS uses interior mutability (Mutex/RwLock) to protect its state.
             let fs_ref = unsafe { &mut *filesystem.get() };
 
-            // Get the current state (we need a lock for proto versions)
-            let mut proto_major_value = *proto_major.lock().unwrap();
-            let mut proto_minor_value = *proto_minor.lock().unwrap();
+            // Get the current state
+            let mut proto_major_value = proto_major.load(Ordering::Relaxed);
+            let mut proto_minor_value = proto_minor.load(Ordering::Relaxed);
             let mut initialized_value = initialized.load(Ordering::Relaxed);
             let destroyed_value = destroyed.load(Ordering::Relaxed);
 
@@ -548,18 +548,8 @@ fn worker_main<FS: Filesystem + Send + Sync + 'static>(
             );
 
             // Update the shared state if it was modified during dispatch
-            {
-                let mut proto_major_lock = proto_major.lock().unwrap();
-                if proto_major_value != *proto_major_lock {
-                    *proto_major_lock = proto_major_value;
-                }
-            }
-            {
-                let mut proto_minor_lock = proto_minor.lock().unwrap();
-                if proto_minor_value != *proto_minor_lock {
-                    *proto_minor_lock = proto_minor_value;
-                }
-            }
+            proto_major.store(proto_major_value, Ordering::Relaxed);
+            proto_minor.store(proto_minor_value, Ordering::Relaxed);
             if initialized_value != initialized.load(Ordering::Relaxed) {
                 initialized.store(initialized_value, Ordering::SeqCst);
             }
