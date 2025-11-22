@@ -7,7 +7,7 @@ use libc::ENOENT;
 use std::ffi::OsStr;
 use std::time::{Duration, UNIX_EPOCH};
 
-const TTL: Duration = Duration::from_secs(0); // 1 second
+const TTL: Duration = Duration::from_secs(1); // 1 second
 
 const HELLO_DIR_ATTR: FileAttr = FileAttr {
     ino: 1,
@@ -59,8 +59,6 @@ impl Filesystem for HelloFS {
     }
 
     fn getattr(&mut self, _req: &Request, ino: u64, _fh: Option<u64>, reply: ReplyAttr) {
-        // Optional: Add artificial delay to simulate I/O work
-        std::thread::sleep(Duration::from_micros(200));
         match ino {
             1 => reply.attr(&TTL, &HELLO_DIR_ATTR),
             2 => reply.attr(&TTL, &HELLO_TXT_ATTR),
