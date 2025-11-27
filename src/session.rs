@@ -159,16 +159,22 @@ impl<FS: Filesystem> Session<FS> {
         }
     }
 
-    /// Wrap an existing /dev/fuse file descriptor from a cloned FUSE fd.
-    /// This is for use with FUSE_DEV_IOC_CLONE multi-reader setups where
-    /// the primary session has already completed the INIT handshake.
+    /// Create a session from a cloned FUSE file descriptor for multi-reader setups.
     ///
-    /// IMPORTANT: This should only be used with fds cloned from an already-initialized
-    /// FUSE mount, as this session skips the INIT protocol.
+    /// Use this with fds obtained from [`Channel::clone_fd()`] when the primary
+    /// session has already completed the FUSE INIT handshake.
     ///
-    /// The `reply_sender` parameter is required for cloned fds because FUSE replies
-    /// must be written to the ORIGINAL /dev/fuse fd, not the cloned fd. Pass the
-    /// ChannelSender from the primary session's channel().sender().
+    /// # Arguments
+    /// * `filesystem` - The filesystem implementation to handle requests
+    /// * `fd` - A cloned fd from [`Channel::clone_fd()`]
+    /// * `reply_sender` - The [`ChannelSender`] from the primary session's
+    ///   `channel().sender()`. Required because FUSE replies must be written
+    ///   to the original fd, not the cloned fd.
+    /// * `acl` - Access control settings for the session
+    ///
+    /// # Important
+    /// This session skips the FUSE INIT protocol. Using this with an uninitialized
+    /// fd will cause all requests to fail with EIO.
     pub fn from_fd_initialized(
         filesystem: FS,
         fd: OwnedFd,
