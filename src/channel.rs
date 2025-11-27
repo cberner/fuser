@@ -10,15 +10,13 @@ use std::{
 use crate::dev_fuse::DevFuse;
 use crate::passthrough::BackingId;
 
-/// FUSE_DEV_IOC_CLONE ioctl number: _IOR(229, 0, uint32_t)
-/// This clones a /dev/fuse file descriptor for multi-threaded reading.
-/// See: https://www.kernel.org/doc/Documentation/filesystems/fuse.txt
+/// FUSE_DEV_IOC_CLONE ioctl number for cloning /dev/fuse file descriptors.
 ///
-/// Note: The ioctl request type varies by platform (i32 on most Linux, c_ulong on some).
-/// Using nix::ioctl_write_ptr! would be cleaner but we keep it simple with raw libc.
-#[cfg(target_env = "musl")]
+/// Calculated as `_IOR(229, 0, uint32_t)` = `0x80000000 | (4 << 16) | (229 << 8) | 0`
+/// See: https://www.kernel.org/doc/Documentation/filesystems/fuse.txt
+#[cfg(all(target_os = "linux", target_env = "musl"))]
 const FUSE_DEV_IOC_CLONE: libc::c_int = 0x8004e500u32 as libc::c_int;
-#[cfg(not(target_env = "musl"))]
+#[cfg(all(target_os = "linux", not(target_env = "musl")))]
 const FUSE_DEV_IOC_CLONE: libc::c_ulong = 0x8004e500;
 
 /// A raw communication channel to the FUSE kernel driver
@@ -53,35 +51,34 @@ impl Channel {
         ChannelSender(self.0.clone())
     }
 
-    /// Clone the FUSE file descriptor using FUSE_DEV_IOC_CLONE ioctl.
-    /// This creates a new fd that can independently read FUSE requests,
-    /// enabling multi-threaded request processing.
+    /// Clone the FUSE file descriptor using `FUSE_DEV_IOC_CLONE` ioctl.
     ///
-    /// The cloned fd shares the same FUSE connection but can be used by
-    /// a separate thread to read and process requests in parallel.
+    /// Creates a new fd that can independently read FUSE requests, enabling
+    /// multi-threaded request processing. The cloned fd shares the same FUSE
+    /// connection but can be used by a separate thread to read requests in parallel.
     ///
-    /// # Safety
-    /// The cloned fd is valid for reading FUSE requests but responses
-    /// must still be written to the original fd (via ChannelSender).
+    /// # Platform Support
+    /// This is only available on Linux. On other platforms, this method is not compiled.
     ///
     /// # Errors
-    /// Returns an error if the ioctl fails (e.g., kernel doesn't support
-    /// FUSE_DEV_IOC_CLONE, or /dev/fuse can't be opened).
+    /// Returns an error if:
+    /// - `/dev/fuse` cannot be opened
+    /// - The `FUSE_DEV_IOC_CLONE` ioctl fails (e.g., kernel doesn't support it)
+    #[cfg(target_os = "linux")]
     pub fn clone_fd(&self) -> io::Result<OwnedFd> {
         // Open a new /dev/fuse fd
-        let new_fd = unsafe {
-            let fd = libc::open(c"/dev/fuse".as_ptr() as *const libc::c_char, libc::O_RDWR);
-            if fd < 0 {
-                return Err(io::Error::last_os_error());
-            }
-            OwnedFd::from_raw_fd(fd)
-        };
+        // SAFETY: libc::open is safe to call with a valid path
+        let fd = unsafe { libc::open(c"/dev/fuse".as_ptr() as *const libc::c_char, libc::O_RDWR) };
+        if fd < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: fd is valid, we just opened it successfully
+        let new_fd = unsafe { OwnedFd::from_raw_fd(fd) };
 
-        // Clone the session onto the new fd using ioctl
+        // Clone the session onto the new fd
         let original_fd = self.0.as_raw_fd() as u32;
-        let ret = unsafe {
-            libc::ioctl(new_fd.as_raw_fd(), FUSE_DEV_IOC_CLONE, &original_fd as *const u32)
-        };
+        // SAFETY: ioctl with FUSE_DEV_IOC_CLONE expects a pointer to u32 containing the source fd
+        let ret = unsafe { libc::ioctl(new_fd.as_raw_fd(), FUSE_DEV_IOC_CLONE, &original_fd) };
         if ret < 0 {
             return Err(io::Error::last_os_error());
         }
@@ -89,8 +86,9 @@ impl Channel {
         Ok(new_fd)
     }
 
-    /// Create a new Channel from an owned fd.
-    /// This is useful for creating reader channels from cloned fds.
+    /// Create a new Channel from an owned file descriptor.
+    ///
+    /// This is useful for creating reader channels from cloned fds obtained via [`clone_fd`](Self::clone_fd).
     pub fn from_fd(fd: OwnedFd) -> Self {
         Self(Arc::new(fd.into()))
     }
