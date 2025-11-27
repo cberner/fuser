@@ -85,7 +85,8 @@ pub use crate::session::SessionUnmounter;
 
 mod access_flags;
 mod bsd_file_flags;
-mod channel;
+/// Low-level FUSE communication channel
+pub mod channel;
 mod dev_fuse;
 /// Experimental APIs
 #[cfg(feature = "experimental")]

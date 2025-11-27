@@ -354,6 +354,13 @@ impl<FS: Filesystem> Session<FS> {
     pub fn notifier(&self) -> Notifier {
         Notifier::new(self.ch.sender())
     }
+
+    /// Returns a reference to the underlying FUSE channel.
+    /// This can be used to clone the FUSE file descriptor for multi-threaded
+    /// request processing.
+    pub fn channel(&self) -> &Channel {
+        &self.ch
+    }
 }
 
 #[derive(Debug)]
