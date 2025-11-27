@@ -155,6 +155,27 @@ impl<FS: Filesystem> Session<FS> {
         }
     }
 
+    /// Wrap an existing /dev/fuse file descriptor from a cloned FUSE fd.
+    /// This is for use with FUSE_DEV_IOC_CLONE multi-reader setups where
+    /// the primary session has already completed the INIT handshake.
+    ///
+    /// IMPORTANT: This should only be used with fds cloned from an already-initialized
+    /// FUSE mount, as this session skips the INIT protocol.
+    pub fn from_fd_initialized(filesystem: FS, fd: OwnedFd, acl: SessionACL) -> Self {
+        let ch = Channel::new(Arc::new(fd.into()));
+        Session {
+            filesystem,
+            ch,
+            mount: Arc::new(Mutex::new(None)),
+            allowed: acl,
+            session_owner: geteuid().as_raw(),
+            proto_major: abi::FUSE_KERNEL_VERSION,
+            proto_minor: abi::FUSE_KERNEL_MINOR_VERSION,
+            initialized: true,  // Skip INIT - caller guarantees mount is initialized
+            destroyed: false,
+        }
+    }
+
     /// Run the session loop that receives kernel requests and dispatches them to method
     /// calls into the filesystem. This read-dispatch-loop is non-concurrent to prevent
     /// having multiple buffers (which take up much memory), but the filesystem methods
