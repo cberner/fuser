@@ -84,12 +84,23 @@ fn fuse_mount_pure(
         return fuse_mount_fusermount(mountpoint, options);
     }
 
-    let res = fuse_mount_sys(mountpoint, options)?;
-    match res {
-        Some(file) => Ok((file, None)),
-        _ => {
-            // Retry
-            fuse_mount_fusermount(mountpoint, options)
+    // The direct mount path is currently implemented only for Linux and macOS.
+    // Other supported Unix targets (such as the BSDs) rely on the setuid
+    // mount helper, which mirrors libfuse's approach.
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        return fuse_mount_fusermount(mountpoint, options);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        let res = fuse_mount_sys(mountpoint, options)?;
+        match res {
+            Some(file) => Ok((file, None)),
+            _ => {
+                // Retry
+                fuse_mount_fusermount(mountpoint, options)
+            }
         }
     }
 }
@@ -129,6 +140,10 @@ fn detect_fusermount_bin() -> String {
     for name in [
         FUSERMOUNT3_BIN.to_string(),
         FUSERMOUNT_BIN.to_string(),
+        "mount_fusefs".to_string(),
+        format!("/sbin/{FUSERMOUNT3_BIN}"),
+        format!("/sbin/{FUSERMOUNT_BIN}"),
+        "/sbin/mount_fusefs".to_string(),
         format!("/bin/{FUSERMOUNT3_BIN}"),
         format!("/bin/{FUSERMOUNT_BIN}"),
     ]
@@ -319,6 +334,7 @@ fn fuse_mount_fusermount(
 }
 
 // If returned option is none. Then fusermount binary should be tried
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn fuse_mount_sys(mountpoint: &OsStr, options: &[MountOption]) -> Result<Option<File>, Error> {
     let fuse_device_name = "/dev/fuse";
 
@@ -451,6 +467,11 @@ fn fuse_mount_sys(mountpoint: &OsStr, options: &[MountOption]) -> Result<Option<
     Ok(Some(file))
 }
 
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn fuse_mount_sys(_mountpoint: &OsStr, _options: &[MountOption]) -> Result<Option<File>, Error> {
+    Ok(None)
+}
+
 #[derive(PartialEq)]
 pub enum MountOptionGroup {
     KernelOption,
@@ -518,6 +539,31 @@ pub fn option_to_flag(option: &MountOption) -> libc::c_int {
         MountOption::NoAtime => libc::MNT_NOATIME,
         MountOption::Async => 0,
         MountOption::Sync => libc::MNT_SYNCHRONOUS,
+        _ => unreachable!(),
+    }
+}
+
+#[cfg(any(
+    target_os = "freebsd",
+    target_os = "dragonfly",
+    target_os = "openbsd",
+    target_os = "netbsd"
+))]
+pub fn option_to_flag(option: &MountOption) -> libc::c_int {
+    match option {
+        MountOption::Dev => 0,
+        MountOption::NoDev => libc::MNT_NODEV,
+        MountOption::Suid => 0,
+        MountOption::NoSuid => libc::MNT_NOSUID,
+        MountOption::RW => 0,
+        MountOption::RO => libc::MNT_RDONLY,
+        MountOption::Exec => 0,
+        MountOption::NoExec => libc::MNT_NOEXEC,
+        MountOption::Atime => 0,
+        MountOption::NoAtime => libc::MNT_NOATIME,
+        MountOption::Async => 0,
+        MountOption::Sync => libc::MNT_SYNCHRONOUS,
+        MountOption::DirSync => libc::MNT_SYNCHRONOUS,
         _ => unreachable!(),
     }
 }

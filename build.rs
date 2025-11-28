@@ -8,7 +8,11 @@ fn main() {
     let target_os =
         std::env::var("CARGO_CFG_TARGET_OS").expect("CARGO_CFG_TARGET_OS should be set");
 
-    if target_os == "linux" && cfg!(not(feature = "libfuse")) {
+    if matches!(
+        target_os.as_str(),
+        "linux" | "freebsd" | "dragonfly" | "openbsd" | "netbsd"
+    ) && cfg!(not(feature = "libfuse"))
+    {
         println!("cargo:rustc-cfg=fuser_mount_impl=\"pure-rust\"");
     } else if target_os == "macos" {
         pkg_config::Config::new()
