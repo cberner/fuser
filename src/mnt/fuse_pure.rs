@@ -26,6 +26,7 @@ use std::{mem, ptr};
 const FUSERMOUNT_BIN: &str = "fusermount";
 const FUSERMOUNT3_BIN: &str = "fusermount3";
 const FUSERMOUNT_COMM_ENV: &str = "_FUSE_COMMFD";
+const MOUNT_FUSEFS_BIN: &str = "mount_fusefs";
 
 #[derive(Debug)]
 pub struct Mount {
@@ -140,10 +141,10 @@ fn detect_fusermount_bin() -> String {
     for name in [
         FUSERMOUNT3_BIN.to_string(),
         FUSERMOUNT_BIN.to_string(),
-        "mount_fusefs".to_string(),
+        MOUNT_FUSEFS_BIN.to_string(),
         format!("/sbin/{FUSERMOUNT3_BIN}"),
         format!("/sbin/{FUSERMOUNT_BIN}"),
-        "/sbin/mount_fusefs".to_string(),
+        format!("/sbin/{MOUNT_FUSEFS_BIN}"),
         format!("/bin/{FUSERMOUNT3_BIN}"),
         format!("/bin/{FUSERMOUNT_BIN}"),
     ]
