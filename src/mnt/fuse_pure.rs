@@ -12,7 +12,14 @@ use libc::c_int;
 use log::{debug, error};
 use std::ffi::{CStr, CString, OsStr};
 use std::fs::File;
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(any(
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "dragonfly",
+    target_os = "openbsd",
+    target_os = "netbsd",
+))]
 use std::fs::OpenOptions;
 use std::io;
 use std::io::{Error, ErrorKind, Read};
@@ -268,13 +275,19 @@ fn fuse_mount_fusermount(
     mountpoint: &OsStr,
     options: &[MountOption],
 ) -> Result<(File, Option<UnixStream>), Error> {
+    let fusermount_bin = detect_fusermount_bin();
+
+    if fusermount_bin.ends_with(MOUNT_FUSEFS_BIN) {
+        return fuse_mount_mount_fusefs(&fusermount_bin, mountpoint, options);
+    }
+
     let (child_socket, receive_socket) = UnixStream::pair()?;
 
     unsafe {
         libc::fcntl(child_socket.as_raw_fd(), libc::F_SETFD, 0);
     }
 
-    let mut builder = Command::new(detect_fusermount_bin());
+    let mut builder = Command::new(&fusermount_bin);
     builder.stdout(Stdio::piped()).stderr(Stdio::piped());
     if !options.is_empty() {
         builder.arg("-o");
@@ -345,6 +358,43 @@ fn fuse_mount_fusermount(
     }
 
     Ok((file, receive_socket))
+}
+
+fn fuse_mount_mount_fusefs(
+    fusermount_bin: &str,
+    mountpoint: &OsStr,
+    options: &[MountOption],
+) -> Result<(File, Option<UnixStream>), Error> {
+    let fuse_device = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/fuse")?;
+
+    let mut builder = Command::new(fusermount_bin);
+    builder.stdout(Stdio::piped()).stderr(Stdio::piped());
+    if !options.is_empty() {
+        builder.arg("-o");
+        let options_strs: Vec<String> = options.iter().map(option_to_string).collect();
+        builder.arg(options_strs.join(","));
+    }
+
+    builder
+        .arg(fuse_device.as_raw_fd().to_string())
+        .arg(mountpoint);
+
+    let output = builder.output()?;
+    if !output.status.success() {
+        return Err(io::Error::new(
+            ErrorKind::Other,
+            String::from_utf8_lossy(&output.stderr).to_string(),
+        ));
+    }
+
+    unsafe {
+        libc::fcntl(fuse_device.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC);
+    }
+
+    Ok((fuse_device, None))
 }
 
 // If returned option is none. Then fusermount binary should be tried
@@ -482,10 +532,12 @@ fn fuse_mount_sys(mountpoint: &OsStr, options: &[MountOption]) -> Result<Option<
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[allow(dead_code)]
 fn fuse_mount_sys(_mountpoint: &OsStr, _options: &[MountOption]) -> Result<Option<File>, Error> {
     Ok(None)
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[derive(PartialEq)]
 pub enum MountOptionGroup {
     KernelOption,
@@ -493,6 +545,7 @@ pub enum MountOptionGroup {
     Fusermount,
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub fn option_group(option: &MountOption) -> MountOptionGroup {
     match option {
         MountOption::FSName(_) => MountOptionGroup::Fusermount,
