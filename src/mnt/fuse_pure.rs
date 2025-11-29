@@ -11,10 +11,13 @@ use super::mount_options::{MountOption, option_to_string};
 use libc::c_int;
 use log::{debug, error};
 use std::ffi::{CStr, CString, OsStr};
-use std::fs::{File, OpenOptions};
+use std::fs::File;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use std::fs::OpenOptions;
 use std::io;
 use std::io::{Error, ErrorKind, Read};
 use std::os::unix::ffi::OsStrExt;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::os::unix::net::UnixStream;
@@ -27,6 +30,16 @@ const FUSERMOUNT_BIN: &str = "fusermount";
 const FUSERMOUNT3_BIN: &str = "fusermount3";
 const FUSERMOUNT_COMM_ENV: &str = "_FUSE_COMMFD";
 const MOUNT_FUSEFS_BIN: &str = "mount_fusefs";
+
+#[cfg(target_os = "freebsd")]
+const BSD_MNT_NODEV: libc::c_int = 0x0000_0010;
+#[cfg(any(
+    target_os = "dragonfly",
+    target_os = "macos",
+    target_os = "netbsd",
+    target_os = "openbsd",
+))]
+const BSD_MNT_NODEV: libc::c_int = libc::MNT_NODEV;
 
 #[derive(Debug)]
 pub struct Mount {
@@ -529,7 +542,7 @@ pub fn option_to_flag(option: &MountOption) -> libc::c_ulong {
 pub fn option_to_flag(option: &MountOption) -> libc::c_int {
     match option {
         MountOption::Dev => 0, // There is no option for dev. It's the absence of NoDev
-        MountOption::NoDev => libc::MNT_NODEV,
+        MountOption::NoDev => BSD_MNT_NODEV,
         MountOption::Suid => 0,
         MountOption::NoSuid => libc::MNT_NOSUID,
         MountOption::RW => 0,
@@ -553,7 +566,7 @@ pub fn option_to_flag(option: &MountOption) -> libc::c_int {
 pub fn option_to_flag(option: &MountOption) -> libc::c_int {
     match option {
         MountOption::Dev => 0,
-        MountOption::NoDev => libc::MNT_NODEV,
+        MountOption::NoDev => BSD_MNT_NODEV,
         MountOption::Suid => 0,
         MountOption::NoSuid => libc::MNT_NOSUID,
         MountOption::RW => 0,
