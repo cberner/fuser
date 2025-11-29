@@ -38,8 +38,10 @@ const FUSERMOUNT3_BIN: &str = "fusermount3";
 const FUSERMOUNT_COMM_ENV: &str = "_FUSE_COMMFD";
 const MOUNT_FUSEFS_BIN: &str = "mount_fusefs";
 
+#[cfg_attr(target_os = "freebsd", allow(dead_code))]
 #[cfg(target_os = "freebsd")]
 const BSD_MNT_NODEV: libc::c_int = 0x0000_0010;
+#[cfg_attr(target_os = "freebsd", allow(dead_code))]
 #[cfg(any(
     target_os = "dragonfly",
     target_os = "macos",
@@ -370,6 +372,20 @@ fn fuse_mount_mount_fusefs(
         .write(true)
         .open("/dev/fuse")?;
 
+    // Ensure the file descriptor is preserved across the helper exec.
+    let current_flags = unsafe { libc::fcntl(fuse_device.as_raw_fd(), libc::F_GETFD) };
+    if current_flags == -1 {
+        return Err(io::Error::last_os_error());
+    }
+
+    if current_flags & libc::FD_CLOEXEC != 0 {
+        let cleared = current_flags & !libc::FD_CLOEXEC;
+        let ret = unsafe { libc::fcntl(fuse_device.as_raw_fd(), libc::F_SETFD, cleared) };
+        if ret == -1 {
+            return Err(io::Error::last_os_error());
+        }
+    }
+
     let mut builder = Command::new(fusermount_bin);
     builder.stdout(Stdio::piped()).stderr(Stdio::piped());
     if !options.is_empty() {
@@ -610,6 +626,15 @@ pub fn option_to_flag(option: &MountOption) -> libc::c_int {
     }
 }
 
+#[cfg_attr(
+    any(
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "openbsd",
+        target_os = "netbsd"
+    ),
+    allow(dead_code)
+)]
 #[cfg(any(
     target_os = "freebsd",
     target_os = "dragonfly",
