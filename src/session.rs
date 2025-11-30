@@ -88,8 +88,6 @@ pub struct Session<FS: Filesystem> {
     pub(crate) proto_version: Option<Version>,
     /// True if the filesystem was destroyed (destroy operation done)
     pub(crate) destroyed: bool,
-    /// Optional sender for replies (used with cloned fds for multi-reader setups)
-    reply_sender: Option<ChannelSender>,
 }
 
 impl<FS: Filesystem> AsFd for Session<FS> {
@@ -139,7 +137,6 @@ impl<FS: Filesystem> Session<FS> {
             session_owner: geteuid(),
             proto_version: None,
             destroyed: false,
-            reply_sender: None,
         })
     }
 
@@ -155,7 +152,6 @@ impl<FS: Filesystem> Session<FS> {
             session_owner: geteuid(),
             proto_version: None,
             destroyed: false,
-            reply_sender: None,
         }
     }
 
@@ -167,18 +163,17 @@ impl<FS: Filesystem> Session<FS> {
     /// # Arguments
     /// * `filesystem` - The filesystem implementation to handle requests
     /// * `fd` - A cloned fd from [`Channel::clone_fd()`]
-    /// * `reply_sender` - The [`ChannelSender`] from the primary session's
-    ///   `channel().sender()`. Required because FUSE replies must be written
-    ///   to the original fd, not the cloned fd.
     /// * `acl` - Access control settings for the session
     ///
     /// # Important
     /// This session skips the FUSE INIT protocol. Using this with an uninitialized
     /// fd will cause all requests to fail with EIO.
+    ///
+    /// Each cloned fd handles its own request/response pairs - the FUSE kernel
+    /// requires that the fd which reads a request is the same fd that sends the response.
     pub fn from_fd_initialized(
         filesystem: FS,
         fd: OwnedFd,
-        reply_sender: ChannelSender,
         acl: SessionACL,
     ) -> Self {
         let ch = Channel::new(Arc::new(fd.into()));
@@ -192,7 +187,6 @@ impl<FS: Filesystem> Session<FS> {
             proto_minor: abi::FUSE_KERNEL_MINOR_VERSION,
             initialized: true,  // Skip INIT - caller guarantees mount is initialized
             destroyed: false,
-            reply_sender: Some(reply_sender),
         }
     }
 
@@ -210,12 +204,8 @@ impl<FS: Filesystem> Session<FS> {
 
         self.handshake(buf)?;
 
-        // For multi-reader setups with cloned fds, replies must be written to the
-        // ORIGINAL fd, not the cloned fd. Use reply_sender if provided.
-        let sender = self
-            .reply_sender
-            .clone()
-            .unwrap_or_else(|| self.ch.sender());
+        // Get sender for replies - each fd (including cloned fds) handles its own request/response pairs
+        let sender = self.ch.sender();
 
         loop {
             // Read the next request from the given channel to kernel driver
