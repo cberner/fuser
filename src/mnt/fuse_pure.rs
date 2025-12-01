@@ -362,6 +362,7 @@ fn fuse_mount_fusermount(
     Ok((file, receive_socket))
 }
 
+// TODO: This method was written by Codex, and seems to work, but it would be good to audit it more thoroughly.
 fn fuse_mount_mount_fusefs(
     fusermount_bin: &str,
     mountpoint: &OsStr,
