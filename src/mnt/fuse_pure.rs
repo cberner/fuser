@@ -11,10 +11,20 @@ use super::mount_options::{MountOption, option_to_string};
 use libc::c_int;
 use log::{debug, error};
 use std::ffi::{CStr, CString, OsStr};
-use std::fs::{File, OpenOptions};
+use std::fs::File;
+#[cfg(any(
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "dragonfly",
+    target_os = "openbsd",
+    target_os = "netbsd",
+))]
+use std::fs::OpenOptions;
 use std::io;
 use std::io::{Error, ErrorKind, Read};
 use std::os::unix::ffi::OsStrExt;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::os::unix::net::UnixStream;
@@ -26,6 +36,19 @@ use std::{mem, ptr};
 const FUSERMOUNT_BIN: &str = "fusermount";
 const FUSERMOUNT3_BIN: &str = "fusermount3";
 const FUSERMOUNT_COMM_ENV: &str = "_FUSE_COMMFD";
+const MOUNT_FUSEFS_BIN: &str = "mount_fusefs";
+
+#[cfg_attr(target_os = "freebsd", allow(dead_code))]
+#[cfg(target_os = "freebsd")]
+const BSD_MNT_NODEV: libc::c_int = 0x0000_0010;
+#[cfg_attr(target_os = "freebsd", allow(dead_code))]
+#[cfg(any(
+    target_os = "dragonfly",
+    target_os = "macos",
+    target_os = "netbsd",
+    target_os = "openbsd",
+))]
+const BSD_MNT_NODEV: libc::c_int = libc::MNT_NODEV;
 
 #[derive(Debug)]
 pub struct Mount {
@@ -84,12 +107,23 @@ fn fuse_mount_pure(
         return fuse_mount_fusermount(mountpoint, options);
     }
 
-    let res = fuse_mount_sys(mountpoint, options)?;
-    match res {
-        Some(file) => Ok((file, None)),
-        _ => {
-            // Retry
-            fuse_mount_fusermount(mountpoint, options)
+    // The direct mount path is currently implemented only for Linux and macOS.
+    // Other supported Unix targets (such as the BSDs) rely on the setuid
+    // mount helper, which mirrors libfuse's approach.
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        return fuse_mount_fusermount(mountpoint, options);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        let res = fuse_mount_sys(mountpoint, options)?;
+        match res {
+            Some(file) => Ok((file, None)),
+            _ => {
+                // Retry
+                fuse_mount_fusermount(mountpoint, options)
+            }
         }
     }
 }
@@ -129,6 +163,10 @@ fn detect_fusermount_bin() -> String {
     for name in [
         FUSERMOUNT3_BIN.to_string(),
         FUSERMOUNT_BIN.to_string(),
+        MOUNT_FUSEFS_BIN.to_string(),
+        format!("/sbin/{FUSERMOUNT3_BIN}"),
+        format!("/sbin/{FUSERMOUNT_BIN}"),
+        format!("/sbin/{MOUNT_FUSEFS_BIN}"),
         format!("/bin/{FUSERMOUNT3_BIN}"),
         format!("/bin/{FUSERMOUNT_BIN}"),
     ]
@@ -239,13 +277,19 @@ fn fuse_mount_fusermount(
     mountpoint: &OsStr,
     options: &[MountOption],
 ) -> Result<(File, Option<UnixStream>), Error> {
+    let fusermount_bin = detect_fusermount_bin();
+
+    if fusermount_bin.ends_with(MOUNT_FUSEFS_BIN) {
+        return fuse_mount_mount_fusefs(&fusermount_bin, mountpoint, options);
+    }
+
     let (child_socket, receive_socket) = UnixStream::pair()?;
 
     unsafe {
         libc::fcntl(child_socket.as_raw_fd(), libc::F_SETFD, 0);
     }
 
-    let mut builder = Command::new(detect_fusermount_bin());
+    let mut builder = Command::new(&fusermount_bin);
     builder.stdout(Stdio::piped()).stderr(Stdio::piped());
     if !options.is_empty() {
         builder.arg("-o");
@@ -318,7 +362,59 @@ fn fuse_mount_fusermount(
     Ok((file, receive_socket))
 }
 
+fn fuse_mount_mount_fusefs(
+    fusermount_bin: &str,
+    mountpoint: &OsStr,
+    options: &[MountOption],
+) -> Result<(File, Option<UnixStream>), Error> {
+    let fuse_device = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/fuse")?;
+
+    // Ensure the file descriptor is preserved across the helper exec.
+    let current_flags = unsafe { libc::fcntl(fuse_device.as_raw_fd(), libc::F_GETFD) };
+    if current_flags == -1 {
+        return Err(io::Error::last_os_error());
+    }
+
+    if current_flags & libc::FD_CLOEXEC != 0 {
+        let cleared = current_flags & !libc::FD_CLOEXEC;
+        let ret = unsafe { libc::fcntl(fuse_device.as_raw_fd(), libc::F_SETFD, cleared) };
+        if ret == -1 {
+            return Err(io::Error::last_os_error());
+        }
+    }
+
+    let mut builder = Command::new(fusermount_bin);
+    builder.stdout(Stdio::piped()).stderr(Stdio::piped());
+    if !options.is_empty() {
+        builder.arg("-o");
+        let options_strs: Vec<String> = options.iter().map(option_to_string).collect();
+        builder.arg(options_strs.join(","));
+    }
+
+    builder
+        .arg(fuse_device.as_raw_fd().to_string())
+        .arg(mountpoint);
+
+    let output = builder.output()?;
+    if !output.status.success() {
+        return Err(io::Error::new(
+            ErrorKind::Other,
+            String::from_utf8_lossy(&output.stderr).to_string(),
+        ));
+    }
+
+    unsafe {
+        libc::fcntl(fuse_device.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC);
+    }
+
+    Ok((fuse_device, None))
+}
+
 // If returned option is none. Then fusermount binary should be tried
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn fuse_mount_sys(mountpoint: &OsStr, options: &[MountOption]) -> Result<Option<File>, Error> {
     let fuse_device_name = "/dev/fuse";
 
@@ -451,6 +547,13 @@ fn fuse_mount_sys(mountpoint: &OsStr, options: &[MountOption]) -> Result<Option<
     Ok(Some(file))
 }
 
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[allow(dead_code)]
+fn fuse_mount_sys(_mountpoint: &OsStr, _options: &[MountOption]) -> Result<Option<File>, Error> {
+    Ok(None)
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[derive(PartialEq)]
 pub enum MountOptionGroup {
     KernelOption,
@@ -458,6 +561,7 @@ pub enum MountOptionGroup {
     Fusermount,
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub fn option_group(option: &MountOption) -> MountOptionGroup {
     match option {
         MountOption::FSName(_) => MountOptionGroup::Fusermount,
@@ -507,7 +611,7 @@ pub fn option_to_flag(option: &MountOption) -> libc::c_ulong {
 pub fn option_to_flag(option: &MountOption) -> libc::c_int {
     match option {
         MountOption::Dev => 0, // There is no option for dev. It's the absence of NoDev
-        MountOption::NoDev => libc::MNT_NODEV,
+        MountOption::NoDev => BSD_MNT_NODEV,
         MountOption::Suid => 0,
         MountOption::NoSuid => libc::MNT_NOSUID,
         MountOption::RW => 0,
@@ -518,6 +622,40 @@ pub fn option_to_flag(option: &MountOption) -> libc::c_int {
         MountOption::NoAtime => libc::MNT_NOATIME,
         MountOption::Async => 0,
         MountOption::Sync => libc::MNT_SYNCHRONOUS,
+        _ => unreachable!(),
+    }
+}
+
+#[cfg_attr(
+    any(
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "openbsd",
+        target_os = "netbsd"
+    ),
+    allow(dead_code)
+)]
+#[cfg(any(
+    target_os = "freebsd",
+    target_os = "dragonfly",
+    target_os = "openbsd",
+    target_os = "netbsd"
+))]
+pub fn option_to_flag(option: &MountOption) -> libc::c_int {
+    match option {
+        MountOption::Dev => 0,
+        MountOption::NoDev => BSD_MNT_NODEV,
+        MountOption::Suid => 0,
+        MountOption::NoSuid => libc::MNT_NOSUID,
+        MountOption::RW => 0,
+        MountOption::RO => libc::MNT_RDONLY,
+        MountOption::Exec => 0,
+        MountOption::NoExec => libc::MNT_NOEXEC,
+        MountOption::Atime => 0,
+        MountOption::NoAtime => libc::MNT_NOATIME,
+        MountOption::Async => 0,
+        MountOption::Sync => libc::MNT_SYNCHRONOUS,
+        MountOption::DirSync => libc::MNT_SYNCHRONOUS,
         _ => unreachable!(),
     }
 }
