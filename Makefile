@@ -55,3 +55,9 @@ test_passthrough:
 
 test: pre mount_tests pjdfs_tests xfstests
 	cargo test
+
+test_macos: pre
+	cargo doc --all --no-deps --features=abi-7-21
+	cargo test --all --all-targets --features=libfuse -- --skip=mnt::test::mount_unmount
+	./osx_mount_tests.sh
+	./tests/macos_pjdfs.sh
