@@ -6,7 +6,13 @@ exit_handler() {
     exit "${TEST_EXIT_STATUS:-1}"
 }
 trap exit_handler TERM
-trap 'kill $(jobs -p); exit $TEST_EXIT_STATUS' INT EXIT
+trap '
+  pids=$(jobs -p)
+  if [ -n "$pids" ]; then
+    kill $pids
+  fi
+  exit $TEST_EXIT_STATUS
+' INT EXIT
 
 export RUST_BACKTRACE=1
 
