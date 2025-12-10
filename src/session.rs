@@ -17,7 +17,9 @@ use std::thread::{self, JoinHandle};
 
 use crate::Filesystem;
 use crate::MountOption;
+use crate::UnmountOption;
 use crate::ll::fuse_abi as abi;
+use crate::mnt::unmount_options;
 use crate::request::Request;
 use crate::{channel::Channel, mnt::Mount};
 use crate::{channel::ChannelSender, notify::Notifier};
@@ -176,6 +178,26 @@ impl<FS: Filesystem> Session<FS> {
         Ok(())
     }
 
+    /// Set the unmount options
+    pub fn set_unmount_options(&mut self, options: Option<&[UnmountOption]>) -> io::Result<()> {
+        if let Some(options) = options {
+            unmount_options::check_option_conflicts(options)?;
+        }
+        let mut guard = self.mount.lock().unwrap();
+        guard.as_mut().map(|(_, mount)| {
+            mount.set_umount_flags(options);
+        });
+        Ok(())
+    }
+
+    /// Enable or disable blocking if the umount operation is busy
+    pub fn set_blocking_umount(&mut self, blocking: bool) {
+        let mut guard = self.mount.lock().unwrap();
+        guard.as_mut().map(|(_, mount)| {
+            mount.set_blocking_umount(blocking);
+        });
+    }
+
     /// Unmount the filesystem
     pub fn unmount(&mut self) {
         drop(std::mem::take(&mut *self.mount.lock().unwrap()));
@@ -205,6 +227,26 @@ impl SessionUnmounter {
     pub fn unmount(&mut self) -> io::Result<()> {
         drop(std::mem::take(&mut *self.mount.lock().unwrap()));
         Ok(())
+    }
+
+    /// Set the unmount options
+    pub fn set_unmount_options(&mut self, options: Option<&[UnmountOption]>) -> io::Result<()> {
+        if let Some(options) = options {
+            unmount_options::check_option_conflicts(options)?;
+        }
+        let mut guard = self.mount.lock().unwrap();
+        guard.as_mut().map(|(_, mount)| {
+            mount.set_umount_flags(options);
+        });
+        Ok(())
+    }
+
+    /// Enable or disable blocking if the umount operation is busy
+    pub fn set_blocking_umount(&mut self, blocking: bool) {
+        let mut guard = self.mount.lock().unwrap();
+        guard.as_mut().map(|(_, mount)| {
+            mount.set_blocking_umount(blocking);
+        });
     }
 }
 
@@ -281,6 +323,20 @@ impl BackgroundSession {
     /// Returns an object that can be used to send notifications to the kernel
     pub fn notifier(&self) -> Notifier {
         Notifier::new(self.sender.clone())
+    }
+
+    /// Set the unmount options
+    pub fn set_unmount_options(&mut self, options: Option<&[UnmountOption]>) -> io::Result<()> {
+        if let Some(options) = options {
+            unmount_options::check_option_conflicts(options)?;
+        }
+        self._mount.as_mut().unwrap().set_umount_flags(options);
+        Ok(())
+    }
+
+    /// Enable or disable blocking if the umount operation is busy
+    pub fn set_blocking_umount(&mut self, blocking: bool) {
+        self._mount.as_mut().unwrap().set_blocking_umount(blocking);
     }
 }
 

@@ -2,10 +2,13 @@ use super::fuse3_sys::{
     fuse_lowlevel_ops, fuse_session_destroy, fuse_session_fd, fuse_session_mount, fuse_session_new,
     fuse_session_unmount,
 };
-use super::{MountOption, with_fuse_args};
+use super::{MountOption, unmount_options, with_fuse_args};
+use super::UnmountOption;
 use log::warn;
+use std::ffi::CStr;
+use std::time::Duration;
 use std::{
-    ffi::{CString, c_void},
+    ffi::{CString, c_int, c_void},
     fs::File,
     io,
     os::unix::{ffi::OsStrExt, io::FromRawFd},
@@ -23,10 +26,20 @@ fn ensure_last_os_error() -> io::Error {
     }
 }
 
+fn cvt(res: i32) -> io::Result<()> {
+    if res == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
 #[derive(Debug)]
 pub struct Mount {
     fuse_session: *mut c_void,
     mountpoint: CString,
+    blocking_umount: bool,
+    umount_flags: Option<Vec<UnmountOption>>,
 }
 impl Mount {
     pub fn new(mnt: &Path, options: &[MountOption]) -> io::Result<(Arc<File>, Mount)> {
@@ -48,6 +61,8 @@ impl Mount {
             let mount = Mount {
                 fuse_session,
                 mountpoint: mnt.clone(),
+                blocking_umount: false,
+                umount_flags: None,
             };
             let result = unsafe { fuse_session_mount(mount.fuse_session, mnt.as_ptr()) };
             if result != 0 {
@@ -64,24 +79,79 @@ impl Mount {
             Ok((Arc::new(file), mount))
         })
     }
+
+    /// Enable or disable blocking if the umount operation is busy
+    pub fn set_blocking_umount(&mut self, blocking: bool) {
+        self.blocking_umount = blocking;
+    }
+
+    /// Override fuser's default umount behavior
+    pub fn set_umount_flags(&mut self, flags: Option<&[UnmountOption]>) {
+        self.umount_flags = flags.map(|f| f.to_vec());
+    }
 }
+
 impl Drop for Mount {
     fn drop(&mut self) {
-        use std::io::ErrorKind::PermissionDenied;
-
-        if let Err(err) = super::libc_umount(&self.mountpoint) {
-            // Linux always returns EPERM for non-root users.  We have to let the
-            // library go through the setuid-root "fusermount -u" to unmount.
-            if err.kind() == PermissionDenied {
-                #[cfg(target_os = "linux")]
-                unsafe {
-                    fuse_session_unmount(self.fuse_session);
-                    fuse_session_destroy(self.fuse_session);
-                    return;
-                }
-            }
+        if let Err(err) = fuse3_umount(
+            self.fuse_session,
+            &self.mountpoint,
+            self.umount_flags.as_deref(),
+            self.blocking_umount,
+        ) {
             warn!("umount failed with {err:?}");
         }
     }
 }
 unsafe impl Send for Mount {}
+
+fn fuse3_umount(
+    fuse_session: *mut c_void,
+    mountpoint: &CStr,
+    flags: Option<&[UnmountOption]>,
+    blocking: bool,
+) -> Result<(), io::Error> {
+    use std::io::ErrorKind::PermissionDenied;
+    use std::io::ErrorKind::ResourceBusy;
+    loop {
+        let result = {
+            // FIXME: Add umount fallback if linux version is <2.1.116
+            #[cfg(target_os = "linux")]
+            let res = cvt(unsafe {
+                let int_flags =
+                    unmount_options::to_unmount_syscall(flags.unwrap_or(&[UnmountOption::Detach]));
+                libc::umount2(mountpoint.as_ptr(), int_flags)
+            });
+            #[cfg(target_os = "macos")]
+            let res = cvt(unsafe {
+                let int_flags =
+                    unmount_options::to_unmount_syscall(flags.unwrap_or(&[UnmountOption::Force]));
+                libc::unmount(mountpoint.as_ptr(), int_flags)
+            });
+            #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+            let res = super::libc_umount(&self.mountpoint);
+            res
+        };
+        let error = match result {
+            Ok(()) => return Ok(()),
+            Err(e) => e,
+        };
+        // Block operation using a sleep wait until last handle is closed
+        if error.kind() == ResourceBusy && blocking {
+            std::thread::sleep(Duration::from_secs_f64(0.5));
+            continue;
+        }
+        // Linux always returns EPERM for non-root users.  We have to let the
+        // library go through the seqtuid-root "fusermount -u" to unmount.
+        #[cfg(target_os = "linux")]
+        if error.kind() == PermissionDenied {
+            break;
+        }
+        return Err(error);
+    }
+    unsafe {
+        fuse_session_unmount(fuse_session);
+        fuse_session_destroy(fuse_session);
+        return Ok(());
+    }
+}
