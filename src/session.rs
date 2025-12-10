@@ -191,7 +191,7 @@ impl<FS: Filesystem> Session<FS> {
     }
 
     /// Enable or disable blocking if the umount operation is busy
-    pub fn set_blocking_umount(&mut self, blocking: bool) {
+    pub fn set_blocking_unmount(&mut self, blocking: bool) {
         let mut guard = self.mount.lock().unwrap();
         guard.as_mut().map(|(_, mount)| {
             mount.set_blocking_umount(blocking);
@@ -242,7 +242,7 @@ impl SessionUnmounter {
     }
 
     /// Enable or disable blocking if the umount operation is busy
-    pub fn set_blocking_umount(&mut self, blocking: bool) {
+    pub fn set_blocking_unmount(&mut self, blocking: bool) {
         let mut guard = self.mount.lock().unwrap();
         guard.as_mut().map(|(_, mount)| {
             mount.set_blocking_umount(blocking);
@@ -335,7 +335,7 @@ impl BackgroundSession {
     }
 
     /// Enable or disable blocking if the umount operation is busy
-    pub fn set_blocking_umount(&mut self, blocking: bool) {
+    pub fn set_blocking_unmount(&mut self, blocking: bool) {
         self._mount.as_mut().unwrap().set_blocking_umount(blocking);
     }
 }
