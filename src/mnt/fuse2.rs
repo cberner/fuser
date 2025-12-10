@@ -87,18 +87,16 @@ fn fuse2_umount(
     use std::io::ErrorKind::PermissionDenied;
     use std::io::ErrorKind::ResourceBusy;
     loop {
+        let flags = flags.unwrap_or(&[]);
+        let int_flags = unmount_options::to_unmount_syscall(flags);
         let result = {
             // FIXME: Add umount fallback if linux version is <2.1.116
             #[cfg(target_os = "linux")]
             let res = cvt(unsafe {
-                let int_flags =
-                    unmount_options::to_unmount_syscall(flags.unwrap_or(&[UnmountOption::Detach]));
                 libc::umount2(mountpoint.as_ptr(), int_flags)
             });
             #[cfg(target_os = "macos")]
             let res = cvt(unsafe {
-                let int_flags =
-                    unmount_options::to_unmount_syscall(flags.unwrap_or(&[UnmountOption::Force]));
                 libc::unmount(mountpoint.as_ptr(), int_flags)
             });
             #[cfg(not(any(target_os = "linux", target_os = "macos")))]

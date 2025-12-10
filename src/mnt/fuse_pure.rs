@@ -157,13 +157,7 @@ fn fuse_unmount_pure(
 ) -> Result<(), io::Error> {
     use std::io::ErrorKind::PermissionDenied;
     use std::io::ErrorKind::ResourceBusy;
-    let flags = {
-        #[cfg(target_os = "linux")]
-        let res = flags.unwrap_or(&[UnmountOption::Detach]);
-        #[cfg(target_os = "macos")]
-        let res = flags.unwrap_or(&[UnmountOption::Force]);
-        res
-    };
+    let flags = flags.unwrap_or(&[]);
     let int_flags = unmount_options::to_unmount_syscall(flags);
     loop {
         let result = {

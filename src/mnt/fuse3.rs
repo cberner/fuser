@@ -1,9 +1,9 @@
+use super::UnmountOption;
 use super::fuse3_sys::{
     fuse_lowlevel_ops, fuse_session_destroy, fuse_session_fd, fuse_session_mount, fuse_session_new,
     fuse_session_unmount,
 };
 use super::{MountOption, unmount_options, with_fuse_args};
-use super::UnmountOption;
 use log::warn;
 use std::ffi::CStr;
 use std::time::Duration;
@@ -114,18 +114,17 @@ fn fuse3_umount(
     use std::io::ErrorKind::PermissionDenied;
     use std::io::ErrorKind::ResourceBusy;
     loop {
+        let flags = flags.unwrap_or(&[]);
         let result = {
             // FIXME: Add umount fallback if linux version is <2.1.116
             #[cfg(target_os = "linux")]
             let res = cvt(unsafe {
-                let int_flags =
-                    unmount_options::to_unmount_syscall(flags.unwrap_or(&[UnmountOption::Detach]));
+                let int_flags = unmount_options::to_unmount_syscall(flags);
                 libc::umount2(mountpoint.as_ptr(), int_flags)
             });
             #[cfg(target_os = "macos")]
             let res = cvt(unsafe {
-                let int_flags =
-                    unmount_options::to_unmount_syscall(flags.unwrap_or(&[UnmountOption::Force]));
+                let int_flags = unmount_options::to_unmount_syscall(flags);
                 libc::unmount(mountpoint.as_ptr(), int_flags)
             });
             #[cfg(not(any(target_os = "linux", target_os = "macos")))]
