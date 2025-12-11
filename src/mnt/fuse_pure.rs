@@ -142,6 +142,7 @@ fn fuse_mount_pure(
     }
 }
 
+#[cfg_attr(not(any(target_os = "linux", target_os = "macos")), allow(dead_code))]
 fn cvt(res: i32) -> io::Result<()> {
     if res == 0 {
         Ok(())
@@ -159,6 +160,7 @@ fn fuse_unmount_pure(
     use std::io::ErrorKind::PermissionDenied;
     use std::io::ErrorKind::ResourceBusy;
     let flags = flags.unwrap_or(&[]);
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     let int_flags = unmount_options::to_unmount_syscall(flags);
     loop {
         let result = {
