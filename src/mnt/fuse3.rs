@@ -111,6 +111,7 @@ fn fuse3_umount(
     flags: Option<&[UnmountOption]>,
     blocking: bool,
 ) -> Result<(), io::Error> {
+    #[cfg(target_os = "linux")]
     use std::io::ErrorKind::PermissionDenied;
     use std::io::ErrorKind::ResourceBusy;
     loop {
@@ -128,7 +129,7 @@ fn fuse3_umount(
                 libc::unmount(mountpoint.as_ptr(), int_flags)
             });
             #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-            let res = super::libc_umount(&self.mountpoint);
+            let res = super::libc_umount(&mountpoint);
             res
         };
         let error = match result {

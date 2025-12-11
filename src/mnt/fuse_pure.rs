@@ -155,6 +155,7 @@ fn fuse_unmount_pure(
     flags: Option<&[UnmountOption]>,
     blocking: bool,
 ) -> Result<(), io::Error> {
+    #[cfg(target_os = "linux")]
     use std::io::ErrorKind::PermissionDenied;
     use std::io::ErrorKind::ResourceBusy;
     let flags = flags.unwrap_or(&[]);
@@ -167,7 +168,7 @@ fn fuse_unmount_pure(
             #[cfg(target_os = "macos")]
             let res = cvt(unsafe { libc::unmount(mountpoint.as_ptr(), int_flags) });
             #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-            let res = super::libc_umount(&self.mountpoint);
+            let res = super::libc_umount(mountpoint);
             res
         };
         let error = match result {
@@ -187,12 +188,13 @@ fn fuse_unmount_pure(
         }
         return Err(error);
     }
-
     let mut builder = Command::new(detect_fusermount_bin());
     builder.stdout(Stdio::piped()).stderr(Stdio::piped());
     builder.arg("-u").arg("-q");
-    if flags.contains(&UnmountOption::Detach) {
-        builder.arg("-z");
+    for flag in flags {
+        if let Some(cmd_arg) = unmount_options::to_fusermount_option(flag) {
+            builder.arg(cmd_arg);
+        }
     }
     builder
         .arg("--")

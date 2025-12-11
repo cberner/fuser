@@ -4,14 +4,36 @@ use std::{
     io::{self, ErrorKind},
 };
 
+/// Unmount options accepted by the umount2 or unmount syscall
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
 pub enum UnmountOption {
     /// Force the unmount
     Force,
+    #[cfg(not(any(
+        target_os = "macos",
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "openbsd",
+        target_os = "netbsd"
+    )))]
     /// Detach the filesystem
     Detach,
+    #[cfg(not(any(
+        target_os = "macos",
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "openbsd",
+        target_os = "netbsd"
+    )))]
     /// Mark the mount as expired
     Expire,
+    #[cfg(not(any(
+        target_os = "macos",
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "openbsd",
+        target_os = "netbsd"
+    )))]
     /// Don't follow symlinks
     NoFollow,
 }
@@ -44,8 +66,29 @@ pub fn check_option_conflicts(options: &[UnmountOption]) -> Result<(), io::Error
 pub fn to_fusermount_option(option: &UnmountOption) -> Option<String> {
     match option {
         UnmountOption::Force => None,
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "freebsd",
+            target_os = "dragonfly",
+            target_os = "openbsd",
+            target_os = "netbsd"
+        )))]
         UnmountOption::Detach => Some("-z".to_string()),
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "freebsd",
+            target_os = "dragonfly",
+            target_os = "openbsd",
+            target_os = "netbsd"
+        )))]
         UnmountOption::Expire => None,
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "freebsd",
+            target_os = "dragonfly",
+            target_os = "openbsd",
+            target_os = "netbsd"
+        )))]
         UnmountOption::NoFollow => None,
     }
 }
@@ -55,8 +98,29 @@ pub fn to_unmount_syscall(options: &[UnmountOption]) -> c_int {
     for option in options {
         match option {
             UnmountOption::Force => res |= libc::MNT_FORCE,
+            #[cfg(not(any(
+                target_os = "macos",
+                target_os = "freebsd",
+                target_os = "dragonfly",
+                target_os = "openbsd",
+                target_os = "netbsd"
+            )))]
             UnmountOption::Detach => res |= libc::MNT_DETACH,
+            #[cfg(not(any(
+                target_os = "macos",
+                target_os = "freebsd",
+                target_os = "dragonfly",
+                target_os = "openbsd",
+                target_os = "netbsd"
+            )))]
             UnmountOption::Expire => res |= libc::MNT_EXPIRE,
+            #[cfg(not(any(
+                target_os = "macos",
+                target_os = "freebsd",
+                target_os = "dragonfly",
+                target_os = "openbsd",
+                target_os = "netbsd"
+            )))]
             UnmountOption::NoFollow => res |= libc::UMOUNT_NOFOLLOW,
         }
     }

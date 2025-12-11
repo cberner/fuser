@@ -84,6 +84,13 @@ fn fuse2_umount(
     flags: Option<&[UnmountOption]>,
     blocking: bool,
 ) -> Result<(), io::Error> {
+    #[cfg(not(any(
+        target_os = "macos",
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "openbsd",
+        target_os = "netbsd"
+    )))]
     use std::io::ErrorKind::PermissionDenied;
     use std::io::ErrorKind::ResourceBusy;
     loop {
@@ -92,13 +99,9 @@ fn fuse2_umount(
         let result = {
             // FIXME: Add umount fallback if linux version is <2.1.116
             #[cfg(target_os = "linux")]
-            let res = cvt(unsafe {
-                libc::umount2(mountpoint.as_ptr(), int_flags)
-            });
+            let res = cvt(unsafe { libc::umount2(mountpoint.as_ptr(), int_flags) });
             #[cfg(target_os = "macos")]
-            let res = cvt(unsafe {
-                libc::unmount(mountpoint.as_ptr(), int_flags)
-            });
+            let res = cvt(unsafe { libc::unmount(mountpoint.as_ptr(), int_flags) });
             #[cfg(not(any(target_os = "linux", target_os = "macos")))]
             let res = super::libc_umount(mountpoint);
             res
