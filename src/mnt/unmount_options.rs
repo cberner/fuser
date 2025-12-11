@@ -40,9 +40,47 @@ pub enum UnmountOption {
 
 fn conflicts_with(option: &UnmountOption) -> Vec<UnmountOption> {
     match option {
-        UnmountOption::Force => vec![UnmountOption::Detach, UnmountOption::Expire],
+        UnmountOption::Force => vec![
+            #[cfg(not(any(
+                target_os = "macos",
+                target_os = "freebsd",
+                target_os = "dragonfly",
+                target_os = "openbsd",
+                target_os = "netbsd"
+            )))]
+            UnmountOption::Detach,
+            #[cfg(not(any(
+                target_os = "macos",
+                target_os = "freebsd",
+                target_os = "dragonfly",
+                target_os = "openbsd",
+                target_os = "netbsd"
+            )))]
+            UnmountOption::Expire,
+        ],
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "freebsd",
+            target_os = "dragonfly",
+            target_os = "openbsd",
+            target_os = "netbsd"
+        )))]
         UnmountOption::Detach => vec![UnmountOption::Force, UnmountOption::Expire],
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "freebsd",
+            target_os = "dragonfly",
+            target_os = "openbsd",
+            target_os = "netbsd"
+        )))]
         UnmountOption::Expire => vec![UnmountOption::Force, UnmountOption::Detach],
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "freebsd",
+            target_os = "dragonfly",
+            target_os = "openbsd",
+            target_os = "netbsd"
+        )))]
         UnmountOption::NoFollow => vec![],
     }
 }
