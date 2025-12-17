@@ -1,6 +1,7 @@
 *
 !src/
 !examples/
+!tests/
 !./Cargo.*
 !./rust-toolchain
 !./build.rs

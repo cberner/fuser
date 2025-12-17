@@ -3,7 +3,7 @@ INTERACTIVE ?= i
 
 
 build: pre
-	cargo build --examples
+	cargo build --examples --features=experimental
 
 pre:
 	cargo fmt --all -- --check
@@ -48,6 +48,8 @@ mount_tests:
 	 fuser:mount_tests bash -c "cd /code/fuser && bash ./simplefs_tests.sh"
 	docker run --rm -$(INTERACTIVE)t --cap-add SYS_ADMIN --device /dev/fuse --security-opt apparmor:unconfined \
 	 fuser:mount_tests bash -c "cd /code/fuser && bash ./mount_tests.sh"
+	docker run --rm -$(INTERACTIVE)t --cap-add SYS_ADMIN --device /dev/fuse --security-opt apparmor:unconfined \
+	 fuser:mount_tests bash -c "cd /code/fuser && bash ./tests/experimental_mount_tests.sh"
 
 test_passthrough:
 	cargo build --example passthrough --features=abi-7-40

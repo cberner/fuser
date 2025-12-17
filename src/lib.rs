@@ -45,6 +45,9 @@ use std::cmp::max;
 use std::cmp::min;
 
 mod channel;
+/// Experimental APIs
+#[cfg(feature = "experimental")]
+pub mod experimental;
 mod ll;
 mod mnt;
 mod notify;

@@ -21,6 +21,8 @@ memchr = "2.7.2"
 page_size = "0.6.0"
 serde = { version = "1.0.102", features = ["std", "derive"], optional = true }
 smallvec = "1.6.1"
+async-trait = { version = "0.1", optional = true }
+tokio = { version = "1.48.0", features = ["rt"], optional = true }
 zerocopy = { version = "0.8", features = ["derive"] }
 nix = { version = "0.29.0", features = ["fs", "user"] }
 
@@ -37,6 +39,7 @@ pkg-config = "0.3.14"
 
 [features]
 default = []
+experimental = ["async-trait", "tokio"]
 libfuse = []
 serializable = ["serde"]
 macfuse-4-compat = []
@@ -55,6 +58,10 @@ abi-7-30 = ["abi-7-29"]
 abi-7-31 = ["abi-7-30"]
 abi-7-36 = ["abi-7-31"]
 abi-7-40 = ["abi-7-36", "nix/ioctl"]
+
+[[example]]
+name = "async_hello"
+required-features = ["experimental"]
 
 [[example]]
 name = "poll"
