@@ -171,11 +171,7 @@ impl<FS: Filesystem> Session<FS> {
     ///
     /// Each cloned fd handles its own request/response pairs - the FUSE kernel
     /// requires that the fd which reads a request is the same fd that sends the response.
-    pub fn from_fd_initialized(
-        filesystem: FS,
-        fd: OwnedFd,
-        acl: SessionACL,
-    ) -> Self {
+    pub fn from_fd_initialized(filesystem: FS, fd: OwnedFd, acl: SessionACL) -> Self {
         let ch = Channel::new(Arc::new(fd.into()));
         Session {
             filesystem,
@@ -185,7 +181,7 @@ impl<FS: Filesystem> Session<FS> {
             session_owner: geteuid().as_raw(),
             proto_major: abi::FUSE_KERNEL_VERSION,
             proto_minor: abi::FUSE_KERNEL_MINOR_VERSION,
-            initialized: true,  // Skip INIT - caller guarantees mount is initialized
+            initialized: true, // Skip INIT - caller guarantees mount is initialized
             destroyed: false,
         }
     }
