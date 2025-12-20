@@ -68,7 +68,7 @@ impl Channel {
     pub fn clone_fd(&self) -> io::Result<OwnedFd> {
         // Open a new /dev/fuse fd
         // SAFETY: libc::open is safe to call with a valid path
-        let fd = unsafe { libc::open(c"/dev/fuse".as_ptr() as *const libc::c_char, libc::O_RDWR) };
+        let fd = unsafe { libc::open(c"/dev/fuse".as_ptr(), libc::O_RDWR) };
         if fd < 0 {
             return Err(io::Error::last_os_error());
         }
