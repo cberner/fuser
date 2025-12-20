@@ -15,11 +15,19 @@ fn main() {
     {
         println!("cargo:rustc-cfg=fuser_mount_impl=\"pure-rust\"");
     } else if target_os == "macos" {
-        pkg_config::Config::new()
-            .atleast_version("2.6.0")
-            .probe("fuse") // for macFUSE 4.x
+        // First try to link with fuse-t
+        if pkg_config::Config::new()
+            .atleast_version("1.0.0")
+            .probe("fuse-t")
             .map_err(|e| eprintln!("{e}"))
-            .unwrap();
+            .is_err()
+        {
+            pkg_config::Config::new()
+                .atleast_version("2.6.0")
+                .probe("fuse") // for macFUSE 4.x
+                .map_err(|e| eprintln!("{e}"))
+                .unwrap();
+        }
         println!("cargo:rustc-cfg=fuser_mount_impl=\"libfuse2\"");
         println!("cargo:rustc-cfg=feature=\"macfuse-4-compat\"");
     } else {
