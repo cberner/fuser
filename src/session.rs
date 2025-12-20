@@ -389,11 +389,33 @@ impl<FS: Filesystem> Session<FS> {
         Notifier::new(self.ch.sender())
     }
 
-    /// Returns a reference to the underlying FUSE channel.
-    /// This can be used to clone the FUSE file descriptor for multi-threaded
-    /// request processing.
-    pub fn channel(&self) -> &Channel {
-        &self.ch
+    /// Clone the FUSE file descriptor for multi-threaded request processing.
+    ///
+    /// Creates a new fd that can independently read FUSE requests, enabling
+    /// multi-threaded request handling. The cloned fd shares the same FUSE
+    /// connection but can be used by a separate thread to read requests in parallel.
+    ///
+    /// # Usage
+    /// ```ignore
+    /// // Primary session handles INIT and runs in main thread
+    /// let mut session = Session::new(fs, mountpoint, options)?;
+    ///
+    /// // Clone fd for additional reader threads
+    /// let cloned_fd = session.clone_fd()?;
+    /// let reader_session = Session::from_fd_initialized(fs_clone, cloned_fd, acl);
+    /// std::thread::spawn(move || reader_session.run());
+    ///
+    /// session.run()?;
+    /// ```
+    ///
+    /// # Platform Support
+    /// This is only available on Linux.
+    ///
+    /// # Errors
+    /// Returns an error if `/dev/fuse` cannot be opened or the ioctl fails.
+    #[cfg(target_os = "linux")]
+    pub fn clone_fd(&self) -> io::Result<OwnedFd> {
+        self.ch.clone_fd()
     }
 }
 

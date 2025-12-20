@@ -85,13 +85,6 @@ impl Channel {
 
         Ok(new_fd)
     }
-
-    /// Create a new Channel from an owned file descriptor.
-    ///
-    /// This is useful for creating reader channels from cloned fds obtained via [`clone_fd`](Self::clone_fd).
-    pub fn from_fd(fd: OwnedFd) -> Self {
-        Self(Arc::new(fd.into()))
-    }
 }
 
 #[derive(Clone, Debug)]
