@@ -91,6 +91,12 @@ impl Drop for Mount {
                 // Linux always returns EPERM for non-root users.  We have to let the
                 // library go through the setuid-root "fusermount -u" to unmount.
                 fuse_unmount_pure(&self.mountpoint)
+            } else if err.raw_os_error() == Some(libc::EBUSY) {
+                // EBUSY means the filesystem is still in use. This can happen transiently
+                // during cleanup when something still has an open reference. Fall through
+                // to fuse_unmount_pure which uses MNT_DETACH for lazy unmount.
+                debug!("Unmount returned EBUSY, trying lazy unmount");
+                fuse_unmount_pure(&self.mountpoint)
             } else {
                 error!("Unmount failed: {}", err)
             }
