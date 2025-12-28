@@ -139,6 +139,37 @@ impl<FS: Filesystem> Session<FS> {
         }
     }
 
+    /// Create a session from a cloned FUSE file descriptor for multi-reader setups.
+    ///
+    /// Use this with fds obtained from [`Channel::clone_fd()`] when the primary
+    /// session has already completed the FUSE INIT handshake.
+    ///
+    /// # Arguments
+    /// * `filesystem` - The filesystem implementation to handle requests
+    /// * `fd` - A cloned fd from [`Channel::clone_fd()`]
+    /// * `acl` - Access control settings for the session
+    ///
+    /// # Important
+    /// This session skips the FUSE INIT protocol. Using this with an uninitialized
+    /// fd will cause all requests to fail with EIO.
+    ///
+    /// Each cloned fd handles its own request/response pairs - the FUSE kernel
+    /// requires that the fd which reads a request is the same fd that sends the response.
+    pub fn from_fd_initialized(filesystem: FS, fd: OwnedFd, acl: SessionACL) -> Self {
+        let ch = Channel::new(Arc::new(fd.into()));
+        Session {
+            filesystem,
+            ch,
+            mount: Arc::new(Mutex::new(None)),
+            allowed: acl,
+            session_owner: geteuid().as_raw(),
+            proto_major: abi::FUSE_KERNEL_VERSION,
+            proto_minor: abi::FUSE_KERNEL_MINOR_VERSION,
+            initialized: true, // Skip INIT - caller guarantees mount is initialized
+            destroyed: false,
+        }
+    }
+
     /// Run the session loop that receives kernel requests and dispatches them to method
     /// calls into the filesystem. This read-dispatch-loop is non-concurrent to prevent
     /// having multiple buffers (which take up much memory), but the filesystem methods
@@ -150,11 +181,15 @@ impl<FS: Filesystem> Session<FS> {
         // it is reused immediately after dispatching to conserve memory and allocations.
         let mut buffer = vec![0; BUFFER_SIZE];
         let buf = aligned_sub_buf(&mut buffer, std::mem::align_of::<abi::fuse_in_header>());
+
+        // Get sender for replies - each fd (including cloned fds) handles its own request/response pairs
+        let sender = self.ch.sender();
+
         loop {
             // Read the next request from the given channel to kernel driver
             // The kernel driver makes sure that we get exactly one request per read
             match self.ch.receive(buf) {
-                Ok(size) => match Request::new(self.ch.sender(), &buf[..size]) {
+                Ok(size) => match Request::new(sender.clone(), &buf[..size]) {
                     // Dispatch request
                     Some(req) => req.dispatch(self),
                     // Quit loop on illegal request
@@ -190,6 +225,35 @@ impl<FS: Filesystem> Session<FS> {
     /// Returns an object that can be used to send notifications to the kernel
     pub fn notifier(&self) -> Notifier {
         Notifier::new(self.ch.sender())
+    }
+
+    /// Clone the FUSE file descriptor for multi-threaded request processing.
+    ///
+    /// Creates a new fd that can independently read FUSE requests, enabling
+    /// multi-threaded request handling. The cloned fd shares the same FUSE
+    /// connection but can be used by a separate thread to read requests in parallel.
+    ///
+    /// # Usage
+    /// ```ignore
+    /// // Primary session handles INIT and runs in main thread
+    /// let mut session = Session::new(fs, mountpoint, options)?;
+    ///
+    /// // Clone fd for additional reader threads
+    /// let cloned_fd = session.clone_fd()?;
+    /// let reader_session = Session::from_fd_initialized(fs_clone, cloned_fd, acl);
+    /// std::thread::spawn(move || reader_session.run());
+    ///
+    /// session.run()?;
+    /// ```
+    ///
+    /// # Platform Support
+    /// This is only available on Linux.
+    ///
+    /// # Errors
+    /// Returns an error if `/dev/fuse` cannot be opened or the ioctl fails.
+    #[cfg(target_os = "linux")]
+    pub fn clone_fd(&self) -> io::Result<OwnedFd> {
+        self.ch.clone_fd()
     }
 }
 

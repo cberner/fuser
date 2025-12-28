@@ -928,6 +928,34 @@ pub trait Filesystem {
         reply.error(ENOSYS);
     }
 
+    /// Remap a range of data from one file to another (FICLONE support)
+    ///
+    /// This is used for reflink/clone operations (FICLONE, FICLONERANGE ioctls).
+    /// On filesystems that support it (btrfs, xfs with reflink), this creates
+    /// a copy-on-write clone without copying data.
+    ///
+    /// Requires kernel patch - not yet upstream.
+    fn remap_file_range(
+        &mut self,
+        _req: &Request<'_>,
+        ino_in: u64,
+        fh_in: u64,
+        offset_in: i64,
+        ino_out: u64,
+        fh_out: u64,
+        offset_out: i64,
+        len: u64,
+        remap_flags: u32,
+        reply: ReplyWrite,
+    ) {
+        warn!(
+            "[Not Implemented] remap_file_range(ino_in: {ino_in:#x?}, fh_in: {fh_in}, \
+            offset_in: {offset_in}, ino_out: {ino_out:#x?}, fh_out: {fh_out}, \
+            offset_out: {offset_out}, len: {len}, remap_flags: {remap_flags})"
+        );
+        reply.error(ENOSYS);
+    }
+
     /// macOS only: Rename the volume. Set `fuse_init_out.flags` during init to
     /// `FUSE_VOL_RENAME` to enable
     #[cfg(target_os = "macos")]

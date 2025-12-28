@@ -579,6 +579,22 @@ impl<'a> Request<'a> {
                     self.reply(),
                 );
             }
+            #[cfg(feature = "abi-7-28")]
+            ll::Operation::RemapFileRange(x) => {
+                let (i, o) = (x.src(), x.dest());
+                se.filesystem.remap_file_range(
+                    self,
+                    i.inode.into(),
+                    i.file_handle.into(),
+                    i.offset,
+                    o.inode.into(),
+                    o.file_handle.into(),
+                    o.offset,
+                    x.len(),
+                    x.remap_flags(),
+                    self.reply(),
+                );
+            }
             #[cfg(target_os = "macos")]
             ll::Operation::SetVolName(x) => {
                 se.filesystem.setvolname(self, x.name(), self.reply());
