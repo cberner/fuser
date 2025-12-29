@@ -1,6 +1,6 @@
 // This example requires fuse 7.40 or later. Run with:
 //
-//   cargo run --example passthrough --features abi-7-40 /tmp/foobar
+//   cargo run --example passthrough --features abi-7-40 DIR
 
 use clap::{Arg, ArgAction, Command, crate_version};
 use fuser::{

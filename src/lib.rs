@@ -29,15 +29,27 @@ pub use mnt::mount_options::MountOption;
 pub use notify::{Notifier, PollHandle};
 #[cfg(feature = "abi-7-40")]
 pub use passthrough::BackingId;
+pub use reply::Reply;
+pub use reply::ReplyAttr;
+pub use reply::ReplyBmap;
+pub use reply::ReplyCreate;
+pub use reply::ReplyData;
+pub use reply::ReplyDirectory;
+#[cfg(feature = "abi-7-21")]
+pub use reply::ReplyDirectoryPlus;
+pub use reply::ReplyEmpty;
+pub use reply::ReplyEntry;
+pub use reply::ReplyIoctl;
+pub use reply::ReplyLock;
+#[cfg(feature = "abi-7-24")]
+pub use reply::ReplyLseek;
+pub use reply::ReplyOpen;
 pub use reply::ReplyPoll;
+pub use reply::ReplyStatfs;
+pub use reply::ReplyWrite;
 #[cfg(target_os = "macos")]
 pub use reply::ReplyXTimes;
 pub use reply::ReplyXattr;
-pub use reply::{Reply, ReplyAttr, ReplyData, ReplyEmpty, ReplyEntry, ReplyOpen};
-pub use reply::{
-    ReplyBmap, ReplyCreate, ReplyDirectory, ReplyDirectoryPlus, ReplyIoctl, ReplyLock, ReplyLseek,
-    ReplyStatfs, ReplyWrite,
-};
 pub use request::Request;
 pub use session::{BackgroundSession, Session, SessionACL, SessionUnmounter};
 #[cfg(feature = "abi-7-28")]
@@ -327,11 +339,12 @@ impl KernelConfig {
 /// implementations are provided here to get a mountable filesystem that does
 /// nothing.
 #[allow(clippy::too_many_arguments)]
+#[allow(unused_variables)] // This is the main API, so variables are named without the underscore for generality.
 pub trait Filesystem {
     /// Initialize filesystem.
     /// Called before any other filesystem method.
     /// The kernel module connection can be configured using the `KernelConfig` object
-    fn init(&mut self, _req: &Request<'_>, _config: &mut KernelConfig) -> Result<(), c_int> {
+    fn init(&mut self, req: &Request<'_>, config: &mut KernelConfig) -> Result<(), c_int> {
         Ok(())
     }
 
@@ -352,7 +365,7 @@ pub trait Filesystem {
     /// each forget. The filesystem may ignore forget calls, if the inodes don't need to
     /// have a limited lifetime. On unmount it is not guaranteed, that all referenced
     /// inodes will receive a forget message.
-    fn forget(&mut self, _req: &Request<'_>, _ino: u64, _nlookup: u64) {}
+    fn forget(&mut self, req: &Request<'_>, ino: u64, nlookup: u64) {}
 
     /// Like forget, but take multiple forget requests at once for performance. The default
     /// implementation will fallback to forget.
@@ -363,7 +376,7 @@ pub trait Filesystem {
     }
 
     /// Get file attributes.
-    fn getattr(&mut self, _req: &Request<'_>, ino: u64, fh: Option<u64>, reply: ReplyAttr) {
+    fn getattr(&mut self, req: &Request<'_>, ino: u64, fh: Option<u64>, reply: ReplyAttr) {
         warn!("[Not Implemented] getattr(ino: {ino:#x?}, fh: {fh:#x?})");
         reply.error(ENOSYS);
     }
@@ -371,19 +384,19 @@ pub trait Filesystem {
     /// Set file attributes.
     fn setattr(
         &mut self,
-        _req: &Request<'_>,
+        req: &Request<'_>,
         ino: u64,
         mode: Option<u32>,
         uid: Option<u32>,
         gid: Option<u32>,
         size: Option<u64>,
-        _atime: Option<TimeOrNow>,
-        _mtime: Option<TimeOrNow>,
-        _ctime: Option<SystemTime>,
+        atime: Option<TimeOrNow>,
+        mtime: Option<TimeOrNow>,
+        ctime: Option<SystemTime>,
         fh: Option<u64>,
-        _crtime: Option<SystemTime>,
-        _chgtime: Option<SystemTime>,
-        _bkuptime: Option<SystemTime>,
+        crtime: Option<SystemTime>,
+        chgtime: Option<SystemTime>,
+        bkuptime: Option<SystemTime>,
         flags: Option<u32>,
         reply: ReplyAttr,
     ) {
@@ -395,7 +408,7 @@ pub trait Filesystem {
     }
 
     /// Read symbolic link.
-    fn readlink(&mut self, _req: &Request<'_>, ino: u64, reply: ReplyData) {
+    fn readlink(&mut self, req: &Request<'_>, ino: u64, reply: ReplyData) {
         warn!("[Not Implemented] readlink(ino: {ino:#x?})");
         reply.error(ENOSYS);
     }
@@ -404,7 +417,7 @@ pub trait Filesystem {
     /// Create a regular file, character device, block device, fifo or socket node.
     fn mknod(
         &mut self,
-        _req: &Request<'_>,
+        req: &Request<'_>,
         parent: u64,
         name: &OsStr,
         mode: u32,
@@ -422,7 +435,7 @@ pub trait Filesystem {
     /// Create a directory.
     fn mkdir(
         &mut self,
-        _req: &Request<'_>,
+        req: &Request<'_>,
         parent: u64,
         name: &OsStr,
         mode: u32,
@@ -436,13 +449,13 @@ pub trait Filesystem {
     }
 
     /// Remove a file.
-    fn unlink(&mut self, _req: &Request<'_>, parent: u64, name: &OsStr, reply: ReplyEmpty) {
+    fn unlink(&mut self, req: &Request<'_>, parent: u64, name: &OsStr, reply: ReplyEmpty) {
         warn!("[Not Implemented] unlink(parent: {parent:#x?}, name: {name:?})",);
         reply.error(ENOSYS);
     }
 
     /// Remove a directory.
-    fn rmdir(&mut self, _req: &Request<'_>, parent: u64, name: &OsStr, reply: ReplyEmpty) {
+    fn rmdir(&mut self, req: &Request<'_>, parent: u64, name: &OsStr, reply: ReplyEmpty) {
         warn!("[Not Implemented] rmdir(parent: {parent:#x?}, name: {name:?})",);
         reply.error(ENOSYS);
     }
@@ -450,7 +463,7 @@ pub trait Filesystem {
     /// Create a symbolic link.
     fn symlink(
         &mut self,
-        _req: &Request<'_>,
+        req: &Request<'_>,
         parent: u64,
         link_name: &OsStr,
         target: &Path,
@@ -465,7 +478,7 @@ pub trait Filesystem {
     /// Rename a file.
     fn rename(
         &mut self,
-        _req: &Request<'_>,
+        req: &Request<'_>,
         parent: u64,
         name: &OsStr,
         newparent: u64,
@@ -483,7 +496,7 @@ pub trait Filesystem {
     /// Create a hard link.
     fn link(
         &mut self,
-        _req: &Request<'_>,
+        req: &Request<'_>,
         ino: u64,
         newparent: u64,
         newname: &OsStr,
@@ -503,7 +516,7 @@ pub trait Filesystem {
     /// anything in fh. There are also some flags (`direct_io`, `keep_cache`) which the
     /// filesystem may set, to change the way the file is opened. See `fuse_file_info`
     /// structure in <`fuse_common.h`> for more details.
-    fn open(&mut self, _req: &Request<'_>, _ino: u64, _flags: i32, reply: ReplyOpen) {
+    fn open(&mut self, req: &Request<'_>, ino: u64, flags: i32, reply: ReplyOpen) {
         reply.opened(0, 0);
     }
 
@@ -519,7 +532,7 @@ pub trait Filesystem {
     /// `lock_owner`: only supported with ABI >= 7.9
     fn read(
         &mut self,
-        _req: &Request<'_>,
+        req: &Request<'_>,
         ino: u64,
         fh: u64,
         offset: i64,
@@ -549,7 +562,7 @@ pub trait Filesystem {
     /// `lock_owner`: only supported with ABI >= 7.9
     fn write(
         &mut self,
-        _req: &Request<'_>,
+        req: &Request<'_>,
         ino: u64,
         fh: u64,
         offset: i64,
@@ -578,7 +591,7 @@ pub trait Filesystem {
     /// is not forced to flush pending writes. One reason to flush data, is if the
     /// filesystem wants to return write errors. If the filesystem supports file locking
     /// operations (`setlk`, `getlk`) it should remove all locks belonging to `lock_owner`.
-    fn flush(&mut self, _req: &Request<'_>, ino: u64, fh: u64, lock_owner: u64, reply: ReplyEmpty) {
+    fn flush(&mut self, req: &Request<'_>, ino: u64, fh: u64, lock_owner: u64, reply: ReplyEmpty) {
         warn!("[Not Implemented] flush(ino: {ino:#x?}, fh: {fh}, lock_owner: {lock_owner:?})");
         reply.error(ENOSYS);
     }
@@ -593,12 +606,12 @@ pub trait Filesystem {
     /// open.
     fn release(
         &mut self,
-        _req: &Request<'_>,
-        _ino: u64,
-        _fh: u64,
-        _flags: i32,
-        _lock_owner: Option<u64>,
-        _flush: bool,
+        req: &Request<'_>,
+        ino: u64,
+        fh: u64,
+        flags: i32,
+        lock_owner: Option<u64>,
+        flush: bool,
         reply: ReplyEmpty,
     ) {
         reply.ok();
@@ -607,7 +620,7 @@ pub trait Filesystem {
     /// Synchronize file contents.
     /// If the datasync parameter is non-zero, then only the user data should be flushed,
     /// not the meta data.
-    fn fsync(&mut self, _req: &Request<'_>, ino: u64, fh: u64, datasync: bool, reply: ReplyEmpty) {
+    fn fsync(&mut self, req: &Request<'_>, ino: u64, fh: u64, datasync: bool, reply: ReplyEmpty) {
         warn!("[Not Implemented] fsync(ino: {ino:#x?}, fh: {fh}, datasync: {datasync})");
         reply.error(ENOSYS);
     }
@@ -619,7 +632,7 @@ pub trait Filesystem {
     /// anything in fh, though that makes it impossible to implement standard conforming
     /// directory stream operations in case the contents of the directory can change
     /// between opendir and releasedir.
-    fn opendir(&mut self, _req: &Request<'_>, _ino: u64, _flags: i32, reply: ReplyOpen) {
+    fn opendir(&mut self, req: &Request<'_>, ino: u64, flags: i32, reply: ReplyOpen) {
         reply.opened(0, 0);
     }
 
@@ -630,7 +643,7 @@ pub trait Filesystem {
     /// didn't set any value.
     fn readdir(
         &mut self,
-        _req: &Request<'_>,
+        req: &Request<'_>,
         ino: u64,
         fh: u64,
         offset: i64,
@@ -645,9 +658,10 @@ pub trait Filesystem {
     /// requested size. Send an empty buffer on end of stream. fh will contain the
     /// value set by the opendir method, or will be undefined if the opendir method
     /// didn't set any value.
+    #[cfg(feature = "abi-7-21")]
     fn readdirplus(
         &mut self,
-        _req: &Request<'_>,
+        req: &Request<'_>,
         ino: u64,
         fh: u64,
         offset: i64,
@@ -661,14 +675,7 @@ pub trait Filesystem {
     /// For every opendir call there will be exactly one releasedir call. fh will
     /// contain the value set by the opendir method, or will be undefined if the
     /// opendir method didn't set any value.
-    fn releasedir(
-        &mut self,
-        _req: &Request<'_>,
-        _ino: u64,
-        _fh: u64,
-        _flags: i32,
-        reply: ReplyEmpty,
-    ) {
+    fn releasedir(&mut self, req: &Request<'_>, ino: u64, fh: u64, flags: i32, reply: ReplyEmpty) {
         reply.ok();
     }
 
@@ -678,7 +685,7 @@ pub trait Filesystem {
     /// method, or will be undefined if the opendir method didn't set any value.
     fn fsyncdir(
         &mut self,
-        _req: &Request<'_>,
+        req: &Request<'_>,
         ino: u64,
         fh: u64,
         datasync: bool,
@@ -689,17 +696,17 @@ pub trait Filesystem {
     }
 
     /// Get file system statistics.
-    fn statfs(&mut self, _req: &Request<'_>, _ino: u64, reply: ReplyStatfs) {
+    fn statfs(&mut self, req: &Request<'_>, ino: u64, reply: ReplyStatfs) {
         reply.statfs(0, 0, 0, 0, 0, 512, 255, 0);
     }
 
     /// Set an extended attribute.
     fn setxattr(
         &mut self,
-        _req: &Request<'_>,
+        req: &Request<'_>,
         ino: u64,
         name: &OsStr,
-        _value: &[u8],
+        value: &[u8],
         flags: i32,
         position: u32,
         reply: ReplyEmpty,
@@ -717,7 +724,7 @@ pub trait Filesystem {
     /// `reply.error(ERANGE)` if it doesn't.
     fn getxattr(
         &mut self,
-        _req: &Request<'_>,
+        req: &Request<'_>,
         ino: u64,
         name: &OsStr,
         size: u32,
@@ -731,13 +738,13 @@ pub trait Filesystem {
     /// If `size` is 0, the size of the value should be sent with `reply.size()`.
     /// If `size` is not 0, and the value fits, send it with `reply.data()`, or
     /// `reply.error(ERANGE)` if it doesn't.
-    fn listxattr(&mut self, _req: &Request<'_>, ino: u64, size: u32, reply: ReplyXattr) {
+    fn listxattr(&mut self, req: &Request<'_>, ino: u64, size: u32, reply: ReplyXattr) {
         warn!("[Not Implemented] listxattr(ino: {ino:#x?}, size: {size})");
         reply.error(ENOSYS);
     }
 
     /// Remove an extended attribute.
-    fn removexattr(&mut self, _req: &Request<'_>, ino: u64, name: &OsStr, reply: ReplyEmpty) {
+    fn removexattr(&mut self, req: &Request<'_>, ino: u64, name: &OsStr, reply: ReplyEmpty) {
         warn!("[Not Implemented] removexattr(ino: {ino:#x?}, name: {name:?})");
         reply.error(ENOSYS);
     }
@@ -746,7 +753,7 @@ pub trait Filesystem {
     /// This will be called for the `access()` system call. If the `default_permissions`
     /// mount option is given, this method is not called. This method is not called
     /// under Linux kernel versions 2.4.x
-    fn access(&mut self, _req: &Request<'_>, ino: u64, mask: i32, reply: ReplyEmpty) {
+    fn access(&mut self, req: &Request<'_>, ino: u64, mask: i32, reply: ReplyEmpty) {
         warn!("[Not Implemented] access(ino: {ino:#x?}, mask: {mask})");
         reply.error(ENOSYS);
     }
@@ -763,7 +770,7 @@ pub trait Filesystem {
     /// 2.6.15, the `mknod()` and `open()` methods will be called instead.
     fn create(
         &mut self,
-        _req: &Request<'_>,
+        req: &Request<'_>,
         parent: u64,
         name: &OsStr,
         mode: u32,
@@ -781,7 +788,7 @@ pub trait Filesystem {
     /// Test for a POSIX file lock.
     fn getlk(
         &mut self,
-        _req: &Request<'_>,
+        req: &Request<'_>,
         ino: u64,
         fh: u64,
         lock_owner: u64,
@@ -807,7 +814,7 @@ pub trait Filesystem {
     /// Hence these are only interesting for network filesystems and similar.
     fn setlk(
         &mut self,
-        _req: &Request<'_>,
+        req: &Request<'_>,
         ino: u64,
         fh: u64,
         lock_owner: u64,
@@ -828,7 +835,7 @@ pub trait Filesystem {
     /// Map block index within file to block index within device.
     /// Note: This makes sense only for block device backed filesystems mounted
     /// with the 'blkdev' option
-    fn bmap(&mut self, _req: &Request<'_>, ino: u64, blocksize: u32, idx: u64, reply: ReplyBmap) {
+    fn bmap(&mut self, req: &Request<'_>, ino: u64, blocksize: u32, idx: u64, reply: ReplyBmap) {
         warn!("[Not Implemented] bmap(ino: {ino:#x?}, blocksize: {blocksize}, idx: {idx})",);
         reply.error(ENOSYS);
     }
@@ -836,7 +843,7 @@ pub trait Filesystem {
     /// control device
     fn ioctl(
         &mut self,
-        _req: &Request<'_>,
+        req: &Request<'_>,
         ino: u64,
         fh: u64,
         flags: u32,
@@ -856,7 +863,7 @@ pub trait Filesystem {
     /// Poll for events
     fn poll(
         &mut self,
-        _req: &Request<'_>,
+        req: &Request<'_>,
         ino: u64,
         fh: u64,
         ph: PollHandle,
@@ -874,7 +881,7 @@ pub trait Filesystem {
     /// Preallocate or deallocate space to a file
     fn fallocate(
         &mut self,
-        _req: &Request<'_>,
+        req: &Request<'_>,
         ino: u64,
         fh: u64,
         offset: i64,
@@ -890,9 +897,10 @@ pub trait Filesystem {
     }
 
     /// Reposition read/write file offset
+    #[cfg(feature = "abi-7-24")]
     fn lseek(
         &mut self,
-        _req: &Request<'_>,
+        req: &Request<'_>,
         ino: u64,
         fh: u64,
         offset: i64,
@@ -909,7 +917,7 @@ pub trait Filesystem {
     /// Copy the specified range from the source inode to the destination inode
     fn copy_file_range(
         &mut self,
-        _req: &Request<'_>,
+        req: &Request<'_>,
         ino_in: u64,
         fh_in: u64,
         offset_in: i64,
@@ -931,7 +939,7 @@ pub trait Filesystem {
     /// macOS only: Rename the volume. Set `fuse_init_out.flags` during init to
     /// `FUSE_VOL_RENAME` to enable
     #[cfg(target_os = "macos")]
-    fn setvolname(&mut self, _req: &Request<'_>, name: &OsStr, reply: ReplyEmpty) {
+    fn setvolname(&mut self, req: &Request<'_>, name: &OsStr, reply: ReplyEmpty) {
         warn!("[Not Implemented] setvolname(name: {name:?})");
         reply.error(ENOSYS);
     }
@@ -940,7 +948,7 @@ pub trait Filesystem {
     #[cfg(target_os = "macos")]
     fn exchange(
         &mut self,
-        _req: &Request<'_>,
+        req: &Request<'_>,
         parent: u64,
         name: &OsStr,
         newparent: u64,
@@ -958,7 +966,7 @@ pub trait Filesystem {
     /// macOS only: Query extended times (`bkuptime` and `crtime`). Set `fuse_init_out.flags`
     /// during init to `FUSE_XTIMES` to enable
     #[cfg(target_os = "macos")]
-    fn getxtimes(&mut self, _req: &Request<'_>, ino: u64, reply: ReplyXTimes) {
+    fn getxtimes(&mut self, req: &Request<'_>, ino: u64, reply: ReplyXTimes) {
         warn!("[Not Implemented] getxtimes(ino: {ino:#x?})");
         reply.error(ENOSYS);
     }
