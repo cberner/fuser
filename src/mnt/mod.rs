@@ -14,6 +14,7 @@ mod fuse3_sys;
 #[cfg(fuser_mount_impl = "pure-rust")]
 mod fuse_pure;
 pub mod mount_options;
+pub mod unmount_options;
 
 #[cfg(any(test, fuser_mount_impl = "libfuse2", fuser_mount_impl = "libfuse3"))]
 use fuse2_sys::fuse_args;
@@ -23,6 +24,7 @@ use std::io;
 
 #[cfg(any(test, fuser_mount_impl = "libfuse2", fuser_mount_impl = "libfuse3"))]
 use mount_options::MountOption;
+use unmount_options::UnmountOption;
 
 /// Helper function to provide options as a `fuse_args` struct
 /// (which contains an argc count and an argv pointer)
