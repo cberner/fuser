@@ -185,7 +185,7 @@ impl<FS: Filesystem> Session<FS> {
         }
         let mut guard = self.mount.lock().unwrap();
         guard.as_mut().map(|(_, mount)| {
-            mount.set_umount_flags(options);
+            mount.set_unmount_flags(options);
         });
         Ok(())
     }
@@ -194,7 +194,7 @@ impl<FS: Filesystem> Session<FS> {
     pub fn set_blocking_unmount(&mut self, blocking: bool) {
         let mut guard = self.mount.lock().unwrap();
         guard.as_mut().map(|(_, mount)| {
-            mount.set_blocking_umount(blocking);
+            mount.set_blocking_unmount(blocking);
         });
     }
 
@@ -225,7 +225,16 @@ pub struct SessionUnmounter {
 impl SessionUnmounter {
     /// Unmount the filesystem
     pub fn unmount(&mut self) -> io::Result<()> {
-        drop(std::mem::take(&mut *self.mount.lock().unwrap()));
+        let mut guard = self.mount.lock().unwrap();
+        let mount_info = guard.take();
+        if let Some((path, mount)) = mount_info {
+            if let Err((mount, e)) = mount.unmount() {
+                // Returns the mount and error to the object and to retry unmounting at another time
+                *guard = Some((path, mount));
+                return Err(e);
+            }
+            info!("unmounted session at {}", path.display());
+        }
         Ok(())
     }
 
@@ -236,7 +245,7 @@ impl SessionUnmounter {
         }
         let mut guard = self.mount.lock().unwrap();
         guard.as_mut().map(|(_, mount)| {
-            mount.set_umount_flags(options);
+            mount.set_unmount_flags(options);
         });
         Ok(())
     }
@@ -245,7 +254,7 @@ impl SessionUnmounter {
     pub fn set_blocking_unmount(&mut self, blocking: bool) {
         let mut guard = self.mount.lock().unwrap();
         guard.as_mut().map(|(_, mount)| {
-            mount.set_blocking_umount(blocking);
+            mount.set_blocking_unmount(blocking);
         });
     }
 }
@@ -308,16 +317,24 @@ impl BackgroundSession {
         })
     }
     /// Unmount the filesystem and join the background thread.
+    ///
+    /// # Returns
+    /// - `Ok(())` if the background thread joined successfully
+    /// - `Err(Some<Self>, io::Error)` if the unmount operation failed. The session is salvaged and returned to the caller
+    /// - `Err(None, io::Error)` if the background thread returns an error for any reason.
+    ///
     /// # Panics
     /// Panics if the background thread can't be recovered (e.g., because it panicked).
-    pub fn join(self) {
-        let Self {
-            guard,
-            sender: _,
-            _mount,
-        } = self;
-        drop(_mount);
-        guard.join().unwrap().unwrap();
+    pub fn join(mut self) -> Result<(), (Option<Self>, io::Error)> {
+        if let Some(mount) = self._mount.take() {
+            if let Err((mount, e)) = mount.unmount() {
+                // Return the mount and error to the object and to retry unmounting at another time
+                self._mount = Some(mount);
+                return Err((Some(self), e));
+            }
+        }
+        self.guard.join().unwrap().map_err(|e| (None, e))?;
+        Ok(())
     }
 
     /// Returns an object that can be used to send notifications to the kernel
@@ -330,13 +347,13 @@ impl BackgroundSession {
         if let Some(options) = options {
             unmount_options::check_option_conflicts(options)?;
         }
-        self._mount.as_mut().unwrap().set_umount_flags(options);
+        self._mount.as_mut().unwrap().set_unmount_flags(options);
         Ok(())
     }
 
     /// Enable or disable blocking if the umount operation is busy
     pub fn set_blocking_unmount(&mut self, blocking: bool) {
-        self._mount.as_mut().unwrap().set_blocking_umount(blocking);
+        self._mount.as_mut().unwrap().set_blocking_unmount(blocking);
     }
 }
 

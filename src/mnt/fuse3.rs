@@ -39,7 +39,8 @@ pub struct Mount {
     fuse_session: *mut c_void,
     mountpoint: CString,
     blocking_umount: bool,
-    umount_flags: Option<Vec<UnmountOption>>,
+    unmount_flags: Option<Vec<UnmountOption>>,
+    unmounted: bool,
 }
 impl Mount {
     pub fn new(mnt: &Path, options: &[MountOption]) -> io::Result<(Arc<File>, Mount)> {
@@ -62,7 +63,8 @@ impl Mount {
                 fuse_session,
                 mountpoint: mnt.clone(),
                 blocking_umount: false,
-                umount_flags: None,
+                unmount_flags: None,
+                unmounted: false,
             };
             let result = unsafe { fuse_session_mount(mount.fuse_session, mnt.as_ptr()) };
             if result != 0 {
@@ -86,23 +88,44 @@ impl Mount {
     }
 
     /// Override fuser's default umount behavior
-    pub fn set_umount_flags(&mut self, flags: Option<&[UnmountOption]>) {
-        self.umount_flags = flags.map(|f| f.to_vec());
+    pub fn set_unmount_flags(&mut self, flags: Option<&[UnmountOption]>) {
+        self.unmount_flags = flags.map(|f| f.to_vec());
+    }
+
+    /// Internal method for [`Self::unmount`] and [`Self::drop`]
+    fn _unmount(&mut self) -> Result<(), (Self, io::Error)> {
+        if self.unmounted {
+            return Ok(());
+        }
+        if let Err(err) = fuse3_umount(
+            self.fuse_session,
+            &self.mountpoint,
+            self.unmount_flags.as_deref(),
+            self.blocking_umount,
+        ) {
+            return Err((self, err));
+        }
+        self.unmounted = true;
+        Ok(())
+    }
+
+    /// Consume the Mount and unmount the filesystem
+    pub fn unmount(mut self) -> Result<(), (Self, io::Error)> {
+        if let Err(err) = self._unmount() {
+            return Err((self, err));
+        }
+        Ok(())
     }
 }
 
 impl Drop for Mount {
     fn drop(&mut self) {
-        if let Err(err) = fuse3_umount(
-            self.fuse_session,
-            &self.mountpoint,
-            self.umount_flags.as_deref(),
-            self.blocking_umount,
-        ) {
-            warn!("umount failed with {err:?}");
+        if let Err(err) = self._unmount() {
+            error!("umount failed with {:?}", err);
         }
     }
 }
+
 unsafe impl Send for Mount {}
 
 fn fuse3_umount(

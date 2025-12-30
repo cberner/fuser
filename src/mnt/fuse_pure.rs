@@ -59,8 +59,10 @@ pub struct Mount {
     auto_unmount_socket: Option<UnixStream>,
     fuse_device: Arc<File>,
     blocking_umount: bool,
-    umount_flags: Option<Vec<UnmountOption>>,
+    unmount_flags: Option<Vec<UnmountOption>>,
+    unmounted: bool,
 }
+
 impl Mount {
     pub fn new(mountpoint: &Path, options: &[MountOption]) -> io::Result<(Arc<File>, Mount)> {
         let mountpoint = mountpoint.canonicalize()?;
@@ -73,40 +75,59 @@ impl Mount {
                 auto_unmount_socket: sock,
                 fuse_device: file,
                 blocking_umount: false,
-                umount_flags: None,
+                unmount_flags: None,
+                unmounted: false,
             },
         ))
     }
 
     /// Enable or disable blocking if the umount operation is busy
-    pub fn set_blocking_umount(&mut self, blocking: bool) {
+    pub fn set_blocking_unmount(&mut self, blocking: bool) {
         self.blocking_umount = blocking;
     }
 
     /// Override fuser's default umount behavior
-    pub fn set_umount_flags(&mut self, flags: Option<&[UnmountOption]>) {
-        self.umount_flags = flags.map(|f| f.to_vec());
+    pub fn set_unmount_flags(&mut self, flags: Option<&[UnmountOption]>) {
+        self.unmount_flags = flags.map(|f| f.to_vec());
+    }
+
+    /// Internal method for [`Self::unmount`] and [`Self::drop`]
+    fn _unmount(&mut self) -> io::Result<()> {
+        if self.unmounted {
+            return Ok(());
+        }
+        if !is_mounted(&self.fuse_device) {
+            // If the filesystem has already been unmounted, avoid unmounting it again.
+            // Unmounting it a second time could cause a race with a newly mounted filesystem
+            // living at the same mountpoint
+            return Ok(());
+        }
+        if let Some(sock) = mem::take(&mut self.auto_unmount_socket) {
+            drop(sock);
+            // fusermount in auto-unmount mode, no more work to do.
+            return Ok(());
+        }
+        fuse_unmount_pure(
+            &self.mountpoint,
+            self.unmount_flags.as_deref(),
+            self.blocking_umount,
+        )?;
+        self.unmounted = true;
+        Ok(())
+    }
+
+    /// Consume the Mount and unmount the filesystem
+    pub fn unmount(mut self) -> Result<(), (Self, io::Error)> {
+        if let Err(err) = self._unmount() {
+            return Err((self, err));
+        }
+        Ok(())
     }
 }
 
 impl Drop for Mount {
     fn drop(&mut self) {
-        if !is_mounted(&self.fuse_device) {
-            // If the filesystem has already been unmounted, avoid unmounting it again.
-            // Unmounting it a second time could cause a race with a newly mounted filesystem
-            // living at the same mountpoint
-            return;
-        }
-        if let Some(sock) = mem::take(&mut self.auto_unmount_socket) {
-            drop(sock);
-            // fusermount in auto-unmount mode, no more work to do.
-            return;
-        }
-        if let Err(err) = fuse_unmount_pure(
-            &self.mountpoint,
-            self.umount_flags.as_deref(),
-            self.blocking_umount,
-        ) {
+        if let Err(err) = self._unmount() {
             error!("Unmount failed: {}", err)
         }
     }
