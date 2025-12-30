@@ -100,13 +100,18 @@ impl Mount {
             // If the filesystem has already been unmounted, avoid unmounting it again.
             // Unmounting it a second time could cause a race with a newly mounted filesystem
             // living at the same mountpoint
+            self.unmounted = true;
             return Ok(());
         }
-        if let Some(sock) = mem::take(&mut self.auto_unmount_socket) {
-            drop(sock);
-            // fusermount in auto-unmount mode, no more work to do.
-            return Ok(());
-        }
+        // We need to ensure that the filesystem actually unmounted instead of returning Ok when it is still
+        // mounted.
+        // if let Some(sock) = mem::take(&mut self.auto_unmount_socket) {
+        //     sock.shutdown(std::net::Shutdown::Both)?;
+        //     drop(sock);
+        //     // fusermount in auto-unmount mode, no more work to do.
+        //     self.unmounted = true;
+        //     return Ok(());
+        // }
         fuse_unmount_pure(
             &self.mountpoint,
             self.unmount_flags.as_deref(),
@@ -128,7 +133,7 @@ impl Mount {
 impl Drop for Mount {
     fn drop(&mut self) {
         if let Err(err) = self._unmount() {
-            error!("Unmount failed: {}", err)
+            error!("Unmount failed: {}", err);
         }
     }
 }
