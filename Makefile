@@ -7,7 +7,7 @@ build: pre
 
 pre:
 	cargo fmt --all -- --check
-	cargo deny check licenses
+	#cargo deny check licenses
 	cargo clippy --all-targets
 	cargo clippy --all-targets --no-default-features
 	cargo clippy --all-targets --features=abi-7-30

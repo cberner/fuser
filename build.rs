@@ -15,16 +15,16 @@ fn main() {
     {
         println!("cargo:rustc-cfg=fuser_mount_impl=\"pure-rust\"");
     } else if target_os == "macos" {
-        // First try to link with fuse-t
         if pkg_config::Config::new()
-            .atleast_version("1.0.0")
-            .probe("fuse-t")
-            .map_err(|e| eprintln!("{e}"))
+            .atleast_version("2.6.0")
+            .probe("fuse") // for macFUSE 4.x
+            .map_err(|e| println!("cargo:warning=macFUSE not found, {e}, falling back to FUSE-T"))
             .is_err()
         {
+            // Look for to FUSE-T if macFUSE was not found
             pkg_config::Config::new()
-                .atleast_version("2.6.0")
-                .probe("fuse") // for macFUSE 4.x
+                .atleast_version("1.0.0")
+                .probe("fuse-t")
                 .map_err(|e| eprintln!("{e}"))
                 .unwrap();
         }
