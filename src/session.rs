@@ -8,7 +8,6 @@
 use libc::{EAGAIN, EINTR, ENODEV, ENOENT};
 use log::{info, warn};
 use nix::unistd::geteuid;
-use std::fmt;
 use std::io;
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::path::{Path, PathBuf};
@@ -302,6 +301,7 @@ impl<FS: Filesystem> Drop for Session<FS> {
 }
 
 /// The background session data structure
+#[derive(Debug)]
 pub struct BackgroundSession {
     /// Thread guard of the background session
     pub guard: JoinHandle<io::Result<()>>,
@@ -345,13 +345,5 @@ impl BackgroundSession {
     /// Returns an object that can be used to send notifications to the kernel
     pub fn notifier(&self) -> Notifier {
         Notifier::new(self.sender.clone())
-    }
-}
-
-// replace with #[derive(Debug)] if Debug ever gets implemented for
-// thread_scoped::JoinGuard
-impl fmt::Debug for BackgroundSession {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        write!(f, "BackgroundSession {{ guard: JoinGuard<()> }}",)
     }
 }
