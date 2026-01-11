@@ -73,6 +73,9 @@ impl ReplySender for ChannelSender {
         if rc < 0 {
             Err(io::Error::last_os_error())
         } else {
+            // writev is atomic, so do not need to check how many bytes are written.
+            // libfuse does not do it either
+            // https://github.com/libfuse/libfuse/blob/6278995cca991978abd25ebb2c20ebd3fc9e8a13/lib/fuse_lowlevel.c#L267
             debug_assert_eq!(bufs.iter().map(|b| b.len()).sum::<usize>(), rc as usize);
             Ok(())
         }
