@@ -4,6 +4,7 @@ use super::fuse3_sys::{
 };
 use super::{MountOption, with_fuse_args};
 use log::warn;
+use std::os::fd::BorrowedFd;
 use std::{
     ffi::{CString, c_void},
     fs::File,
@@ -57,6 +58,7 @@ impl Mount {
             if fd < 0 {
                 return Err(io::Error::last_os_error());
             }
+            let fd = unsafe { BorrowedFd::borrow_raw(fd) };
             // We dup the fd here as the existing fd is owned by the fuse_session, and we
             // don't want it being closed out from under us:
             let fd = nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(0))?;

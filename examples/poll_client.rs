@@ -12,11 +12,11 @@
 // licensed under the terms of the GNU GPLv2.
 
 use nix::poll;
-use std::os::fd::{AsFd, AsRawFd, RawFd};
+use std::os::fd::AsFd;
 
 const NUMFILES: usize = 16;
 
-fn make_nonblock(fd: RawFd) {
+fn make_nonblock(fd: impl AsFd) {
     use nix::fcntl::{FcntlArg, OFlag, fcntl};
     let arg = FcntlArg::F_SETFL(OFlag::O_NONBLOCK);
     fcntl(fd, arg).expect("failed to set fd nonblocking");
@@ -27,7 +27,7 @@ fn main() -> std::io::Result<()> {
     for c in "0123456789ABCDEF".chars() {
         let name = format!("{c}");
         let f = std::fs::File::open(name)?;
-        make_nonblock(f.as_raw_fd());
+        make_nonblock(&f);
         files.push(f);
     }
     let mut readbuf = vec![0u8; 4096];
@@ -47,8 +47,7 @@ fn main() -> std::io::Result<()> {
                 continue;
             }
             print!("{i:X}:");
-            let fd = pfd.as_fd().as_raw_fd();
-            let nbytes = nix::unistd::read(fd, readbuf.as_mut_slice())?;
+            let nbytes = nix::unistd::read(pfd.as_fd(), readbuf.as_mut_slice())?;
             print!("{nbytes:02} ");
         }
         println!();

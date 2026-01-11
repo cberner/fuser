@@ -287,7 +287,7 @@ fn fuse_mount_fusermount(
     let (child_socket, receive_socket) = UnixStream::pair()?;
 
     // TODO: do not ignore error.
-    let _ = fcntl(child_socket.as_raw_fd(), FcntlArg::F_SETFD(FdFlag::empty()));
+    let _ = fcntl(&child_socket, FcntlArg::F_SETFD(FdFlag::empty()));
 
     let mut builder = Command::new(&fusermount_bin);
     builder.stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -330,11 +330,10 @@ fn fuse_mount_fusermount(
         debug!("fusermount: {}", String::from_utf8_lossy(&output.stderr));
     } else {
         if let Some(mut stdout) = fusermount_child.stdout {
-            let stdout_fd = stdout.as_raw_fd();
             // TODO: do not ignore error.
-            if let Ok(flags) = fcntl(stdout_fd, FcntlArg::F_GETFL) {
+            if let Ok(flags) = fcntl(&stdout, FcntlArg::F_GETFL) {
                 let new_flags = OFlag::from_bits_retain(flags) | OFlag::O_NONBLOCK;
-                let _ = fcntl(stdout_fd, FcntlArg::F_SETFL(new_flags));
+                let _ = fcntl(&stdout, FcntlArg::F_SETFL(new_flags));
             }
             let mut buf = vec![0; 64 * 1024];
             if let Ok(len) = stdout.read(&mut buf) {
@@ -342,11 +341,10 @@ fn fuse_mount_fusermount(
             }
         }
         if let Some(mut stderr) = fusermount_child.stderr {
-            let stderr_fd = stderr.as_raw_fd();
             // TODO: do not ignore error.
-            if let Ok(flags) = fcntl(stderr_fd, FcntlArg::F_GETFL) {
+            if let Ok(flags) = fcntl(&stderr, FcntlArg::F_GETFL) {
                 let new_flags = OFlag::from_bits_retain(flags) | OFlag::O_NONBLOCK;
-                let _ = fcntl(stderr_fd, FcntlArg::F_SETFL(new_flags));
+                let _ = fcntl(&stderr, FcntlArg::F_SETFL(new_flags));
             }
             let mut buf = vec![0; 64 * 1024];
             if let Ok(len) = stderr.read(&mut buf) {
@@ -356,7 +354,7 @@ fn fuse_mount_fusermount(
     }
 
     // TODO: do not ignore error.
-    let _ = fcntl(file.as_raw_fd(), FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC));
+    let _ = fcntl(&file, FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC));
 
     Ok((file, receive_socket))
 }
@@ -373,11 +371,11 @@ fn fuse_mount_mount_fusefs(
         .open("/dev/fuse")?;
 
     // Ensure the file descriptor is preserved across the helper exec.
-    let current_flags = fcntl(fuse_device.as_raw_fd(), FcntlArg::F_GETFD)?;
+    let current_flags = fcntl(&fuse_device, FcntlArg::F_GETFD)?;
 
     if current_flags & FdFlag::FD_CLOEXEC.bits() != 0 {
         let cleared = FdFlag::from_bits_retain(current_flags) & !FdFlag::FD_CLOEXEC;
-        fcntl(fuse_device.as_raw_fd(), FcntlArg::F_SETFD(cleared))?;
+        fcntl(&fuse_device, FcntlArg::F_SETFD(cleared))?;
     }
 
     let mut builder = Command::new(fusermount_bin);
@@ -401,10 +399,7 @@ fn fuse_mount_mount_fusefs(
     }
 
     // TODO: do not ignore error.
-    let _ = fcntl(
-        fuse_device.as_raw_fd(),
-        FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC),
-    );
+    let _ = fcntl(&fuse_device, FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC));
 
     Ok((fuse_device, None))
 }
