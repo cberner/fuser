@@ -81,7 +81,15 @@ impl ReplyRaw {
         let sender = self.sender.take().unwrap();
         let res = response.with_iovec(self.unique, |iov| sender.send(iov));
         if let Err(err) = res {
-            error!("Failed to send FUSE reply: {err}");
+            // ENOENT means the kernel aborted this request before we could reply.
+            // This happens during unmount when the kernel sends abort to all pending
+            // requests. libfuse explicitly ignores ENOENT for this reason:
+            // https://github.com/libfuse/libfuse/blob/master/lib/fuse_lowlevel.c
+            //   "ENOENT means the operation was interrupted"
+            // This is not an error - it's expected kernel behavior during shutdown.
+            if err.raw_os_error() != Some(libc::ENOENT) {
+                error!("Failed to send FUSE reply: {err}");
+            }
         }
     }
     fn send_ll(mut self, response: &ll::Response<'_>) {
