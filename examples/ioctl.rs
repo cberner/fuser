@@ -25,8 +25,8 @@ struct FiocFS {
 
 impl FiocFS {
     fn new() -> Self {
-        let uid = unsafe { libc::getuid() };
-        let gid = unsafe { libc::getgid() };
+        let uid = nix::unistd::getuid().into();
+        let gid = nix::unistd::getgid().into();
 
         let root_attr = FileAttr {
             ino: 1,
