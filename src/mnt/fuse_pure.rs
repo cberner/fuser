@@ -10,6 +10,7 @@ use super::is_mounted;
 use super::mount_options::{MountOption, option_to_string};
 use libc::c_int;
 use log::{debug, error};
+use nix::fcntl::{FcntlArg, FdFlag, OFlag, fcntl};
 use std::ffi::{CStr, CString, OsStr};
 use std::fs::File;
 #[cfg(any(
@@ -285,9 +286,8 @@ fn fuse_mount_fusermount(
 
     let (child_socket, receive_socket) = UnixStream::pair()?;
 
-    unsafe {
-        libc::fcntl(child_socket.as_raw_fd(), libc::F_SETFD, 0);
-    }
+    // TODO: do not ignore error.
+    let _ = fcntl(child_socket.as_raw_fd(), FcntlArg::F_SETFD(FdFlag::empty()));
 
     let mut builder = Command::new(&fusermount_bin);
     builder.stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -331,10 +331,10 @@ fn fuse_mount_fusermount(
     } else {
         if let Some(mut stdout) = fusermount_child.stdout {
             let stdout_fd = stdout.as_raw_fd();
-            unsafe {
-                let mut flags = libc::fcntl(stdout_fd, libc::F_GETFL, 0);
-                flags |= libc::O_NONBLOCK;
-                libc::fcntl(stdout_fd, libc::F_SETFL, flags);
+            // TODO: do not ignore error.
+            if let Ok(flags) = fcntl(stdout_fd, FcntlArg::F_GETFL) {
+                let new_flags = OFlag::from_bits_retain(flags) | OFlag::O_NONBLOCK;
+                let _ = fcntl(stdout_fd, FcntlArg::F_SETFL(new_flags));
             }
             let mut buf = vec![0; 64 * 1024];
             if let Ok(len) = stdout.read(&mut buf) {
@@ -343,10 +343,10 @@ fn fuse_mount_fusermount(
         }
         if let Some(mut stderr) = fusermount_child.stderr {
             let stderr_fd = stderr.as_raw_fd();
-            unsafe {
-                let mut flags = libc::fcntl(stderr_fd, libc::F_GETFL, 0);
-                flags |= libc::O_NONBLOCK;
-                libc::fcntl(stderr_fd, libc::F_SETFL, flags);
+            // TODO: do not ignore error.
+            if let Ok(flags) = fcntl(stderr_fd, FcntlArg::F_GETFL) {
+                let new_flags = OFlag::from_bits_retain(flags) | OFlag::O_NONBLOCK;
+                let _ = fcntl(stderr_fd, FcntlArg::F_SETFL(new_flags));
             }
             let mut buf = vec![0; 64 * 1024];
             if let Ok(len) = stderr.read(&mut buf) {
@@ -355,9 +355,8 @@ fn fuse_mount_fusermount(
         }
     }
 
-    unsafe {
-        libc::fcntl(file.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC);
-    }
+    // TODO: do not ignore error.
+    let _ = fcntl(file.as_raw_fd(), FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC));
 
     Ok((file, receive_socket))
 }
@@ -374,17 +373,11 @@ fn fuse_mount_mount_fusefs(
         .open("/dev/fuse")?;
 
     // Ensure the file descriptor is preserved across the helper exec.
-    let current_flags = unsafe { libc::fcntl(fuse_device.as_raw_fd(), libc::F_GETFD) };
-    if current_flags == -1 {
-        return Err(io::Error::last_os_error());
-    }
+    let current_flags = fcntl(fuse_device.as_raw_fd(), FcntlArg::F_GETFD)?;
 
-    if current_flags & libc::FD_CLOEXEC != 0 {
-        let cleared = current_flags & !libc::FD_CLOEXEC;
-        let ret = unsafe { libc::fcntl(fuse_device.as_raw_fd(), libc::F_SETFD, cleared) };
-        if ret == -1 {
-            return Err(io::Error::last_os_error());
-        }
+    if current_flags & FdFlag::FD_CLOEXEC.bits() != 0 {
+        let cleared = FdFlag::from_bits_retain(current_flags) & !FdFlag::FD_CLOEXEC;
+        fcntl(fuse_device.as_raw_fd(), FcntlArg::F_SETFD(cleared))?;
     }
 
     let mut builder = Command::new(fusermount_bin);
@@ -407,9 +400,11 @@ fn fuse_mount_mount_fusefs(
         ));
     }
 
-    unsafe {
-        libc::fcntl(fuse_device.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC);
-    }
+    // TODO: do not ignore error.
+    let _ = fcntl(
+        fuse_device.as_raw_fd(),
+        FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC),
+    );
 
     Ok((fuse_device, None))
 }
