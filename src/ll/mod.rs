@@ -24,15 +24,10 @@ pub enum TimeOrNow {
 }
 
 macro_rules! errno {
-    ($x: expr_2021) => {
-        Errno(unsafe {
-            // This is a static assertion that the constant $x is > 0
-            const _X: [(); 0 - !{
-                const ASSERT: bool = ($x > 0);
-                ASSERT
-            } as usize] = [];
-            // Which makes this safe
-            NonZeroI32::new_unchecked($x)
+    ($x:expr) => {
+        Errno(match NonZeroI32::new($x) {
+            Some(x) => x,
+            None => panic!(),
         })
     };
 }
