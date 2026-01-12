@@ -6,6 +6,7 @@
 //! data without cloning the data. A reply *must always* be used (by calling either `ok()` or
 //! `error()` exactly once).
 
+use crate::ll::fuse_abi::FopenFlags;
 use crate::ll::{
     self, Generation,
     reply::{DirEntPlusList, DirEntryPlus},
@@ -15,7 +16,7 @@ use crate::ll::{
     reply::{DirEntList, DirEntOffset, DirEntry},
 };
 #[cfg(feature = "abi-7-40")]
-use crate::{consts::FOPEN_PASSTHROUGH, passthrough::BackingId};
+use crate::passthrough::BackingId;
 use libc::c_int;
 use log::{error, warn};
 use std::convert::AsRef;
@@ -279,8 +280,9 @@ impl ReplyOpen {
     /// # Panics
     /// When attempting to use kernel passthrough. Use `opened_passthrough()` instead.
     pub fn opened(self, fh: u64, flags: u32) {
+        let flags = FopenFlags::from_bits_retain(flags);
         #[cfg(feature = "abi-7-40")]
-        assert_eq!(flags & FOPEN_PASSTHROUGH, 0);
+        assert!(!flags.contains(FopenFlags::FOPEN_PASSTHROUGH));
         self.reply
             .send_ll(&ll::Response::new_open(ll::FileHandle(fh), flags, 0));
     }
@@ -298,9 +300,10 @@ impl ReplyOpen {
     /// these.
     #[cfg(feature = "abi-7-40")]
     pub fn opened_passthrough(self, fh: u64, flags: u32, backing_id: &BackingId) {
+        let flags = FopenFlags::from_bits_retain(flags) | FopenFlags::FOPEN_PASSTHROUGH;
         self.reply.send_ll(&ll::Response::new_open(
             ll::FileHandle(fh),
-            flags | FOPEN_PASSTHROUGH,
+            flags,
             backing_id.backing_id,
         ));
     }
@@ -401,8 +404,9 @@ impl ReplyCreate {
     /// # Panics
     /// When attempting to use kernel passthrough. Use `opened_passthrough()` instead.
     pub fn created(self, ttl: &Duration, attr: &FileAttr, generation: u64, fh: u64, flags: u32) {
+        let flags = FopenFlags::from_bits_retain(flags);
         #[cfg(feature = "abi-7-40")]
-        assert_eq!(flags & FOPEN_PASSTHROUGH, 0);
+        assert!(!flags.contains(FopenFlags::FOPEN_PASSTHROUGH));
         self.reply.send_ll(&ll::Response::new_create(
             ttl,
             &attr.into(),
