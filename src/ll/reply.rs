@@ -366,15 +366,18 @@ impl EntListBuf {
     /// value to request the next entries in further readdir calls
     #[must_use]
     pub(crate) fn push(&mut self, ent: [&[u8]; 2]) -> bool {
+        debug_assert!(self.buf.len() % size_of::<u64>() == 0);
+
         let entlen = ent[0].len() + ent[1].len();
-        let entsize = (entlen + size_of::<u64>() - 1) & !(size_of::<u64>() - 1); // 64bit align
+        let entsize = entlen.next_multiple_of(size_of::<u64>()); // 64 bit align
         if self.buf.len() + entsize > self.max_size {
             return true;
         }
+        self.buf.reserve(entsize);
         self.buf.extend_from_slice(ent[0]);
         self.buf.extend_from_slice(ent[1]);
         let padlen = entsize - entlen;
-        self.buf.extend_from_slice(&[0u8; 8][..padlen]);
+        self.buf.resize(self.buf.len() + padlen, 0);
         false
     }
 }
