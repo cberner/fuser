@@ -15,7 +15,7 @@ use super::argument::ArgumentIterator;
 
 /// Error that may occur while reading and parsing a request from the kernel driver.
 #[derive(Debug)]
-pub enum RequestError {
+pub(crate) enum RequestError {
     /// Not enough data for parsing header (short read).
     ShortReadHeader(usize),
     /// Kernel requested an unknown operation.
@@ -38,7 +38,7 @@ pub enum RequestError {
 /// [`SetLkW`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "serializable", derive(Serialize, Deserialize))]
-pub struct RequestId(pub u64);
+pub(crate) struct RequestId(pub(crate) u64);
 impl From<RequestId> for u64 {
     fn from(fh: RequestId) -> Self {
         fh.0
@@ -70,7 +70,7 @@ impl From<RequestId> for u64 {
 /// a [`INodeNo`] from a [`u64`] we must be explicit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "serializable", derive(Serialize, Deserialize))]
-pub struct INodeNo(pub u64);
+pub(crate) struct INodeNo(pub(crate) u64);
 impl From<INodeNo> for u64 {
     fn from(fh: INodeNo) -> Self {
         fh.0
@@ -114,7 +114,7 @@ impl From<INodeNo> for u64 {
 /// a `FileHandle` from a [`u64`] we must be explicit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "serializable", derive(Serialize, Deserialize))]
-pub struct FileHandle(pub u64);
+pub(crate) struct FileHandle(pub(crate) u64);
 
 impl From<FileHandle> for u64 {
     fn from(fh: FileHandle) -> Self {
@@ -133,7 +133,7 @@ impl From<FileHandle> for u64 {
 /// a [`LockOwner`] from a [`u64`] we must be explicit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "serializable", derive(Serialize, Deserialize))]
-pub struct LockOwner(pub u64);
+pub(crate) struct LockOwner(pub(crate) u64);
 
 impl From<LockOwner> for u64 {
     fn from(fh: LockOwner) -> Self {
@@ -142,13 +142,13 @@ impl From<LockOwner> for u64 {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Lock {
+pub(crate) struct Lock {
     // Unfortunately this can't be a std::ops::Range because Range is not Copy:
     // https://github.com/rust-lang/rfcs/issues/2848
-    pub range: (u64, u64),
+    pub(crate) range: (u64, u64),
     // TODO: Make typ an enum
-    pub typ: i32,
-    pub pid: u32,
+    pub(crate) typ: i32,
+    pub(crate) pid: u32,
 }
 impl Lock {
     fn from_abi(x: &abi::fuse_file_lock) -> Lock {
@@ -163,12 +163,12 @@ impl Lock {
 /// A newtype for ABI version
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "serializable", derive(Serialize, Deserialize))]
-pub struct Version(pub u32, pub u32);
+pub(crate) struct Version(pub(crate) u32, pub(crate) u32);
 impl Version {
-    pub fn major(&self) -> u32 {
+    pub(crate) fn major(&self) -> u32 {
         self.0
     }
-    pub fn minor(&self) -> u32 {
+    pub(crate) fn minor(&self) -> u32 {
         self.1
     }
 }
@@ -180,13 +180,13 @@ impl Display for Version {
 
 /// Represents a filename in a directory
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-pub struct FilenameInDir<'a> {
+pub(crate) struct FilenameInDir<'a> {
     /// The Inode number of the directory
-    pub dir: INodeNo,
+    pub(crate) dir: INodeNo,
     /// Name of the file. This refers to a name directly in this directory, rather than any
     /// subdirectory so is guaranteed not to contain '\0' or '/'.  It may be literally "." or ".."
     /// however.
-    pub name: &'a Path,
+    pub(crate) name: &'a Path,
 }
 
 impl fmt::Display for RequestError {
@@ -207,7 +207,7 @@ impl fmt::Display for RequestError {
 }
 
 impl error::Error for RequestError {}
-pub trait Request: Sized {
+pub(crate) trait Request: Sized {
     /// Returns the unique identifier of this request.
     ///
     /// The FUSE kernel driver assigns a unique id to every concurrent request. This allows to
@@ -290,13 +290,13 @@ mod op {
     /// about `INode` lifecycle and the relationship between [`Lookup`] and [`Forget`] in the
     /// documentation for [`INodeNo`].
     #[derive(Debug)]
-    pub struct Lookup<'a> {
+    pub(crate) struct Lookup<'a> {
         header: &'a fuse_in_header,
         name: &'a OsStr,
     }
     impl_request!(Lookup<'_>);
     impl<'a> Lookup<'a> {
-        pub fn name(&self) -> &'a Path {
+        pub(crate) fn name(&self) -> &'a Path {
             self.name.as_ref()
         }
     }
@@ -313,21 +313,21 @@ mod op {
     /// On unmount it is not guaranteed, that all referenced inodes will receive a forget
     /// message.
     #[derive(Debug)]
-    pub struct Forget<'a> {
+    pub(crate) struct Forget<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_forget_in,
     }
     impl_request!(Forget<'_>);
     impl Forget<'_> {
         /// The number of lookups previously performed on this inode
-        pub fn nlookup(&self) -> u64 {
+        pub(crate) fn nlookup(&self) -> u64 {
             self.arg.nlookup
         }
     }
 
     /// Get file attributes.
     #[derive(Debug)]
-    pub struct GetAttr<'a> {
+    pub(crate) struct GetAttr<'a> {
         header: &'a fuse_in_header,
 
         arg: &'a fuse_getattr_in,
@@ -335,7 +335,7 @@ mod op {
     impl_request!(GetAttr<'_>);
 
     impl GetAttr<'_> {
-        pub fn file_handle(&self) -> Option<FileHandle> {
+        pub(crate) fn file_handle(&self) -> Option<FileHandle> {
             if self.arg.getattr_flags & crate::FUSE_GETATTR_FH != 0 {
                 Some(FileHandle(self.arg.fh))
             } else {
@@ -346,37 +346,37 @@ mod op {
 
     /// Set file attributes.
     #[derive(Debug)]
-    pub struct SetAttr<'a> {
+    pub(crate) struct SetAttr<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_setattr_in,
     }
     impl_request!(SetAttr<'_>);
     impl SetAttr<'_> {
-        pub fn mode(&self) -> Option<u32> {
+        pub(crate) fn mode(&self) -> Option<u32> {
             match self.arg.valid & FATTR_MODE {
                 0 => None,
                 _ => Some(self.arg.mode),
             }
         }
-        pub fn uid(&self) -> Option<u32> {
+        pub(crate) fn uid(&self) -> Option<u32> {
             match self.arg.valid & FATTR_UID {
                 0 => None,
                 _ => Some(self.arg.uid),
             }
         }
-        pub fn gid(&self) -> Option<u32> {
+        pub(crate) fn gid(&self) -> Option<u32> {
             match self.arg.valid & FATTR_GID {
                 0 => None,
                 _ => Some(self.arg.gid),
             }
         }
-        pub fn size(&self) -> Option<u64> {
+        pub(crate) fn size(&self) -> Option<u64> {
             match self.arg.valid & FATTR_SIZE {
                 0 => None,
                 _ => Some(self.arg.size),
             }
         }
-        pub fn atime(&self) -> Option<TimeOrNow> {
+        pub(crate) fn atime(&self) -> Option<TimeOrNow> {
             match self.arg.valid & FATTR_ATIME {
                 0 => None,
                 _ => Some(if self.arg.atime_now() {
@@ -389,7 +389,7 @@ mod op {
                 }),
             }
         }
-        pub fn mtime(&self) -> Option<TimeOrNow> {
+        pub(crate) fn mtime(&self) -> Option<TimeOrNow> {
             match self.arg.valid & FATTR_MTIME {
                 0 => None,
                 _ => Some(if self.arg.mtime_now() {
@@ -402,7 +402,7 @@ mod op {
                 }),
             }
         }
-        pub fn ctime(&self) -> Option<SystemTime> {
+        pub(crate) fn ctime(&self) -> Option<SystemTime> {
             #[cfg(feature = "abi-7-23")]
             match self.arg.valid & FATTR_CTIME {
                 0 => None,
@@ -415,13 +415,13 @@ mod op {
         ///
         /// This will only be set if the user passed a file-descriptor to set the
         /// attributes - i.e. they used [`libc::fchmod`] rather than [`libc::chmod`].
-        pub fn file_handle(&self) -> Option<FileHandle> {
+        pub(crate) fn file_handle(&self) -> Option<FileHandle> {
             match self.arg.valid & FATTR_FH {
                 0 => None,
                 _ => Some(FileHandle(self.arg.fh)),
             }
         }
-        pub fn crtime(&self) -> Option<SystemTime> {
+        pub(crate) fn crtime(&self) -> Option<SystemTime> {
             #[cfg(target_os = "macos")]
             match self.arg.valid & FATTR_CRTIME {
                 0 => None,
@@ -436,7 +436,7 @@ mod op {
             #[cfg(not(target_os = "macos"))]
             None
         }
-        pub fn chgtime(&self) -> Option<SystemTime> {
+        pub(crate) fn chgtime(&self) -> Option<SystemTime> {
             #[cfg(target_os = "macos")]
             match self.arg.valid & FATTR_CHGTIME {
                 0 => None,
@@ -447,7 +447,7 @@ mod op {
             #[cfg(not(target_os = "macos"))]
             None
         }
-        pub fn bkuptime(&self) -> Option<SystemTime> {
+        pub(crate) fn bkuptime(&self) -> Option<SystemTime> {
             #[cfg(target_os = "macos")]
             match self.arg.valid & FATTR_BKUPTIME {
                 0 => None,
@@ -459,7 +459,7 @@ mod op {
             #[cfg(not(target_os = "macos"))]
             None
         }
-        pub fn flags(&self) -> Option<u32> {
+        pub(crate) fn flags(&self) -> Option<u32> {
             #[cfg(target_os = "macos")]
             match self.arg.valid & FATTR_FLAGS {
                 0 => None,
@@ -496,24 +496,24 @@ mod op {
 
     /// Read symbolic link.
     #[derive(Debug)]
-    pub struct ReadLink<'a> {
+    pub(crate) struct ReadLink<'a> {
         header: &'a fuse_in_header,
     }
     impl_request!(ReadLink<'_>);
 
     /// Create a symbolic link.
     #[derive(Debug)]
-    pub struct SymLink<'a> {
+    pub(crate) struct SymLink<'a> {
         header: &'a fuse_in_header,
         target: &'a Path,
         link_name: &'a Path,
     }
     impl_request!(SymLink<'_>);
     impl<'a> SymLink<'a> {
-        pub fn target(&self) -> &'a Path {
+        pub(crate) fn target(&self) -> &'a Path {
             self.target
         }
-        pub fn link_name(&self) -> &'a Path {
+        pub(crate) fn link_name(&self) -> &'a Path {
             self.link_name
         }
     }
@@ -521,76 +521,76 @@ mod op {
     /// Create file node.
     /// Create a regular file, character device, block device, fifo or socket node.
     #[derive(Debug)]
-    pub struct MkNod<'a> {
+    pub(crate) struct MkNod<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_mknod_in,
         name: &'a Path,
     }
     impl_request!(MkNod<'_>);
     impl<'a> MkNod<'a> {
-        pub fn name(&self) -> &'a Path {
+        pub(crate) fn name(&self) -> &'a Path {
             self.name
         }
-        pub fn mode(&self) -> u32 {
+        pub(crate) fn mode(&self) -> u32 {
             self.arg.mode
         }
-        pub fn umask(&self) -> u32 {
+        pub(crate) fn umask(&self) -> u32 {
             self.arg.umask
         }
-        pub fn rdev(&self) -> u32 {
+        pub(crate) fn rdev(&self) -> u32 {
             self.arg.rdev
         }
     }
 
     /// Create a directory.
     #[derive(Debug)]
-    pub struct MkDir<'a> {
+    pub(crate) struct MkDir<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_mkdir_in,
         name: &'a Path,
     }
     impl_request!(MkDir<'_>);
     impl<'a> MkDir<'a> {
-        pub fn name(&self) -> &'a Path {
+        pub(crate) fn name(&self) -> &'a Path {
             self.name
         }
-        pub fn mode(&self) -> u32 {
+        pub(crate) fn mode(&self) -> u32 {
             self.arg.mode
         }
-        pub fn umask(&self) -> u32 {
+        pub(crate) fn umask(&self) -> u32 {
             self.arg.umask
         }
     }
 
     /// Remove a file.
     #[derive(Debug)]
-    pub struct Unlink<'a> {
+    pub(crate) struct Unlink<'a> {
         header: &'a fuse_in_header,
         name: &'a Path,
     }
     impl_request!(Unlink<'_>);
     impl<'a> Unlink<'a> {
-        pub fn name(&self) -> &'a Path {
+        pub(crate) fn name(&self) -> &'a Path {
             self.name
         }
     }
 
     /// Remove a directory.
     #[derive(Debug)]
-    pub struct RmDir<'a> {
+    pub(crate) struct RmDir<'a> {
         header: &'a fuse_in_header,
-        pub name: &'a Path,
+        pub(crate) name: &'a Path,
     }
     impl_request!(RmDir<'_>);
     impl<'a> RmDir<'a> {
-        pub fn name(&self) -> &'a Path {
+        pub(crate) fn name(&self) -> &'a Path {
             self.name
         }
     }
 
     /// Rename a file.
     #[derive(Debug)]
-    pub struct Rename<'a> {
+    pub(crate) struct Rename<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_rename_in,
         name: &'a Path,
@@ -598,13 +598,13 @@ mod op {
     }
     impl_request!(Rename<'_>);
     impl<'a> Rename<'a> {
-        pub fn src(&self) -> FilenameInDir<'a> {
+        pub(crate) fn src(&self) -> FilenameInDir<'a> {
             FilenameInDir::<'a> {
                 dir: self.nodeid(),
                 name: self.name,
             }
         }
-        pub fn dest(&self) -> FilenameInDir<'a> {
+        pub(crate) fn dest(&self) -> FilenameInDir<'a> {
             FilenameInDir::<'a> {
                 dir: INodeNo(self.arg.newdir),
                 name: self.newname,
@@ -614,7 +614,7 @@ mod op {
 
     /// Create a hard link.
     #[derive(Debug)]
-    pub struct Link<'a> {
+    pub(crate) struct Link<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_link_in,
         name: &'a Path,
@@ -623,10 +623,10 @@ mod op {
     impl<'a> Link<'a> {
         /// This is the inode no of the file to be linked.  The inode number in
         /// the fuse header is of the directory that it will be linked into.
-        pub fn inode_no(&self) -> INodeNo {
+        pub(crate) fn inode_no(&self) -> INodeNo {
             INodeNo(self.arg.oldnodeid)
         }
-        pub fn dest(&self) -> FilenameInDir<'a> {
+        pub(crate) fn dest(&self) -> FilenameInDir<'a> {
             FilenameInDir::<'a> {
                 dir: self.nodeid(),
                 name: self.name,
@@ -644,13 +644,13 @@ mod op {
     /// filesystem may set, to change the way the file is opened. See `fuse_file_info`
     /// structure in <`fuse_common.h`> for more details.
     #[derive(Debug)]
-    pub struct Open<'a> {
+    pub(crate) struct Open<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_open_in,
     }
     impl_request!(Open<'_>);
     impl Open<'_> {
-        pub fn flags(&self) -> i32 {
+        pub(crate) fn flags(&self) -> i32 {
             self.arg.flags
         }
     }
@@ -663,24 +663,24 @@ mod op {
     /// return value of the read system call will reflect the return value of this
     /// operation.
     #[derive(Debug)]
-    pub struct Read<'a> {
+    pub(crate) struct Read<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_read_in,
     }
     impl_request!(Read<'_>);
     impl Read<'_> {
         /// The value set by the [Open] method.
-        pub fn file_handle(&self) -> FileHandle {
+        pub(crate) fn file_handle(&self) -> FileHandle {
             FileHandle(self.arg.fh)
         }
-        pub fn offset(&self) -> i64 {
+        pub(crate) fn offset(&self) -> i64 {
             self.arg.offset
         }
-        pub fn size(&self) -> u32 {
+        pub(crate) fn size(&self) -> u32 {
             self.arg.size
         }
         /// Only supported with ABI >= 7.9
-        pub fn lock_owner(&self) -> Option<LockOwner> {
+        pub(crate) fn lock_owner(&self) -> Option<LockOwner> {
             if self.arg.read_flags & FUSE_READ_LOCKOWNER != 0 {
                 Some(LockOwner(self.arg.lock_owner))
             } else {
@@ -688,7 +688,7 @@ mod op {
             }
         }
         /// The file flags, such as `O_SYNC`. Only supported with ABI >= 7.9
-        pub fn flags(&self) -> i32 {
+        pub(crate) fn flags(&self) -> i32 {
             self.arg.flags
         }
     }
@@ -700,7 +700,7 @@ mod op {
     /// which case the return value of the write system call will reflect the return
     /// value of this operation.
     #[derive(Debug)]
-    pub struct Write<'a> {
+    pub(crate) struct Write<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_write_in,
         data: &'a [u8],
@@ -708,13 +708,13 @@ mod op {
     impl_request!(Write<'_>);
     impl<'a> Write<'a> {
         /// The value set by the [Open] method.
-        pub fn file_handle(&self) -> FileHandle {
+        pub(crate) fn file_handle(&self) -> FileHandle {
             FileHandle(self.arg.fh)
         }
-        pub fn offset(&self) -> i64 {
+        pub(crate) fn offset(&self) -> i64 {
             self.arg.offset
         }
-        pub fn data(&self) -> &'a [u8] {
+        pub(crate) fn data(&self) -> &'a [u8] {
             self.data
         }
         /// Will contain `FUSE_WRITE_CACHE`, if this write is from the page cache. If set,
@@ -722,11 +722,11 @@ mod op {
         /// is disabled
         ///
         /// TODO: `WriteFlags` type or remove this
-        pub fn write_flags(&self) -> u32 {
+        pub(crate) fn write_flags(&self) -> u32 {
             self.arg.write_flags
         }
         /// `lock_owner`: only supported with ABI >= 7.9
-        pub fn lock_owner(&self) -> Option<LockOwner> {
+        pub(crate) fn lock_owner(&self) -> Option<LockOwner> {
             if self.arg.write_flags & FUSE_WRITE_LOCKOWNER != 0 {
                 Some(LockOwner(self.arg.lock_owner))
             } else {
@@ -735,14 +735,14 @@ mod op {
         }
         /// flags: these are the file flags, such as `O_SYNC`. Only supported with ABI >= 7.9
         /// TODO: Make a Flags type specifying valid values
-        pub fn flags(&self) -> i32 {
+        pub(crate) fn flags(&self) -> i32 {
             self.arg.flags
         }
     }
 
     /// Get file system statistics.
     #[derive(Debug)]
-    pub struct StatFs<'a> {
+    pub(crate) struct StatFs<'a> {
         header: &'a fuse_in_header,
     }
     impl_request!(StatFs<'_>);
@@ -755,25 +755,25 @@ mod op {
     /// error, but error values are not returned to `close()` or `munmap()` which
     /// triggered the release.
     #[derive(Debug)]
-    pub struct Release<'a> {
+    pub(crate) struct Release<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_release_in,
     }
     impl_request!(Release<'_>);
     impl Release<'_> {
-        pub fn flush(&self) -> bool {
+        pub(crate) fn flush(&self) -> bool {
             self.arg.release_flags & FUSE_RELEASE_FLUSH != 0
         }
         /// The value set by the [`Open`] method.
-        pub fn file_handle(&self) -> FileHandle {
+        pub(crate) fn file_handle(&self) -> FileHandle {
             FileHandle(self.arg.fh)
         }
         /// The same flags as for open.
         /// TODO: Document what flags are valid, or remove this
-        pub fn flags(&self) -> i32 {
+        pub(crate) fn flags(&self) -> i32 {
             self.arg.flags
         }
-        pub fn lock_owner(&self) -> Option<LockOwner> {
+        pub(crate) fn lock_owner(&self) -> Option<LockOwner> {
             if self.arg.release_flags & FUSE_RELEASE_FLOCK_UNLOCK != 0 {
                 Some(LockOwner(self.arg.lock_owner))
             } else {
@@ -784,25 +784,25 @@ mod op {
 
     /// Synchronize file contents.
     #[derive(Debug)]
-    pub struct FSync<'a> {
+    pub(crate) struct FSync<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_fsync_in,
     }
     impl_request!(FSync<'a>);
     impl FSync<'_> {
         /// The value set by the [`Open`] method.
-        pub fn file_handle(&self) -> FileHandle {
+        pub(crate) fn file_handle(&self) -> FileHandle {
             FileHandle(self.arg.fh)
         }
         /// If set only the user data should be flushed, not the meta data.
-        pub fn fdatasync(&self) -> bool {
+        pub(crate) fn fdatasync(&self) -> bool {
             self.arg.fsync_flags & consts::FUSE_FSYNC_FDATASYNC != 0
         }
     }
 
     /// Set an extended attribute.
     #[derive(Debug)]
-    pub struct SetXAttr<'a> {
+    pub(crate) struct SetXAttr<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_setxattr_in,
         name: &'a OsStr,
@@ -810,19 +810,19 @@ mod op {
     }
     impl_request!(SetXAttr<'a>);
     impl<'a> SetXAttr<'a> {
-        pub fn name(&self) -> &'a OsStr {
+        pub(crate) fn name(&self) -> &'a OsStr {
             self.name
         }
-        pub fn value(&self) -> &'a [u8] {
+        pub(crate) fn value(&self) -> &'a [u8] {
             self.value
         }
         // TODO: Document what are valid flags
-        pub fn flags(&self) -> i32 {
+        pub(crate) fn flags(&self) -> i32 {
             self.arg.flags
         }
         /// This will always be 0 except on `MacOS`.  It's recommended that
         /// implementations return EINVAL if this is not 0.
-        pub fn position(&self) -> u32 {
+        pub(crate) fn position(&self) -> u32 {
             #[cfg(target_os = "macos")]
             return self.arg.position;
             #[cfg(not(target_os = "macos"))]
@@ -835,7 +835,7 @@ mod op {
     /// If the requested `XAttr` doesn't exist, return [`Err(Errno::NO_XATTR)`] which will
     /// map to the right platform-specific error code.
     #[derive(Debug)]
-    pub struct GetXAttr<'a> {
+    pub(crate) struct GetXAttr<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_getxattr_in,
         name: &'a OsStr,
@@ -846,11 +846,11 @@ mod op {
     ///
     /// Represents a request from the user to get the size of the data stored in the `XAttr`.
     #[derive(Debug)]
-    pub struct GetXAttrSize();
+    pub(crate) struct GetXAttrSize();
 
     #[derive(Debug)]
     /// Return type for [`GetXAttr::size`].
-    pub enum GetXAttrSizeEnum {
+    pub(crate) enum GetXAttrSizeEnum {
         /// User is requesting the size of the data stored in the `XAttr`
         GetSize(GetXAttrSize),
         /// User is requesting the data stored in the `XAttr`.  If the data will fit
@@ -860,7 +860,7 @@ mod op {
     }
     impl<'a> GetXAttr<'a> {
         /// Name of the `XAttr`
-        pub fn name(&self) -> &'a OsStr {
+        pub(crate) fn name(&self) -> &'a OsStr {
             self.name
         }
         /// See [`GetXAttrSizeEnum`].
@@ -869,7 +869,7 @@ mod op {
         /// cost difference between checking the size of the data stored in an `XAttr`
         /// and actually providing the data.  Otherwise just call [`reply()`] with the
         /// data and it will do the right thing.
-        pub fn size(&self) -> GetXAttrSizeEnum {
+        pub(crate) fn size(&self) -> GetXAttrSizeEnum {
             let s: Result<NonZeroU32, _> = self.arg.size.try_into();
             match s {
                 Ok(s) => GetXAttrSizeEnum::Size(s),
@@ -884,7 +884,7 @@ mod op {
 
     /// List extended attribute names.
     #[derive(Debug)]
-    pub struct ListXAttr<'a> {
+    pub(crate) struct ListXAttr<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_getxattr_in,
     }
@@ -895,7 +895,7 @@ mod op {
         /// required to fit the whole list.
         ///
         /// You don't need to worry about this except as an optimisation.
-        pub fn size(&self) -> u32 {
+        pub(crate) fn size(&self) -> u32 {
             self.arg.size
         }
     }
@@ -905,14 +905,14 @@ mod op {
     /// Return [`Err(Errno::NO_XATTR)`] if the xattr doesn't exist
     /// Return [`Err(Errno::ENOTSUP)`] if this filesystem doesn't support `XAttrs`
     #[derive(Debug)]
-    pub struct RemoveXAttr<'a> {
+    pub(crate) struct RemoveXAttr<'a> {
         header: &'a fuse_in_header,
         name: &'a OsStr,
     }
     impl_request!(RemoveXAttr<'a>);
     impl<'a> RemoveXAttr<'a> {
         /// Name of the `XAttr` to remove
-        pub fn name(&self) -> &'a OsStr {
+        pub(crate) fn name(&self) -> &'a OsStr {
             self.name
         }
     }
@@ -929,43 +929,43 @@ mod op {
     /// filesystem wants to return write errors. If the filesystem supports file locking
     /// operations (`setlk`, `getlk`) it should remove all locks belonging to `lock_owner`.
     #[derive(Debug)]
-    pub struct Flush<'a> {
+    pub(crate) struct Flush<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_flush_in,
     }
     impl_request!(Flush<'a>);
     impl Flush<'_> {
         /// The value set by the open method
-        pub fn file_handle(&self) -> FileHandle {
+        pub(crate) fn file_handle(&self) -> FileHandle {
             FileHandle(self.arg.fh)
         }
-        pub fn lock_owner(&self) -> LockOwner {
+        pub(crate) fn lock_owner(&self) -> LockOwner {
             LockOwner(self.arg.lock_owner)
         }
     }
 
     #[derive(Debug)]
-    pub struct Init<'a> {
+    pub(crate) struct Init<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_init_in,
     }
     impl_request!(Init<'a>);
     impl<'a> Init<'a> {
-        pub fn capabilities(&self) -> u64 {
+        pub(crate) fn capabilities(&self) -> u64 {
             #[cfg(feature = "abi-7-36")]
             if self.arg.flags & (FUSE_INIT_EXT as u32) != 0 {
                 return u64::from(self.arg.flags) | (u64::from(self.arg.flags2) << 32);
             }
             u64::from(self.arg.flags)
         }
-        pub fn max_readahead(&self) -> u32 {
+        pub(crate) fn max_readahead(&self) -> u32 {
             self.arg.max_readahead
         }
-        pub fn version(&self) -> super::Version {
+        pub(crate) fn version(&self) -> super::Version {
             super::Version(self.arg.major, self.arg.minor)
         }
 
-        pub fn reply(&self, config: &crate::KernelConfig) -> Response<'a> {
+        pub(crate) fn reply(&self, config: &crate::KernelConfig) -> Response<'a> {
             let flags = self.capabilities() & config.requested; // use requested features and reported as capable
 
             let init = fuse_init_out {
@@ -1013,34 +1013,34 @@ mod op {
     ///
     /// TODO: Document how to implement "standard conforming directory stream operations"
     #[derive(Debug)]
-    pub struct OpenDir<'a> {
+    pub(crate) struct OpenDir<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_open_in,
     }
     impl_request!(OpenDir<'a>);
     impl OpenDir<'_> {
         /// Flags as passed to open
-        pub fn flags(&self) -> i32 {
+        pub(crate) fn flags(&self) -> i32 {
             self.arg.flags
         }
     }
 
     /// Read directory.
     #[derive(Debug)]
-    pub struct ReadDir<'a> {
+    pub(crate) struct ReadDir<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_read_in,
     }
     impl_request!(ReadDir<'a>);
     impl ReadDir<'_> {
         /// The value set by the [`OpenDir`] method.
-        pub fn file_handle(&self) -> FileHandle {
+        pub(crate) fn file_handle(&self) -> FileHandle {
             FileHandle(self.arg.fh)
         }
-        pub fn offset(&self) -> i64 {
+        pub(crate) fn offset(&self) -> i64 {
             self.arg.offset
         }
-        pub fn size(&self) -> u32 {
+        pub(crate) fn size(&self) -> u32 {
             self.arg.size
         }
     }
@@ -1049,20 +1049,20 @@ mod op {
     ///
     /// For every [`OpenDir`] call there will be exactly one [`ReleaseDir`] call.
     #[derive(Debug)]
-    pub struct ReleaseDir<'a> {
+    pub(crate) struct ReleaseDir<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_release_in,
     }
     impl_request!(ReleaseDir<'a>);
     impl ReleaseDir<'_> {
         /// The value set by the [`OpenDir`] method.
-        pub fn file_handle(&self) -> FileHandle {
+        pub(crate) fn file_handle(&self) -> FileHandle {
             FileHandle(self.arg.fh)
         }
-        pub fn flush(&self) -> bool {
+        pub(crate) fn flush(&self) -> bool {
             self.arg.release_flags & consts::FUSE_RELEASE_FLUSH != 0
         }
-        pub fn lock_owner(&self) -> Option<LockOwner> {
+        pub(crate) fn lock_owner(&self) -> Option<LockOwner> {
             if self.arg.release_flags & FUSE_RELEASE_FLOCK_UNLOCK != 0 {
                 Some(LockOwner(self.arg.lock_owner))
             } else {
@@ -1070,45 +1070,45 @@ mod op {
             }
         }
         /// TODO: Document what values this may take
-        pub fn flags(&self) -> i32 {
+        pub(crate) fn flags(&self) -> i32 {
             self.arg.flags
         }
     }
 
     /// Synchronize directory contents.
     #[derive(Debug)]
-    pub struct FSyncDir<'a> {
+    pub(crate) struct FSyncDir<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_fsync_in,
     }
     impl_request!(FSyncDir<'a>);
     impl FSyncDir<'_> {
         /// The value set by the [`OpenDir`] method. See [`FileHandle`].
-        pub fn file_handle(&self) -> FileHandle {
+        pub(crate) fn file_handle(&self) -> FileHandle {
             FileHandle(self.arg.fh)
         }
         /// If set, then only the directory contents should be flushed, not the meta data.
-        pub fn fdatasync(&self) -> bool {
+        pub(crate) fn fdatasync(&self) -> bool {
             self.arg.fsync_flags & consts::FUSE_FSYNC_FDATASYNC != 0
         }
     }
 
     /// Test for a POSIX file lock.
     #[derive(Debug)]
-    pub struct GetLk<'a> {
+    pub(crate) struct GetLk<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_lk_in,
     }
     impl_request!(GetLk<'a>);
     impl GetLk<'_> {
         /// The value set by the [`Open`] method. See [`FileHandle`].
-        pub fn file_handle(&self) -> FileHandle {
+        pub(crate) fn file_handle(&self) -> FileHandle {
             FileHandle(self.arg.fh)
         }
-        pub fn lock(&self) -> Lock {
+        pub(crate) fn lock(&self) -> Lock {
             Lock::from_abi(&self.arg.lk)
         }
-        pub fn lock_owner(&self) -> LockOwner {
+        pub(crate) fn lock_owner(&self) -> LockOwner {
             LockOwner(self.arg.owner)
         }
     }
@@ -1122,38 +1122,38 @@ mod op {
     /// implemented, the kernel will still allow file locking to work locally.
     /// Hence these are only interesting for network filesystems and similar.
     #[derive(Debug)]
-    pub struct SetLk<'a> {
+    pub(crate) struct SetLk<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_lk_in,
     }
     impl_request!(SetLk<'a>);
     impl SetLk<'_> {
         /// The value set by the [`Open`] method. See [`FileHandle`].
-        pub fn file_handle(&self) -> FileHandle {
+        pub(crate) fn file_handle(&self) -> FileHandle {
             FileHandle(self.arg.fh)
         }
-        pub fn lock(&self) -> Lock {
+        pub(crate) fn lock(&self) -> Lock {
             Lock::from_abi(&self.arg.lk)
         }
-        pub fn lock_owner(&self) -> LockOwner {
+        pub(crate) fn lock_owner(&self) -> LockOwner {
             LockOwner(self.arg.owner)
         }
     }
     #[derive(Debug)]
-    pub struct SetLkW<'a> {
+    pub(crate) struct SetLkW<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_lk_in,
     }
     impl_request!(SetLkW<'a>);
     impl SetLkW<'_> {
         /// The value set by the [`Open`] method. See [`FileHandle`].
-        pub fn file_handle(&self) -> FileHandle {
+        pub(crate) fn file_handle(&self) -> FileHandle {
             FileHandle(self.arg.fh)
         }
-        pub fn lock(&self) -> Lock {
+        pub(crate) fn lock(&self) -> Lock {
             Lock::from_abi(&self.arg.lk)
         }
-        pub fn lock_owner(&self) -> LockOwner {
+        pub(crate) fn lock_owner(&self) -> LockOwner {
             LockOwner(self.arg.owner)
         }
     }
@@ -1163,13 +1163,13 @@ mod op {
     /// This will be called for the `access()` system call. If the `default_permissions`
     /// mount option is given, this method is not called.
     #[derive(Debug)]
-    pub struct Access<'a> {
+    pub(crate) struct Access<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_access_in,
     }
     impl_request!(Access<'a>);
     impl Access<'_> {
-        pub fn mask(&self) -> i32 {
+        pub(crate) fn mask(&self) -> i32 {
             self.arg.mask
         }
     }
@@ -1186,24 +1186,24 @@ mod op {
     /// implemented or under Linux kernel versions earlier than 2.6.15, the [`MkNod`]
     /// and [`Open`] methods will be called instead.
     #[derive(Debug)]
-    pub struct Create<'a> {
+    pub(crate) struct Create<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_create_in,
         name: &'a Path,
     }
     impl_request!(Create<'a>);
     impl<'a> Create<'a> {
-        pub fn name(&self) -> &'a Path {
+        pub(crate) fn name(&self) -> &'a Path {
             self.name
         }
-        pub fn mode(&self) -> u32 {
+        pub(crate) fn mode(&self) -> u32 {
             self.arg.mode
         }
         /// Flags as passed to the `create()` call
-        pub fn flags(&self) -> i32 {
+        pub(crate) fn flags(&self) -> i32 {
             self.arg.flags
         }
-        pub fn umask(&self) -> u32 {
+        pub(crate) fn umask(&self) -> u32 {
             self.arg.umask
         }
     }
@@ -1246,13 +1246,13 @@ mod op {
     /// In case (1) the [`Interrupt`] request will be requeued.  In case (2) the
     /// [`Interrupt`] reply will be ignored.
     #[derive(Debug)]
-    pub struct Interrupt<'a> {
+    pub(crate) struct Interrupt<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_interrupt_in,
     }
     impl_request!(Interrupt<'a>);
     impl Interrupt<'_> {
-        pub fn unique(&self) -> RequestId {
+        pub(crate) fn unique(&self) -> RequestId {
             RequestId(self.arg.unique)
         }
     }
@@ -1261,83 +1261,83 @@ mod op {
     /// Note: This makes sense only for block device backed filesystems mounted
     /// with the `blkdev` option
     #[derive(Debug)]
-    pub struct BMap<'a> {
+    pub(crate) struct BMap<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_bmap_in,
     }
     impl_request!(BMap<'a>);
     impl BMap<'_> {
-        pub fn block_size(&self) -> u32 {
+        pub(crate) fn block_size(&self) -> u32 {
             self.arg.blocksize
         }
-        pub fn block(&self) -> u64 {
+        pub(crate) fn block(&self) -> u64 {
             self.arg.block
         }
     }
 
     #[derive(Debug)]
-    pub struct Destroy<'a> {
+    pub(crate) struct Destroy<'a> {
         header: &'a fuse_in_header,
     }
     impl_request!(Destroy<'a>);
     impl<'a> Destroy<'a> {
-        pub fn reply(&self) -> Response<'a> {
+        pub(crate) fn reply(&self) -> Response<'a> {
             Response::new_empty()
         }
     }
 
     /// Control device
     #[derive(Debug)]
-    pub struct IoCtl<'a> {
+    pub(crate) struct IoCtl<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_ioctl_in,
         data: &'a [u8],
     }
     impl_request!(IoCtl<'a>);
     impl IoCtl<'_> {
-        pub fn in_data(&self) -> &[u8] {
+        pub(crate) fn in_data(&self) -> &[u8] {
             &self.data[..self.arg.in_size as usize]
         }
-        pub fn unrestricted(&self) -> bool {
+        pub(crate) fn unrestricted(&self) -> bool {
             self.arg.flags & consts::FUSE_IOCTL_UNRESTRICTED != 0
         }
         /// The value set by the [`Open`] method. See [`FileHandle`].
-        pub fn file_handle(&self) -> FileHandle {
+        pub(crate) fn file_handle(&self) -> FileHandle {
             FileHandle(self.arg.fh)
         }
         /// TODO: What are valid values here?
-        pub fn flags(&self) -> u32 {
+        pub(crate) fn flags(&self) -> u32 {
             self.arg.flags
         }
         /// TODO: What does this mean?
-        pub fn command(&self) -> u32 {
+        pub(crate) fn command(&self) -> u32 {
             self.arg.cmd
         }
-        pub fn out_size(&self) -> u32 {
+        pub(crate) fn out_size(&self) -> u32 {
             self.arg.out_size
         }
     }
 
     /// Poll.
     #[derive(Debug)]
-    pub struct Poll<'a> {
+    pub(crate) struct Poll<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_poll_in,
     }
     impl_request!(Poll<'a>);
     impl Poll<'_> {
         /// The value set by the [`Open`] method. See [`FileHandle`].
-        pub fn file_handle(&self) -> FileHandle {
+        pub(crate) fn file_handle(&self) -> FileHandle {
             FileHandle(self.arg.fh)
         }
 
         /// The unique id used for the poll context by the kernel
-        pub fn kernel_handle(&self) -> u64 {
+        pub(crate) fn kernel_handle(&self) -> u64 {
             self.arg.kh
         }
 
         /// The requested poll events
-        pub fn events(&self) -> u32 {
+        pub(crate) fn events(&self) -> u32 {
             #[cfg(feature = "abi-7-21")]
             return self.arg.events;
             #[cfg(not(feature = "abi-7-21"))]
@@ -1345,14 +1345,14 @@ mod op {
         }
 
         /// The poll request's flags
-        pub fn flags(&self) -> u32 {
+        pub(crate) fn flags(&self) -> u32 {
             self.arg.flags
         }
     }
 
     /// `NotifyReply`.  TODO: currently unsupported by fuser
     #[derive(Debug)]
-    pub struct NotifyReply<'a> {
+    pub(crate) struct NotifyReply<'a> {
         header: &'a fuse_in_header,
         #[allow(unused)]
         arg: &'a [u8],
@@ -1361,7 +1361,7 @@ mod op {
 
     /// `BatchForget`: TODO: merge with Forget
     #[derive(Debug)]
-    pub struct BatchForget<'a> {
+    pub(crate) struct BatchForget<'a> {
         header: &'a fuse_in_header,
         #[allow(unused)]
         arg: &'a fuse_batch_forget_in,
@@ -1370,7 +1370,7 @@ mod op {
     impl_request!(BatchForget<'a>);
     impl<'a> BatchForget<'a> {
         /// TODO: Don't return `fuse_forget_one`, this should be private
-        pub fn nodes(&self) -> &'a [fuse_forget_one] {
+        pub(crate) fn nodes(&self) -> &'a [fuse_forget_one] {
             self.nodes
         }
     }
@@ -1380,7 +1380,7 @@ mod op {
     /// Implementations should return EINVAL if offset or length are < 0
     #[cfg(feature = "abi-7-19")]
     #[derive(Debug)]
-    pub struct FAllocate<'a> {
+    pub(crate) struct FAllocate<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_fallocate_in,
     }
@@ -1389,17 +1389,17 @@ mod op {
     #[cfg(feature = "abi-7-19")]
     impl FAllocate<'_> {
         /// The value set by the [`Open`] method. See [`FileHandle`].
-        pub fn file_handle(&self) -> FileHandle {
+        pub(crate) fn file_handle(&self) -> FileHandle {
             FileHandle(self.arg.fh)
         }
-        pub fn offset(&self) -> i64 {
+        pub(crate) fn offset(&self) -> i64 {
             self.arg.offset
         }
-        pub fn len(&self) -> i64 {
+        pub(crate) fn len(&self) -> i64 {
             self.arg.length
         }
         /// `mode` as passed to fallocate.  See `man 2 fallocate`
-        pub fn mode(&self) -> i32 {
+        pub(crate) fn mode(&self) -> i32 {
             self.arg.mode
         }
     }
@@ -1409,7 +1409,7 @@ mod op {
     /// TODO: Document when this is called rather than `ReadDir`
     #[cfg(feature = "abi-7-21")]
     #[derive(Debug)]
-    pub struct ReadDirPlus<'a> {
+    pub(crate) struct ReadDirPlus<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_read_in,
     }
@@ -1418,13 +1418,13 @@ mod op {
     #[cfg(feature = "abi-7-21")]
     impl ReadDirPlus<'_> {
         /// The value set by the [`Open`] method. See [`FileHandle`].
-        pub fn file_handle(&self) -> FileHandle {
+        pub(crate) fn file_handle(&self) -> FileHandle {
             FileHandle(self.arg.fh)
         }
-        pub fn offset(&self) -> i64 {
+        pub(crate) fn offset(&self) -> i64 {
             self.arg.offset
         }
-        pub fn size(&self) -> u32 {
+        pub(crate) fn size(&self) -> u32 {
             self.arg.size
         }
     }
@@ -1434,7 +1434,7 @@ mod op {
     /// TODO: Document the differences to [`Rename`] and [`Exchange`]
     #[cfg(feature = "abi-7-23")]
     #[derive(Debug)]
-    pub struct Rename2<'a> {
+    pub(crate) struct Rename2<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_rename2_in,
         name: &'a Path,
@@ -1445,13 +1445,13 @@ mod op {
     impl_request!(Rename2<'a>);
     #[cfg(feature = "abi-7-23")]
     impl<'a> Rename2<'a> {
-        pub fn from(&self) -> FilenameInDir<'a> {
+        pub(crate) fn from(&self) -> FilenameInDir<'a> {
             FilenameInDir::<'a> {
                 dir: self.old_parent,
                 name: self.name,
             }
         }
-        pub fn to(&self) -> FilenameInDir<'a> {
+        pub(crate) fn to(&self) -> FilenameInDir<'a> {
             FilenameInDir::<'a> {
                 dir: INodeNo(self.arg.newdir),
                 name: self.newname,
@@ -1463,7 +1463,7 @@ mod op {
         /// reply with an EINVAL error.
         ///
         /// TODO: Replace with enum/flags type
-        pub fn flags(&self) -> u32 {
+        pub(crate) fn flags(&self) -> u32 {
             self.arg.flags
         }
     }
@@ -1473,7 +1473,7 @@ mod op {
     /// TODO: Document when you need to implement this.  Read and Write provide the offset anyway.
     #[cfg(feature = "abi-7-24")]
     #[derive(Debug)]
-    pub struct Lseek<'a> {
+    pub(crate) struct Lseek<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_lseek_in,
     }
@@ -1482,14 +1482,14 @@ mod op {
     #[cfg(feature = "abi-7-24")]
     impl Lseek<'_> {
         /// The value set by the [`Open`] method. See [`FileHandle`].
-        pub fn file_handle(&self) -> FileHandle {
+        pub(crate) fn file_handle(&self) -> FileHandle {
             FileHandle(self.arg.fh)
         }
-        pub fn offset(&self) -> i64 {
+        pub(crate) fn offset(&self) -> i64 {
             self.arg.offset
         }
         /// TODO: Make this return an enum
-        pub fn whence(&self) -> i32 {
+        pub(crate) fn whence(&self) -> i32 {
             self.arg.whence
         }
     }
@@ -1497,15 +1497,15 @@ mod op {
     /// Copy the specified range from the source inode to the destination inode
     #[cfg(feature = "abi-7-28")]
     #[derive(Debug, Clone, Copy)]
-    pub struct CopyFileRangeFile {
-        pub inode: INodeNo,
+    pub(crate) struct CopyFileRangeFile {
+        pub(crate) inode: INodeNo,
         /// The value set by the [`Open`] method. See [`FileHandle`].
-        pub file_handle: FileHandle,
-        pub offset: i64,
+        pub(crate) file_handle: FileHandle,
+        pub(crate) offset: i64,
     }
     #[cfg(feature = "abi-7-28")]
     #[derive(Debug)]
-    pub struct CopyFileRange<'a> {
+    pub(crate) struct CopyFileRange<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_copy_file_range_in,
     }
@@ -1514,7 +1514,7 @@ mod op {
     #[cfg(feature = "abi-7-28")]
     impl CopyFileRange<'_> {
         /// File and offset to copy data from
-        pub fn src(&self) -> CopyFileRangeFile {
+        pub(crate) fn src(&self) -> CopyFileRangeFile {
             CopyFileRangeFile {
                 inode: self.nodeid(),
                 file_handle: FileHandle(self.arg.fh_in),
@@ -1522,7 +1522,7 @@ mod op {
             }
         }
         /// File and offset to copy data to
-        pub fn dest(&self) -> CopyFileRangeFile {
+        pub(crate) fn dest(&self) -> CopyFileRangeFile {
             CopyFileRangeFile {
                 inode: INodeNo(self.arg.nodeid_out),
                 file_handle: FileHandle(self.arg.fh_out),
@@ -1530,11 +1530,11 @@ mod op {
             }
         }
         /// Number of bytes to copy
-        pub fn len(&self) -> u64 {
+        pub(crate) fn len(&self) -> u64 {
             self.arg.len
         }
         // API TODO: Return a specific flags type
-        pub fn flags(&self) -> u64 {
+        pub(crate) fn flags(&self) -> u64 {
             self.arg.flags
         }
     }
@@ -1543,7 +1543,7 @@ mod op {
     /// `FUSE_VOL_RENAME` to enable
     #[cfg(target_os = "macos")]
     #[derive(Debug)]
-    pub struct SetVolName<'a> {
+    pub(crate) struct SetVolName<'a> {
         header: &'a fuse_in_header,
         name: &'a OsStr,
     }
@@ -1551,7 +1551,7 @@ mod op {
     impl_request!(SetVolName<'a>);
     #[cfg(target_os = "macos")]
     impl<'a> SetVolName<'a> {
-        pub fn name(&self) -> &'a OsStr {
+        pub(crate) fn name(&self) -> &'a OsStr {
             self.name
         }
     }
@@ -1560,7 +1560,7 @@ mod op {
     /// during init to `FUSE_XTIMES` to enable
     #[cfg(target_os = "macos")]
     #[derive(Debug)]
-    pub struct GetXTimes<'a> {
+    pub(crate) struct GetXTimes<'a> {
         header: &'a fuse_in_header,
     }
     #[cfg(target_os = "macos")]
@@ -1569,7 +1569,7 @@ mod op {
     /// `MacOS` only (undocumented)
     #[cfg(target_os = "macos")]
     #[derive(Debug)]
-    pub struct Exchange<'a> {
+    pub(crate) struct Exchange<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_exchange_in,
         oldname: &'a Path,
@@ -1579,25 +1579,25 @@ mod op {
     impl_request!(Exchange<'a>);
     #[cfg(target_os = "macos")]
     impl<'a> Exchange<'a> {
-        pub fn from(&self) -> FilenameInDir<'a> {
+        pub(crate) fn from(&self) -> FilenameInDir<'a> {
             FilenameInDir::<'a> {
                 dir: INodeNo(self.arg.olddir),
                 name: self.oldname,
             }
         }
-        pub fn to(&self) -> FilenameInDir<'a> {
+        pub(crate) fn to(&self) -> FilenameInDir<'a> {
             FilenameInDir::<'a> {
                 dir: INodeNo(self.arg.newdir),
                 name: self.newname,
             }
         }
-        pub fn options(&self) -> u64 {
+        pub(crate) fn options(&self) -> u64 {
             self.arg.options
         }
     }
     /// TODO: Document
     #[derive(Debug)]
-    pub struct CuseInit<'a> {
+    pub(crate) struct CuseInit<'a> {
         header: &'a fuse_in_header,
         #[allow(unused)]
         arg: &'a fuse_init_in,
@@ -1851,7 +1851,7 @@ use op::*;
 /// variant needs to match the actual arguments the kernel driver sends for the specific operation.
 #[derive(Debug)]
 #[allow(missing_docs)]
-pub enum Operation<'a> {
+pub(crate) enum Operation<'a> {
     Lookup(Lookup<'a>),
     Forget(Forget<'a>),
     GetAttr(GetAttr<'a>),
@@ -2112,14 +2112,14 @@ impl fmt::Display for Operation<'_> {
 
 /// Low-level request of a filesystem operation the kernel driver wants to perform.
 #[derive(Debug)]
-pub struct AnyRequest<'a> {
+pub(crate) struct AnyRequest<'a> {
     header: &'a fuse_in_header,
     data: &'a [u8],
 }
 impl_request!(AnyRequest<'_>);
 
 impl<'a> AnyRequest<'a> {
-    pub fn operation(&self) -> Result<Operation<'a>, RequestError> {
+    pub(crate) fn operation(&self) -> Result<Operation<'a>, RequestError> {
         // Parse/check opcode
         let opcode = fuse_opcode::try_from(self.header.opcode)
             .map_err(|_: InvalidOpcodeError| RequestError::UnknownOperation(self.header.opcode))?;

@@ -18,7 +18,7 @@ const INLINE_DATA_THRESHOLD: usize = size_of::<u64>() * 4;
 pub(crate) type ResponseBuf = SmallVec<[u8; INLINE_DATA_THRESHOLD]>;
 
 #[derive(Debug)]
-pub enum Response<'a> {
+pub(crate) enum Response<'a> {
     Error(i32),
     Data(ResponseBuf),
     Slice(&'a [u8]),
@@ -330,7 +330,7 @@ pub(crate) fn fuse_attr_from_attr(attr: &crate::FileAttr) -> abi::fuse_attr {
 
 // TODO: Add methods for creating this without making a `FileAttr` first.
 #[derive(Debug, Clone, Copy)]
-pub struct Attr {
+pub(crate) struct Attr {
     pub(crate) attr: abi::fuse_attr,
 }
 impl From<&crate::FileAttr> for Attr {
@@ -381,7 +381,7 @@ impl EntListBuf {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord)]
-pub struct DirEntOffset(pub i64);
+pub(crate) struct DirEntOffset(pub(crate) i64);
 impl From<DirEntOffset> for i64 {
     fn from(x: DirEntOffset) -> Self {
         x.0
@@ -389,7 +389,7 @@ impl From<DirEntOffset> for i64 {
 }
 
 #[derive(Debug)]
-pub struct DirEntry<T: AsRef<Path>> {
+pub(crate) struct DirEntry<T: AsRef<Path>> {
     ino: INodeNo,
     offset: DirEntOffset,
     kind: FileType,
@@ -397,7 +397,7 @@ pub struct DirEntry<T: AsRef<Path>> {
 }
 
 impl<T: AsRef<Path>> DirEntry<T> {
-    pub fn new(ino: INodeNo, offset: DirEntOffset, kind: FileType, name: T) -> DirEntry<T> {
+    pub(crate) fn new(ino: INodeNo, offset: DirEntOffset, kind: FileType, name: T) -> DirEntry<T> {
         DirEntry::<T> {
             ino,
             offset,
@@ -409,7 +409,7 @@ impl<T: AsRef<Path>> DirEntry<T> {
 
 /// Data buffer used to respond to [`Readdir`] requests.
 #[derive(Debug)]
-pub struct DirEntList(EntListBuf);
+pub(crate) struct DirEntList(EntListBuf);
 impl From<DirEntList> for Response<'_> {
     fn from(l: DirEntList) -> Self {
         assert!(l.0.buf.len() <= l.0.max_size);
@@ -425,7 +425,7 @@ impl DirEntList {
     /// A transparent offset value can be provided for each entry. The kernel uses these
     /// value to request the next entries in further readdir calls
     #[must_use]
-    pub fn push<T: AsRef<Path>>(&mut self, ent: &DirEntry<T>) -> bool {
+    pub(crate) fn push<T: AsRef<Path>>(&mut self, ent: &DirEntry<T>) -> bool {
         let name = ent.name.as_ref().as_os_str().as_bytes();
         let header = abi::fuse_dirent {
             ino: ent.ino.into(),
@@ -438,7 +438,7 @@ impl DirEntList {
 }
 
 #[derive(Debug)]
-pub struct DirEntryPlus<T: AsRef<Path>> {
+pub(crate) struct DirEntryPlus<T: AsRef<Path>> {
     #[allow(unused)] // We use `attr.ino` instead
     ino: INodeNo,
     generation: Generation,
@@ -450,7 +450,7 @@ pub struct DirEntryPlus<T: AsRef<Path>> {
 }
 
 impl<T: AsRef<Path>> DirEntryPlus<T> {
-    pub fn new(
+    pub(crate) fn new(
         ino: INodeNo,
         generation: Generation,
         offset: DirEntOffset,
@@ -473,7 +473,7 @@ impl<T: AsRef<Path>> DirEntryPlus<T> {
 
 /// Data buffer used to respond to [`ReaddirPlus`] requests.
 #[derive(Debug)]
-pub struct DirEntPlusList(EntListBuf);
+pub(crate) struct DirEntPlusList(EntListBuf);
 impl From<DirEntPlusList> for Response<'_> {
     fn from(l: DirEntPlusList) -> Self {
         assert!(l.0.buf.len() <= l.0.max_size);
@@ -489,7 +489,7 @@ impl DirEntPlusList {
     /// A transparent offset value can be provided for each entry. The kernel uses these
     /// value to request the next entries in further readdir calls
     #[must_use]
-    pub fn push<T: AsRef<Path>>(&mut self, x: &DirEntryPlus<T>) -> bool {
+    pub(crate) fn push<T: AsRef<Path>>(&mut self, x: &DirEntryPlus<T>) -> bool {
         let name = x.name.as_ref().as_os_str().as_bytes();
         let header = abi::fuse_direntplus {
             entry_out: abi::fuse_entry_out {

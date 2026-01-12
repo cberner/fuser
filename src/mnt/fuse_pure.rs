@@ -52,13 +52,16 @@ const BSD_MNT_NODEV: libc::c_int = 0x0000_0010;
 const BSD_MNT_NODEV: libc::c_int = libc::MNT_NODEV;
 
 #[derive(Debug)]
-pub struct Mount {
+pub(crate) struct Mount {
     mountpoint: CString,
     auto_unmount_socket: Option<UnixStream>,
     fuse_device: Arc<File>,
 }
 impl Mount {
-    pub fn new(mountpoint: &Path, options: &[MountOption]) -> io::Result<(Arc<File>, Mount)> {
+    pub(crate) fn new(
+        mountpoint: &Path,
+        options: &[MountOption],
+    ) -> io::Result<(Arc<File>, Mount)> {
         let mountpoint = mountpoint.canonicalize()?;
         let (file, sock) = fuse_mount_pure(mountpoint.as_os_str(), options)?;
         let file = Arc::new(file);
@@ -546,14 +549,14 @@ fn fuse_mount_sys(_mountpoint: &OsStr, _options: &[MountOption]) -> Result<Optio
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[derive(PartialEq)]
-pub enum MountOptionGroup {
+pub(crate) enum MountOptionGroup {
     KernelOption,
     KernelFlag,
     Fusermount,
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-pub fn option_group(option: &MountOption) -> MountOptionGroup {
+pub(crate) fn option_group(option: &MountOption) -> MountOptionGroup {
     match option {
         MountOption::FSName(_) => MountOptionGroup::Fusermount,
         MountOption::Subtype(_) => MountOptionGroup::Fusermount,
@@ -579,7 +582,7 @@ pub fn option_group(option: &MountOption) -> MountOptionGroup {
 }
 
 #[cfg(target_os = "linux")]
-pub fn option_to_flag(option: &MountOption) -> libc::c_ulong {
+pub(crate) fn option_to_flag(option: &MountOption) -> libc::c_ulong {
     match option {
         MountOption::Dev => 0, // There is no option for dev. It's the absence of NoDev
         MountOption::NoDev => libc::MS_NODEV,
@@ -599,7 +602,7 @@ pub fn option_to_flag(option: &MountOption) -> libc::c_ulong {
 }
 
 #[cfg(target_os = "macos")]
-pub fn option_to_flag(option: &MountOption) -> libc::c_int {
+pub(crate) fn option_to_flag(option: &MountOption) -> libc::c_int {
     match option {
         MountOption::Dev => 0, // There is no option for dev. It's the absence of NoDev
         MountOption::NoDev => BSD_MNT_NODEV,
@@ -632,7 +635,7 @@ pub fn option_to_flag(option: &MountOption) -> libc::c_int {
     target_os = "openbsd",
     target_os = "netbsd"
 ))]
-pub fn option_to_flag(option: &MountOption) -> libc::c_int {
+pub(crate) fn option_to_flag(option: &MountOption) -> libc::c_int {
     match option {
         MountOption::Dev => 0,
         MountOption::NoDev => BSD_MNT_NODEV,

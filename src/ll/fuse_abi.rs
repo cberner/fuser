@@ -25,99 +25,99 @@ use crate::consts::{FATTR_ATIME_NOW, FATTR_MTIME_NOW};
 use std::convert::TryFrom;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
-pub const FUSE_KERNEL_VERSION: u32 = 7;
+pub(crate) const FUSE_KERNEL_VERSION: u32 = 7;
 
 #[cfg(not(feature = "abi-7-19"))]
-pub const FUSE_KERNEL_MINOR_VERSION: u32 = 18;
+pub(crate) const FUSE_KERNEL_MINOR_VERSION: u32 = 18;
 #[cfg(all(feature = "abi-7-19", not(feature = "abi-7-20")))]
-pub const FUSE_KERNEL_MINOR_VERSION: u32 = 19;
+pub(crate) const FUSE_KERNEL_MINOR_VERSION: u32 = 19;
 #[cfg(all(feature = "abi-7-20", not(feature = "abi-7-21")))]
-pub const FUSE_KERNEL_MINOR_VERSION: u32 = 20;
+pub(crate) const FUSE_KERNEL_MINOR_VERSION: u32 = 20;
 #[cfg(all(feature = "abi-7-21", not(feature = "abi-7-22")))]
-pub const FUSE_KERNEL_MINOR_VERSION: u32 = 21;
+pub(crate) const FUSE_KERNEL_MINOR_VERSION: u32 = 21;
 #[cfg(all(feature = "abi-7-22", not(feature = "abi-7-23")))]
-pub const FUSE_KERNEL_MINOR_VERSION: u32 = 22;
+pub(crate) const FUSE_KERNEL_MINOR_VERSION: u32 = 22;
 #[cfg(all(feature = "abi-7-23", not(feature = "abi-7-24")))]
-pub const FUSE_KERNEL_MINOR_VERSION: u32 = 23;
+pub(crate) const FUSE_KERNEL_MINOR_VERSION: u32 = 23;
 #[cfg(all(feature = "abi-7-24", not(feature = "abi-7-25")))]
-pub const FUSE_KERNEL_MINOR_VERSION: u32 = 24;
+pub(crate) const FUSE_KERNEL_MINOR_VERSION: u32 = 24;
 #[cfg(all(feature = "abi-7-25", not(feature = "abi-7-26")))]
-pub const FUSE_KERNEL_MINOR_VERSION: u32 = 25;
+pub(crate) const FUSE_KERNEL_MINOR_VERSION: u32 = 25;
 #[cfg(all(feature = "abi-7-26", not(feature = "abi-7-27")))]
-pub const FUSE_KERNEL_MINOR_VERSION: u32 = 26;
+pub(crate) const FUSE_KERNEL_MINOR_VERSION: u32 = 26;
 #[cfg(all(feature = "abi-7-27", not(feature = "abi-7-28")))]
-pub const FUSE_KERNEL_MINOR_VERSION: u32 = 27;
+pub(crate) const FUSE_KERNEL_MINOR_VERSION: u32 = 27;
 #[cfg(all(feature = "abi-7-28", not(feature = "abi-7-29")))]
-pub const FUSE_KERNEL_MINOR_VERSION: u32 = 28;
+pub(crate) const FUSE_KERNEL_MINOR_VERSION: u32 = 28;
 #[cfg(all(feature = "abi-7-29", not(feature = "abi-7-30")))]
-pub const FUSE_KERNEL_MINOR_VERSION: u32 = 29;
+pub(crate) const FUSE_KERNEL_MINOR_VERSION: u32 = 29;
 #[cfg(all(feature = "abi-7-30", not(feature = "abi-7-31")))]
-pub const FUSE_KERNEL_MINOR_VERSION: u32 = 30;
+pub(crate) const FUSE_KERNEL_MINOR_VERSION: u32 = 30;
 #[cfg(all(feature = "abi-7-31", not(feature = "abi-7-36")))]
-pub const FUSE_KERNEL_MINOR_VERSION: u32 = 31;
+pub(crate) const FUSE_KERNEL_MINOR_VERSION: u32 = 31;
 #[cfg(all(feature = "abi-7-36", not(feature = "abi-7-40")))]
-pub const FUSE_KERNEL_MINOR_VERSION: u32 = 36;
+pub(crate) const FUSE_KERNEL_MINOR_VERSION: u32 = 36;
 #[cfg(feature = "abi-7-40")]
-pub const FUSE_KERNEL_MINOR_VERSION: u32 = 40;
+pub(crate) const FUSE_KERNEL_MINOR_VERSION: u32 = 40;
 
 pub const FUSE_ROOT_ID: u64 = 1;
 
 #[repr(C)]
 #[derive(Debug, IntoBytes, Clone, Copy, KnownLayout, Immutable)]
-pub struct fuse_attr {
-    pub ino: u64,
-    pub size: u64,
-    pub blocks: u64,
+pub(crate) struct fuse_attr {
+    pub(crate) ino: u64,
+    pub(crate) size: u64,
+    pub(crate) blocks: u64,
     // NOTE: this field is defined as u64 in fuse_kernel.h in libfuse. However, it is treated as signed
     // to match stat.st_atime
-    pub atime: i64,
+    pub(crate) atime: i64,
     // NOTE: this field is defined as u64 in fuse_kernel.h in libfuse. However, it is treated as signed
     // to match stat.st_mtime
-    pub mtime: i64,
+    pub(crate) mtime: i64,
     // NOTE: this field is defined as u64 in fuse_kernel.h in libfuse. However, it is treated as signed
     // to match stat.st_ctime
-    pub ctime: i64,
+    pub(crate) ctime: i64,
     #[cfg(target_os = "macos")]
-    pub crtime: u64,
-    pub atimensec: u32,
-    pub mtimensec: u32,
-    pub ctimensec: u32,
+    pub(crate) crtime: u64,
+    pub(crate) atimensec: u32,
+    pub(crate) mtimensec: u32,
+    pub(crate) ctimensec: u32,
     #[cfg(target_os = "macos")]
-    pub crtimensec: u32,
-    pub mode: u32,
-    pub nlink: u32,
-    pub uid: u32,
-    pub gid: u32,
-    pub rdev: u32,
+    pub(crate) crtimensec: u32,
+    pub(crate) mode: u32,
+    pub(crate) nlink: u32,
+    pub(crate) uid: u32,
+    pub(crate) gid: u32,
+    pub(crate) rdev: u32,
     #[cfg(target_os = "macos")]
-    pub flags: u32, // see chflags(2)
-    pub blksize: u32,
-    pub padding: u32,
+    pub(crate) flags: u32, // see chflags(2)
+    pub(crate) blksize: u32,
+    pub(crate) padding: u32,
 }
 
 #[repr(C)]
 #[derive(Debug, IntoBytes, KnownLayout, Immutable)]
-pub struct fuse_kstatfs {
-    pub blocks: u64,  // Total blocks (in units of frsize)
-    pub bfree: u64,   // Free blocks
-    pub bavail: u64,  // Free blocks for unprivileged users
-    pub files: u64,   // Total inodes
-    pub ffree: u64,   // Free inodes
-    pub bsize: u32,   // Filesystem block size
-    pub namelen: u32, // Maximum filename length
-    pub frsize: u32,  // Fundamental file system block size
-    pub padding: u32,
-    pub spare: [u32; 6],
+pub(crate) struct fuse_kstatfs {
+    pub(crate) blocks: u64,  // Total blocks (in units of frsize)
+    pub(crate) bfree: u64,   // Free blocks
+    pub(crate) bavail: u64,  // Free blocks for unprivileged users
+    pub(crate) files: u64,   // Total inodes
+    pub(crate) ffree: u64,   // Free inodes
+    pub(crate) bsize: u32,   // Filesystem block size
+    pub(crate) namelen: u32, // Maximum filename length
+    pub(crate) frsize: u32,  // Fundamental file system block size
+    pub(crate) padding: u32,
+    pub(crate) spare: [u32; 6],
 }
 
 #[repr(C)]
 #[derive(Debug, IntoBytes, FromBytes, KnownLayout, Immutable)]
-pub struct fuse_file_lock {
-    pub start: u64,
-    pub end: u64,
+pub(crate) struct fuse_file_lock {
+    pub(crate) start: u64,
+    pub(crate) end: u64,
     // NOTE: this field is defined as u32 in fuse_kernel.h in libfuse. However, it is treated as signed
-    pub typ: i32,
-    pub pid: u32,
+    pub(crate) typ: i32,
+    pub(crate) pid: u32,
 }
 
 pub mod consts {
@@ -263,12 +263,12 @@ pub mod consts {
 
 /// Invalid opcode error.
 #[derive(Debug)]
-pub struct InvalidOpcodeError;
+pub(crate) struct InvalidOpcodeError;
 
 #[repr(C)]
 #[derive(Debug)]
 #[allow(non_camel_case_types)]
-pub enum fuse_opcode {
+pub(crate) enum fuse_opcode {
     FUSE_LOOKUP = 1,
     FUSE_FORGET = 2, // no reply
     FUSE_GETATTR = 3,
@@ -402,12 +402,12 @@ impl TryFrom<u32> for fuse_opcode {
 
 /// Invalid notify code error.
 #[derive(Debug)]
-pub struct InvalidNotifyCodeError;
+pub(crate) struct InvalidNotifyCodeError;
 
 #[repr(C)]
 #[derive(Debug)]
 #[allow(non_camel_case_types)]
-pub enum fuse_notify_code {
+pub(crate) enum fuse_notify_code {
     FUSE_POLL = 1,
     FUSE_NOTIFY_INVAL_INODE = 2,
     FUSE_NOTIFY_INVAL_ENTRY = 3,
@@ -435,606 +435,606 @@ impl TryFrom<u32> for fuse_notify_code {
 
 #[repr(C)]
 #[derive(Debug, IntoBytes, KnownLayout, Immutable)]
-pub struct fuse_entry_out {
-    pub nodeid: u64,
-    pub generation: u64,
-    pub entry_valid: u64,
-    pub attr_valid: u64,
-    pub entry_valid_nsec: u32,
-    pub attr_valid_nsec: u32,
-    pub attr: fuse_attr,
+pub(crate) struct fuse_entry_out {
+    pub(crate) nodeid: u64,
+    pub(crate) generation: u64,
+    pub(crate) entry_valid: u64,
+    pub(crate) attr_valid: u64,
+    pub(crate) entry_valid_nsec: u32,
+    pub(crate) attr_valid_nsec: u32,
+    pub(crate) attr: fuse_attr,
 }
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
-pub struct fuse_forget_in {
-    pub nlookup: u64,
+pub(crate) struct fuse_forget_in {
+    pub(crate) nlookup: u64,
 }
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
 pub struct fuse_forget_one {
-    pub nodeid: u64,
-    pub nlookup: u64,
+    pub(crate) nodeid: u64,
+    pub(crate) nlookup: u64,
 }
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
-pub struct fuse_batch_forget_in {
-    pub count: u32,
-    pub dummy: u32,
+pub(crate) struct fuse_batch_forget_in {
+    pub(crate) count: u32,
+    pub(crate) dummy: u32,
 }
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
-pub struct fuse_getattr_in {
-    pub getattr_flags: u32,
-    pub dummy: u32,
-    pub fh: u64,
+pub(crate) struct fuse_getattr_in {
+    pub(crate) getattr_flags: u32,
+    pub(crate) dummy: u32,
+    pub(crate) fh: u64,
 }
 
 #[repr(C)]
 #[derive(Debug, IntoBytes, KnownLayout, Immutable)]
-pub struct fuse_attr_out {
-    pub attr_valid: u64,
-    pub attr_valid_nsec: u32,
-    pub dummy: u32,
-    pub attr: fuse_attr,
+pub(crate) struct fuse_attr_out {
+    pub(crate) attr_valid: u64,
+    pub(crate) attr_valid_nsec: u32,
+    pub(crate) dummy: u32,
+    pub(crate) attr: fuse_attr,
 }
 
 #[cfg(target_os = "macos")]
 #[repr(C)]
 #[derive(Debug, IntoBytes, KnownLayout, Immutable)]
-pub struct fuse_getxtimes_out {
-    pub bkuptime: u64,
-    pub crtime: u64,
-    pub bkuptimensec: u32,
-    pub crtimensec: u32,
+pub(crate) struct fuse_getxtimes_out {
+    pub(crate) bkuptime: u64,
+    pub(crate) crtime: u64,
+    pub(crate) bkuptimensec: u32,
+    pub(crate) crtimensec: u32,
 }
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
-pub struct fuse_mknod_in {
-    pub mode: u32,
-    pub rdev: u32,
-    pub umask: u32,
-    pub padding: u32,
+pub(crate) struct fuse_mknod_in {
+    pub(crate) mode: u32,
+    pub(crate) rdev: u32,
+    pub(crate) umask: u32,
+    pub(crate) padding: u32,
 }
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
-pub struct fuse_mkdir_in {
-    pub mode: u32,
-    pub umask: u32,
+pub(crate) struct fuse_mkdir_in {
+    pub(crate) mode: u32,
+    pub(crate) umask: u32,
 }
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
-pub struct fuse_rename_in {
-    pub newdir: u64,
+pub(crate) struct fuse_rename_in {
+    pub(crate) newdir: u64,
     #[cfg(feature = "macfuse-4-compat")]
-    pub flags: u32,
+    pub(crate) flags: u32,
     #[cfg(feature = "macfuse-4-compat")]
-    pub padding: u32,
+    pub(crate) padding: u32,
 }
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
-pub struct fuse_rename2_in {
-    pub newdir: u64,
-    pub flags: u32,
-    pub padding: u32,
+pub(crate) struct fuse_rename2_in {
+    pub(crate) newdir: u64,
+    pub(crate) flags: u32,
+    pub(crate) padding: u32,
 }
 
 #[cfg(target_os = "macos")]
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
-pub struct fuse_exchange_in {
-    pub olddir: u64,
-    pub newdir: u64,
-    pub options: u64,
+pub(crate) struct fuse_exchange_in {
+    pub(crate) olddir: u64,
+    pub(crate) newdir: u64,
+    pub(crate) options: u64,
 }
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
-pub struct fuse_link_in {
-    pub oldnodeid: u64,
+pub(crate) struct fuse_link_in {
+    pub(crate) oldnodeid: u64,
 }
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
-pub struct fuse_setattr_in {
-    pub valid: u32,
-    pub padding: u32,
-    pub fh: u64,
-    pub size: u64,
-    pub lock_owner: u64,
+pub(crate) struct fuse_setattr_in {
+    pub(crate) valid: u32,
+    pub(crate) padding: u32,
+    pub(crate) fh: u64,
+    pub(crate) size: u64,
+    pub(crate) lock_owner: u64,
     // NOTE: this field is defined as u64 in fuse_kernel.h in libfuse. However, it is treated as signed
     // to match stat.st_atime
-    pub atime: i64,
+    pub(crate) atime: i64,
     // NOTE: this field is defined as u64 in fuse_kernel.h in libfuse. However, it is treated as signed
     // to match stat.st_mtime
-    pub mtime: i64,
+    pub(crate) mtime: i64,
     #[cfg(not(feature = "abi-7-23"))]
-    pub unused2: u64,
+    pub(crate) unused2: u64,
     #[cfg(feature = "abi-7-23")]
     // NOTE: this field is defined as u64 in fuse_kernel.h in libfuse. However, it is treated as signed
     // to match stat.st_ctime
-    pub ctime: i64,
-    pub atimensec: u32,
-    pub mtimensec: u32,
+    pub(crate) ctime: i64,
+    pub(crate) atimensec: u32,
+    pub(crate) mtimensec: u32,
     #[cfg(not(feature = "abi-7-23"))]
-    pub unused3: u32,
+    pub(crate) unused3: u32,
     #[cfg(feature = "abi-7-23")]
-    pub ctimensec: u32,
-    pub mode: u32,
-    pub unused4: u32,
-    pub uid: u32,
-    pub gid: u32,
-    pub unused5: u32,
+    pub(crate) ctimensec: u32,
+    pub(crate) mode: u32,
+    pub(crate) unused4: u32,
+    pub(crate) uid: u32,
+    pub(crate) gid: u32,
+    pub(crate) unused5: u32,
     #[cfg(target_os = "macos")]
-    pub bkuptime: u64,
+    pub(crate) bkuptime: u64,
     #[cfg(target_os = "macos")]
-    pub chgtime: u64,
+    pub(crate) chgtime: u64,
     #[cfg(target_os = "macos")]
-    pub crtime: u64,
+    pub(crate) crtime: u64,
     #[cfg(target_os = "macos")]
-    pub bkuptimensec: u32,
+    pub(crate) bkuptimensec: u32,
     #[cfg(target_os = "macos")]
-    pub chgtimensec: u32,
+    pub(crate) chgtimensec: u32,
     #[cfg(target_os = "macos")]
-    pub crtimensec: u32,
+    pub(crate) crtimensec: u32,
     #[cfg(target_os = "macos")]
-    pub flags: u32, // see chflags(2)
+    pub(crate) flags: u32, // see chflags(2)
 }
 
 impl fuse_setattr_in {
-    pub fn atime_now(&self) -> bool {
+    pub(crate) fn atime_now(&self) -> bool {
         self.valid & FATTR_ATIME_NOW != 0
     }
 
-    pub fn mtime_now(&self) -> bool {
+    pub(crate) fn mtime_now(&self) -> bool {
         self.valid & FATTR_MTIME_NOW != 0
     }
 }
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
-pub struct fuse_open_in {
+pub(crate) struct fuse_open_in {
     // NOTE: this field is defined as u32 in fuse_kernel.h in libfuse. However, it is then cast
     // to an i32 when invoking the filesystem's open method and this matches the open() syscall
-    pub flags: i32,
-    pub unused: u32,
+    pub(crate) flags: i32,
+    pub(crate) unused: u32,
 }
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
-pub struct fuse_create_in {
+pub(crate) struct fuse_create_in {
     // NOTE: this field is defined as u32 in fuse_kernel.h in libfuse. However, it is then cast
     // to an i32 when invoking the filesystem's create method and this matches the open() syscall
-    pub flags: i32,
-    pub mode: u32,
-    pub umask: u32,
-    pub padding: u32,
+    pub(crate) flags: i32,
+    pub(crate) mode: u32,
+    pub(crate) umask: u32,
+    pub(crate) padding: u32,
 }
 
 #[repr(C)]
 #[derive(Debug, IntoBytes, KnownLayout, Immutable)]
-pub struct fuse_create_out(pub fuse_entry_out, pub fuse_open_out);
+pub(crate) struct fuse_create_out(pub(crate) fuse_entry_out, pub(crate) fuse_open_out);
 
 #[repr(C)]
 #[derive(Debug, IntoBytes, KnownLayout, Immutable)]
-pub struct fuse_open_out {
-    pub fh: u64,
-    pub open_flags: u32,
+pub(crate) struct fuse_open_out {
+    pub(crate) fh: u64,
+    pub(crate) open_flags: u32,
     #[cfg(not(feature = "abi-7-40"))]
-    pub padding: u32,
+    pub(crate) padding: u32,
     #[cfg(feature = "abi-7-40")]
-    pub backing_id: u32,
+    pub(crate) backing_id: u32,
 }
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
-pub struct fuse_release_in {
-    pub fh: u64,
+pub(crate) struct fuse_release_in {
+    pub(crate) fh: u64,
     // NOTE: this field is defined as u32 in fuse_kernel.h in libfuse. However, it is then cast
     // to an i32 when invoking the filesystem's read method
-    pub flags: i32,
-    pub release_flags: u32,
-    pub lock_owner: u64,
+    pub(crate) flags: i32,
+    pub(crate) release_flags: u32,
+    pub(crate) lock_owner: u64,
 }
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
-pub struct fuse_flush_in {
-    pub fh: u64,
-    pub unused: u32,
-    pub padding: u32,
-    pub lock_owner: u64,
+pub(crate) struct fuse_flush_in {
+    pub(crate) fh: u64,
+    pub(crate) unused: u32,
+    pub(crate) padding: u32,
+    pub(crate) lock_owner: u64,
 }
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
-pub struct fuse_read_in {
-    pub fh: u64,
+pub(crate) struct fuse_read_in {
+    pub(crate) fh: u64,
     // NOTE: this field is defined as u64 in fuse_kernel.h in libfuse. However, it is then cast
     // to an i64 when invoking the filesystem's read method
-    pub offset: i64,
-    pub size: u32,
-    pub read_flags: u32,
-    pub lock_owner: u64,
+    pub(crate) offset: i64,
+    pub(crate) size: u32,
+    pub(crate) read_flags: u32,
+    pub(crate) lock_owner: u64,
     // NOTE: this field is defined as u32 in fuse_kernel.h in libfuse. However, it is then cast
     // to an i32 when invoking the filesystem's read method
-    pub flags: i32,
-    pub padding: u32,
+    pub(crate) flags: i32,
+    pub(crate) padding: u32,
 }
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
-pub struct fuse_write_in {
-    pub fh: u64,
+pub(crate) struct fuse_write_in {
+    pub(crate) fh: u64,
     // NOTE: this field is defined as u64 in fuse_kernel.h in libfuse. However, it is then cast
     // to an i64 when invoking the filesystem's write method
-    pub offset: i64,
-    pub size: u32,
-    pub write_flags: u32,
-    pub lock_owner: u64,
+    pub(crate) offset: i64,
+    pub(crate) size: u32,
+    pub(crate) write_flags: u32,
+    pub(crate) lock_owner: u64,
     // NOTE: this field is defined as u32 in fuse_kernel.h in libfuse. However, it is then cast
     // to an i32 when invoking the filesystem's read method
-    pub flags: i32,
-    pub padding: u32,
+    pub(crate) flags: i32,
+    pub(crate) padding: u32,
 }
 
 #[repr(C)]
 #[derive(Debug, IntoBytes, KnownLayout, Immutable)]
-pub struct fuse_write_out {
-    pub size: u32,
-    pub padding: u32,
+pub(crate) struct fuse_write_out {
+    pub(crate) size: u32,
+    pub(crate) padding: u32,
 }
 
 #[repr(C)]
 #[derive(Debug, IntoBytes, KnownLayout, Immutable)]
-pub struct fuse_statfs_out {
-    pub st: fuse_kstatfs,
+pub(crate) struct fuse_statfs_out {
+    pub(crate) st: fuse_kstatfs,
 }
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
-pub struct fuse_fsync_in {
-    pub fh: u64,
-    pub fsync_flags: u32,
-    pub padding: u32,
+pub(crate) struct fuse_fsync_in {
+    pub(crate) fh: u64,
+    pub(crate) fsync_flags: u32,
+    pub(crate) padding: u32,
 }
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
-pub struct fuse_setxattr_in {
-    pub size: u32,
+pub(crate) struct fuse_setxattr_in {
+    pub(crate) size: u32,
     // NOTE: this field is defined as u32 in fuse_kernel.h in libfuse. However, it is then cast
     // to an i32 when invoking the filesystem's setxattr method
-    pub flags: i32,
+    pub(crate) flags: i32,
     #[cfg(target_os = "macos")]
-    pub position: u32,
+    pub(crate) position: u32,
     #[cfg(target_os = "macos")]
-    pub padding: u32,
+    pub(crate) padding: u32,
 }
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
-pub struct fuse_getxattr_in {
-    pub size: u32,
-    pub padding: u32,
+pub(crate) struct fuse_getxattr_in {
+    pub(crate) size: u32,
+    pub(crate) padding: u32,
     #[cfg(target_os = "macos")]
-    pub position: u32,
+    pub(crate) position: u32,
     #[cfg(target_os = "macos")]
-    pub padding2: u32,
+    pub(crate) padding2: u32,
 }
 
 #[repr(C)]
 #[derive(Debug, IntoBytes, KnownLayout, Immutable)]
-pub struct fuse_getxattr_out {
-    pub size: u32,
-    pub padding: u32,
+pub(crate) struct fuse_getxattr_out {
+    pub(crate) size: u32,
+    pub(crate) padding: u32,
 }
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
-pub struct fuse_lk_in {
-    pub fh: u64,
-    pub owner: u64,
-    pub lk: fuse_file_lock,
-    pub lk_flags: u32,
-    pub padding: u32,
+pub(crate) struct fuse_lk_in {
+    pub(crate) fh: u64,
+    pub(crate) owner: u64,
+    pub(crate) lk: fuse_file_lock,
+    pub(crate) lk_flags: u32,
+    pub(crate) padding: u32,
 }
 
 #[repr(C)]
 #[derive(Debug, IntoBytes, KnownLayout, Immutable)]
-pub struct fuse_lk_out {
-    pub lk: fuse_file_lock,
+pub(crate) struct fuse_lk_out {
+    pub(crate) lk: fuse_file_lock,
 }
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
-pub struct fuse_access_in {
+pub(crate) struct fuse_access_in {
     // NOTE: this field is defined as u32 in fuse_kernel.h in libfuse. However, it is then cast
     // to an i32 when invoking the filesystem's access method
-    pub mask: i32,
-    pub padding: u32,
+    pub(crate) mask: i32,
+    pub(crate) padding: u32,
 }
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
-pub struct fuse_init_in {
-    pub major: u32,
-    pub minor: u32,
-    pub max_readahead: u32,
-    pub flags: u32,
+pub(crate) struct fuse_init_in {
+    pub(crate) major: u32,
+    pub(crate) minor: u32,
+    pub(crate) max_readahead: u32,
+    pub(crate) flags: u32,
     #[cfg(feature = "abi-7-36")]
-    pub flags2: u32,
+    pub(crate) flags2: u32,
     #[cfg(feature = "abi-7-36")]
-    pub unused: [u32; 11],
+    pub(crate) unused: [u32; 11],
 }
 
 #[repr(C)]
 #[derive(Debug, IntoBytes, KnownLayout, Immutable)]
-pub struct fuse_init_out {
-    pub major: u32,
-    pub minor: u32,
-    pub max_readahead: u32,
-    pub flags: u32,
-    pub max_background: u16,
-    pub congestion_threshold: u16,
-    pub max_write: u32,
+pub(crate) struct fuse_init_out {
+    pub(crate) major: u32,
+    pub(crate) minor: u32,
+    pub(crate) max_readahead: u32,
+    pub(crate) flags: u32,
+    pub(crate) max_background: u16,
+    pub(crate) congestion_threshold: u16,
+    pub(crate) max_write: u32,
     #[cfg(feature = "abi-7-23")]
-    pub time_gran: u32,
+    pub(crate) time_gran: u32,
     #[cfg(all(feature = "abi-7-23", not(feature = "abi-7-28")))]
-    pub reserved: [u32; 9],
+    pub(crate) reserved: [u32; 9],
     #[cfg(feature = "abi-7-28")]
-    pub max_pages: u16,
+    pub(crate) max_pages: u16,
     #[cfg(feature = "abi-7-28")]
-    pub unused2: u16,
+    pub(crate) unused2: u16,
     #[cfg(all(feature = "abi-7-28", not(feature = "abi-7-36")))]
-    pub reserved: [u32; 8],
+    pub(crate) reserved: [u32; 8],
     #[cfg(feature = "abi-7-36")]
-    pub flags2: u32,
+    pub(crate) flags2: u32,
     #[cfg(all(feature = "abi-7-36", not(feature = "abi-7-40")))]
-    pub reserved: [u32; 7],
+    pub(crate) reserved: [u32; 7],
     #[cfg(feature = "abi-7-40")]
-    pub max_stack_depth: u32,
+    pub(crate) max_stack_depth: u32,
     #[cfg(feature = "abi-7-40")]
-    pub reserved: [u32; 6],
+    pub(crate) reserved: [u32; 6],
 }
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
-pub struct cuse_init_in {
-    pub major: u32,
-    pub minor: u32,
-    pub unused: u32,
-    pub flags: u32,
+pub(crate) struct cuse_init_in {
+    pub(crate) major: u32,
+    pub(crate) minor: u32,
+    pub(crate) unused: u32,
+    pub(crate) flags: u32,
 }
 
 #[repr(C)]
 #[derive(Debug, KnownLayout, Immutable)]
-pub struct cuse_init_out {
-    pub major: u32,
-    pub minor: u32,
-    pub unused: u32,
-    pub flags: u32,
-    pub max_read: u32,
-    pub max_write: u32,
-    pub dev_major: u32, // chardev major
-    pub dev_minor: u32, // chardev minor
-    pub spare: [u32; 10],
+pub(crate) struct cuse_init_out {
+    pub(crate) major: u32,
+    pub(crate) minor: u32,
+    pub(crate) unused: u32,
+    pub(crate) flags: u32,
+    pub(crate) max_read: u32,
+    pub(crate) max_write: u32,
+    pub(crate) dev_major: u32, // chardev major
+    pub(crate) dev_minor: u32, // chardev minor
+    pub(crate) spare: [u32; 10],
 }
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
-pub struct fuse_interrupt_in {
-    pub unique: u64,
+pub(crate) struct fuse_interrupt_in {
+    pub(crate) unique: u64,
 }
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
-pub struct fuse_bmap_in {
-    pub block: u64,
-    pub blocksize: u32,
-    pub padding: u32,
+pub(crate) struct fuse_bmap_in {
+    pub(crate) block: u64,
+    pub(crate) blocksize: u32,
+    pub(crate) padding: u32,
 }
 
 #[repr(C)]
 #[derive(Debug, IntoBytes, KnownLayout, Immutable)]
-pub struct fuse_bmap_out {
-    pub block: u64,
+pub(crate) struct fuse_bmap_out {
+    pub(crate) block: u64,
 }
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
-pub struct fuse_ioctl_in {
-    pub fh: u64,
-    pub flags: u32,
-    pub cmd: u32,
-    pub arg: u64, // TODO: this is currently unused, but is defined as a void* in libfuse
-    pub in_size: u32,
-    pub out_size: u32,
+pub(crate) struct fuse_ioctl_in {
+    pub(crate) fh: u64,
+    pub(crate) flags: u32,
+    pub(crate) cmd: u32,
+    pub(crate) arg: u64, // TODO: this is currently unused, but is defined as a void* in libfuse
+    pub(crate) in_size: u32,
+    pub(crate) out_size: u32,
 }
 
 #[repr(C)]
 #[derive(Debug, KnownLayout, Immutable)]
-pub struct fuse_ioctl_iovec {
-    pub base: u64,
-    pub len: u64,
+pub(crate) struct fuse_ioctl_iovec {
+    pub(crate) base: u64,
+    pub(crate) len: u64,
 }
 
 #[repr(C)]
 #[derive(Debug, IntoBytes, KnownLayout, Immutable)]
-pub struct fuse_ioctl_out {
-    pub result: i32,
-    pub flags: u32,
-    pub in_iovs: u32,
-    pub out_iovs: u32,
+pub(crate) struct fuse_ioctl_out {
+    pub(crate) result: i32,
+    pub(crate) flags: u32,
+    pub(crate) in_iovs: u32,
+    pub(crate) out_iovs: u32,
 }
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
-pub struct fuse_poll_in {
-    pub fh: u64,
-    pub kh: u64,
-    pub flags: u32,
+pub(crate) struct fuse_poll_in {
+    pub(crate) fh: u64,
+    pub(crate) kh: u64,
+    pub(crate) flags: u32,
     #[cfg(not(feature = "abi-7-21"))]
-    pub padding: u32,
+    pub(crate) padding: u32,
     #[cfg(feature = "abi-7-21")]
-    pub events: u32,
+    pub(crate) events: u32,
 }
 
 #[repr(C)]
 #[derive(Debug, IntoBytes, KnownLayout, Immutable)]
-pub struct fuse_poll_out {
-    pub revents: u32,
-    pub padding: u32,
+pub(crate) struct fuse_poll_out {
+    pub(crate) revents: u32,
+    pub(crate) padding: u32,
 }
 
 #[repr(C)]
 #[derive(Debug, IntoBytes, KnownLayout, Immutable)]
-pub struct fuse_notify_poll_wakeup_out {
-    pub kh: u64,
+pub(crate) struct fuse_notify_poll_wakeup_out {
+    pub(crate) kh: u64,
 }
 
 #[cfg(feature = "abi-7-19")]
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
-pub struct fuse_fallocate_in {
-    pub fh: u64,
+pub(crate) struct fuse_fallocate_in {
+    pub(crate) fh: u64,
     // NOTE: this field is defined as u64 in fuse_kernel.h in libfuse. However, it is treated as signed
-    pub offset: i64,
+    pub(crate) offset: i64,
     // NOTE: this field is defined as u64 in fuse_kernel.h in libfuse. However, it is treated as signed
-    pub length: i64,
+    pub(crate) length: i64,
     // NOTE: this field is defined as u32 in fuse_kernel.h in libfuse. However, it is treated as signed
-    pub mode: i32,
-    pub padding: u32,
+    pub(crate) mode: i32,
+    pub(crate) padding: u32,
 }
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
-pub struct fuse_in_header {
-    pub len: u32,
-    pub opcode: u32,
-    pub unique: u64,
-    pub nodeid: u64,
-    pub uid: u32,
-    pub gid: u32,
-    pub pid: u32,
-    pub padding: u32,
+pub(crate) struct fuse_in_header {
+    pub(crate) len: u32,
+    pub(crate) opcode: u32,
+    pub(crate) unique: u64,
+    pub(crate) nodeid: u64,
+    pub(crate) uid: u32,
+    pub(crate) gid: u32,
+    pub(crate) pid: u32,
+    pub(crate) padding: u32,
 }
 
 #[repr(C)]
 #[derive(Debug, IntoBytes, KnownLayout, Immutable)]
-pub struct fuse_out_header {
-    pub len: u32,
-    pub error: i32,
-    pub unique: u64,
+pub(crate) struct fuse_out_header {
+    pub(crate) len: u32,
+    pub(crate) error: i32,
+    pub(crate) unique: u64,
 }
 
 #[repr(C)]
 #[derive(Debug, IntoBytes, KnownLayout, Immutable)]
-pub struct fuse_dirent {
-    pub ino: u64,
+pub(crate) struct fuse_dirent {
+    pub(crate) ino: u64,
     // NOTE: this field is defined as u64 in fuse_kernel.h in libfuse. However, it is treated as signed
-    pub off: i64,
-    pub namelen: u32,
-    pub typ: u32,
+    pub(crate) off: i64,
+    pub(crate) namelen: u32,
+    pub(crate) typ: u32,
     // followed by name of namelen bytes
 }
 
 #[repr(C)]
 #[derive(Debug, IntoBytes, KnownLayout, Immutable)]
-pub struct fuse_direntplus {
-    pub entry_out: fuse_entry_out,
-    pub dirent: fuse_dirent,
+pub(crate) struct fuse_direntplus {
+    pub(crate) entry_out: fuse_entry_out,
+    pub(crate) dirent: fuse_dirent,
 }
 
 #[repr(C)]
 #[derive(Debug, IntoBytes, KnownLayout, Immutable)]
-pub struct fuse_notify_inval_inode_out {
-    pub ino: u64,
-    pub off: i64,
-    pub len: i64,
+pub(crate) struct fuse_notify_inval_inode_out {
+    pub(crate) ino: u64,
+    pub(crate) off: i64,
+    pub(crate) len: i64,
 }
 
 #[repr(C)]
 #[derive(Debug, IntoBytes, KnownLayout, Immutable)]
-pub struct fuse_notify_inval_entry_out {
-    pub parent: u64,
-    pub namelen: u32,
-    pub padding: u32,
+pub(crate) struct fuse_notify_inval_entry_out {
+    pub(crate) parent: u64,
+    pub(crate) namelen: u32,
+    pub(crate) padding: u32,
 }
 
 #[repr(C)]
 #[derive(Debug, IntoBytes, KnownLayout, Immutable)]
-pub struct fuse_notify_delete_out {
-    pub parent: u64,
-    pub child: u64,
-    pub namelen: u32,
-    pub padding: u32,
+pub(crate) struct fuse_notify_delete_out {
+    pub(crate) parent: u64,
+    pub(crate) child: u64,
+    pub(crate) namelen: u32,
+    pub(crate) padding: u32,
 }
 
 #[repr(C)]
 #[derive(Debug, IntoBytes, KnownLayout, Immutable)]
-pub struct fuse_notify_store_out {
-    pub nodeid: u64,
-    pub offset: u64,
-    pub size: u32,
-    pub padding: u32,
+pub(crate) struct fuse_notify_store_out {
+    pub(crate) nodeid: u64,
+    pub(crate) offset: u64,
+    pub(crate) size: u32,
+    pub(crate) padding: u32,
 }
 
 #[repr(C)]
 #[derive(Debug, KnownLayout, Immutable)]
-pub struct fuse_notify_retrieve_out {
-    pub notify_unique: u64,
-    pub nodeid: u64,
-    pub offset: u64,
-    pub size: u32,
-    pub padding: u32,
+pub(crate) struct fuse_notify_retrieve_out {
+    pub(crate) notify_unique: u64,
+    pub(crate) nodeid: u64,
+    pub(crate) offset: u64,
+    pub(crate) size: u32,
+    pub(crate) padding: u32,
 }
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
-pub struct fuse_notify_retrieve_in {
+pub(crate) struct fuse_notify_retrieve_in {
     // matches the size of fuse_write_in
-    pub dummy1: u64,
-    pub offset: u64,
-    pub size: u32,
-    pub dummy2: u32,
-    pub dummy3: u64,
-    pub dummy4: u64,
+    pub(crate) dummy1: u64,
+    pub(crate) offset: u64,
+    pub(crate) size: u32,
+    pub(crate) dummy2: u32,
+    pub(crate) dummy3: u64,
+    pub(crate) dummy4: u64,
 }
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
-pub struct fuse_lseek_in {
-    pub fh: u64,
-    pub offset: i64,
+pub(crate) struct fuse_lseek_in {
+    pub(crate) fh: u64,
+    pub(crate) offset: i64,
     // NOTE: this field is defined as u32 in fuse_kernel.h in libfuse. However, it is treated as signed
-    pub whence: i32,
-    pub padding: u32,
+    pub(crate) whence: i32,
+    pub(crate) padding: u32,
 }
 
 #[repr(C)]
 #[derive(Debug, IntoBytes, KnownLayout, Immutable)]
-pub struct fuse_lseek_out {
-    pub offset: i64,
+pub(crate) struct fuse_lseek_out {
+    pub(crate) offset: i64,
 }
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
-pub struct fuse_copy_file_range_in {
-    pub fh_in: u64,
+pub(crate) struct fuse_copy_file_range_in {
+    pub(crate) fh_in: u64,
     // NOTE: this field is defined as u64 in fuse_kernel.h in libfuse. However, it is treated as signed
-    pub off_in: i64,
-    pub nodeid_out: u64,
-    pub fh_out: u64,
+    pub(crate) off_in: i64,
+    pub(crate) nodeid_out: u64,
+    pub(crate) fh_out: u64,
     // NOTE: this field is defined as u64 in fuse_kernel.h in libfuse. However, it is treated as signed
-    pub off_out: i64,
-    pub len: u64,
-    pub flags: u64,
+    pub(crate) off_out: i64,
+    pub(crate) len: u64,
+    pub(crate) flags: u64,
 }

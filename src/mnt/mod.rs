@@ -13,7 +13,7 @@ mod fuse3_sys;
 
 #[cfg(fuser_mount_impl = "pure-rust")]
 mod fuse_pure;
-pub mod mount_options;
+pub(crate) mod mount_options;
 
 #[cfg(any(test, fuser_mount_impl = "libfuse2", fuser_mount_impl = "libfuse3"))]
 use fuse2_sys::fuse_args;
@@ -47,11 +47,11 @@ fn with_fuse_args<T, F: FnOnce(&fuse_args) -> T>(options: &[MountOption], f: F) 
 }
 
 #[cfg(fuser_mount_impl = "pure-rust")]
-pub use fuse_pure::Mount;
+pub(crate) use fuse_pure::Mount;
 #[cfg(fuser_mount_impl = "libfuse2")]
-pub use fuse2::Mount;
+pub(crate) use fuse2::Mount;
 #[cfg(fuser_mount_impl = "libfuse3")]
-pub use fuse3::Mount;
+pub(crate) use fuse3::Mount;
 use std::ffi::CStr;
 
 #[inline]
