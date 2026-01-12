@@ -15,6 +15,7 @@ categories = ["external-ffi-bindings", "api-bindings", "filesystem", "os::unix-a
 build = "build.rs"
 
 [dependencies]
+bitflags = "2.9"
 libc = "0.2.51"
 log = "0.4.6"
 memchr = "2.7.2"

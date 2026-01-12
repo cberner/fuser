@@ -22,6 +22,7 @@
 #![allow(missing_docs)]
 
 use crate::consts::{FATTR_ATIME_NOW, FATTR_MTIME_NOW};
+use bitflags::bitflags;
 use std::convert::TryFrom;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
@@ -120,6 +121,33 @@ pub(crate) struct fuse_file_lock {
     pub(crate) pid: u32,
 }
 
+bitflags! {
+    /// Flags returned in open response.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub(crate) struct FopenFlags: u32 {
+        /// bypass page cache for this open file
+        const FOPEN_DIRECT_IO = 1 << 0;
+        /// don't invalidate the data cache on open
+        const FOPEN_KEEP_CACHE = 1 << 1;
+        /// the file is not seekable
+        const FOPEN_NONSEEKABLE = 1 << 2;
+        /// allow caching this directory
+        const FOPEN_CACHE_DIR = 1 << 3;
+        /// the file is stream-like (no file position at all)
+        const FOPEN_STREAM = 1 << 4;
+        /// kernel skips sending FUSE_FLUSH on close
+        const FOPEN_NOFLUSH = 1 << 5;
+        /// allow multiple concurrent writes on the same direct-IO file
+        const FOPEN_PARALLEL_DIRECT_WRITES = 1 << 6;
+        /// the file is fd-backed (via the backing_id field)
+        const FOPEN_PASSTHROUGH = 1 << 7;
+        #[cfg(target_os = "macos")]
+        const FOPEN_PURGE_ATTR = 1 << 30;
+        #[cfg(target_os = "macos")]
+        const FOPEN_PURGE_UBC = 1 << 31;
+    }
+}
+
 pub mod consts {
     // Bitmasks for fuse_setattr_in.valid
     pub const FATTR_MODE: u32 = 1 << 0;
@@ -145,20 +173,25 @@ pub mod consts {
     pub const FATTR_FLAGS: u32 = 1 << 31;
 
     // Flags returned by the open request
-    pub const FOPEN_DIRECT_IO: u32 = 1 << 0; // bypass page cache for this open file
-    pub const FOPEN_KEEP_CACHE: u32 = 1 << 1; // don't invalidate the data cache on open
-    pub const FOPEN_NONSEEKABLE: u32 = 1 << 2; // the file is not seekable
+    // bypass page cache for this open file
+    pub const FOPEN_DIRECT_IO: u32 = super::FopenFlags::FOPEN_DIRECT_IO.bits();
+    // don't invalidate the data cache on open
+    pub const FOPEN_KEEP_CACHE: u32 = super::FopenFlags::FOPEN_KEEP_CACHE.bits();
+    // the file is not seekable
+    pub const FOPEN_NONSEEKABLE: u32 = super::FopenFlags::FOPEN_NONSEEKABLE.bits();
+    // allow caching this directory
     #[cfg(feature = "abi-7-28")]
-    pub const FOPEN_CACHE_DIR: u32 = 1 << 3; // allow caching this directory
+    pub const FOPEN_CACHE_DIR: u32 = super::FopenFlags::FOPEN_CACHE_DIR.bits();
+    // the file is stream-like (no file position at all)
     #[cfg(feature = "abi-7-31")]
-    pub const FOPEN_STREAM: u32 = 1 << 4; // the file is stream-like (no file position at all)
+    pub const FOPEN_STREAM: u32 = super::FopenFlags::FOPEN_STREAM.bits();
+    // the file is fd-backed (via the backing_id field)
     #[cfg(feature = "abi-7-40")]
-    pub const FOPEN_PASSTHROUGH: u32 = 1 << 7; // the file is fd-backed (via the backing_id field)
-
+    pub const FOPEN_PASSTHROUGH: u32 = super::FopenFlags::FOPEN_PASSTHROUGH.bits();
     #[cfg(target_os = "macos")]
-    pub const FOPEN_PURGE_ATTR: u32 = 1 << 30;
+    pub const FOPEN_PURGE_ATTR: u32 = super::FopenFlags::FOPEN_PURGE_ATTR.bits();
     #[cfg(target_os = "macos")]
-    pub const FOPEN_PURGE_UBC: u32 = 1 << 31;
+    pub const FOPEN_PURGE_UBC: u32 = super::FopenFlags::FOPEN_PURGE_UBC.bits();
 
     // Init request/reply flags
     pub const FUSE_ASYNC_READ: u64 = 1 << 0; // asynchronous read requests

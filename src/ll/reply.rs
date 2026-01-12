@@ -8,6 +8,7 @@ use std::{
 
 use crate::FileType;
 
+use super::fuse_abi::FopenFlags;
 use super::{Errno, FileHandle, Generation, INodeNo, fuse_abi as abi};
 use super::{Lock, RequestId};
 use smallvec::{SmallVec, smallvec};
@@ -117,14 +118,13 @@ impl<'a> Response<'a> {
         Self::from_struct(&r)
     }
 
-    // TODO: Could flags be more strongly typed?
-    pub(crate) fn new_open(fh: FileHandle, flags: u32, backing_id: u32) -> Self {
+    pub(crate) fn new_open(fh: FileHandle, flags: FopenFlags, backing_id: u32) -> Self {
         #[cfg(not(feature = "abi-7-40"))]
         let _ = backing_id;
 
         let r = abi::fuse_open_out {
             fh: fh.into(),
-            open_flags: flags,
+            open_flags: flags.bits(),
             #[cfg(not(feature = "abi-7-40"))]
             padding: 0,
             #[cfg(feature = "abi-7-40")]
@@ -186,13 +186,12 @@ impl<'a> Response<'a> {
         Self::from_struct(&r)
     }
 
-    // TODO: Can flags be more strongly typed?
     pub(crate) fn new_create(
         ttl: &Duration,
         attr: &Attr,
         generation: Generation,
         fh: FileHandle,
-        flags: u32,
+        flags: FopenFlags,
         backing_id: u32,
     ) -> Self {
         #[cfg(not(feature = "abi-7-40"))]
@@ -210,7 +209,7 @@ impl<'a> Response<'a> {
             },
             abi::fuse_open_out {
                 fh: fh.into(),
-                open_flags: flags,
+                open_flags: flags.bits(),
                 #[cfg(not(feature = "abi-7-40"))]
                 padding: 0,
                 #[cfg(feature = "abi-7-40")]
@@ -694,7 +693,7 @@ mod test {
             0x00, 0x00, 0x22, 0x11, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x33, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00,
         ];
-        let r = Response::new_open(FileHandle(0x1122), 0x33, 0);
+        let r = Response::new_open(FileHandle(0x1122), FopenFlags::from_bits_retain(0x33), 0);
         assert_eq!(
             r.with_iovec(RequestId(0xdeadbeef), ioslice_to_vec),
             expected
@@ -796,7 +795,7 @@ mod test {
             &attr.into(),
             Generation(0xaa),
             FileHandle(0xbb),
-            0xcc,
+            FopenFlags::from_bits_retain(0xcc),
             0,
         );
         assert_eq!(
