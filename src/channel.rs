@@ -1,14 +1,9 @@
 use std::{
     fs::File,
     io,
-    os::{
-        fd::{AsFd, BorrowedFd},
-        unix::prelude::AsRawFd,
-    },
+    os::fd::{AsFd, BorrowedFd},
     sync::Arc,
 };
-
-use libc::{c_int, c_void, size_t};
 
 #[cfg(feature = "abi-7-40")]
 use crate::passthrough::BackingId;
@@ -34,18 +29,7 @@ impl Channel {
 
     /// Receives data up to the capacity of the given buffer (can block).
     pub(crate) fn receive(&self, buffer: &mut [u8]) -> io::Result<usize> {
-        let rc = unsafe {
-            libc::read(
-                self.0.as_raw_fd(),
-                buffer.as_ptr() as *mut c_void,
-                buffer.len() as size_t,
-            )
-        };
-        if rc < 0 {
-            Err(io::Error::last_os_error())
-        } else {
-            Ok(rc as usize)
-        }
+        Ok(nix::unistd::read(&self.0, buffer)?)
     }
 
     /// Returns a sender object for this channel. The sender object can be
@@ -63,22 +47,12 @@ pub(crate) struct ChannelSender(Arc<File>);
 
 impl ReplySender for ChannelSender {
     fn send(&self, bufs: &[io::IoSlice<'_>]) -> io::Result<()> {
-        let rc = unsafe {
-            libc::writev(
-                self.0.as_raw_fd(),
-                bufs.as_ptr() as *const libc::iovec,
-                bufs.len() as c_int,
-            )
-        };
-        if rc < 0 {
-            Err(io::Error::last_os_error())
-        } else {
-            // writev is atomic, so do not need to check how many bytes are written.
-            // libfuse does not do it either
-            // https://github.com/libfuse/libfuse/blob/6278995cca991978abd25ebb2c20ebd3fc9e8a13/lib/fuse_lowlevel.c#L267
-            debug_assert_eq!(bufs.iter().map(|b| b.len()).sum::<usize>(), rc as usize);
-            Ok(())
-        }
+        let rc = nix::sys::uio::writev(&self.0, bufs)?;
+        // writev is atomic, so do not need to check how many bytes are written.
+        // libfuse does not do it either
+        // https://github.com/libfuse/libfuse/blob/6278995cca991978abd25ebb2c20ebd3fc9e8a13/lib/fuse_lowlevel.c#L267
+        debug_assert_eq!(bufs.iter().map(|b| b.len()).sum::<usize>(), rc);
+        Ok(())
     }
 
     #[cfg(feature = "abi-7-40")]
