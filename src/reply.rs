@@ -32,7 +32,7 @@ use std::time::SystemTime;
 use crate::{FileAttr, FileType};
 
 /// Generic reply callback to send data
-pub trait ReplySender: Send + Sync + Unpin + 'static {
+pub(crate) trait ReplySender: Send + Sync + Unpin + 'static {
     /// Send data.
     fn send(&self, data: &[IoSlice<'_>]) -> std::io::Result<()>;
     /// Open a backing file
@@ -47,7 +47,7 @@ impl fmt::Debug for Box<dyn ReplySender> {
 }
 
 /// Generic reply trait
-pub trait Reply {
+pub(crate) trait Reply {
     /// Create a new reply for the given request
     fn new<S: ReplySender>(unique: u64, sender: S) -> Self;
 }
@@ -547,7 +547,7 @@ pub struct ReplyDirectory {
 
 impl ReplyDirectory {
     /// Creates a new `ReplyDirectory` with a specified buffer size.
-    pub fn new<S: ReplySender>(unique: u64, sender: S, size: usize) -> ReplyDirectory {
+    pub(crate) fn new<S: ReplySender>(unique: u64, sender: S, size: usize) -> ReplyDirectory {
         ReplyDirectory {
             reply: Reply::new(unique, sender),
             data: DirEntList::new(size),
@@ -590,7 +590,8 @@ pub struct ReplyDirectoryPlus {
 
 impl ReplyDirectoryPlus {
     /// Creates a new `ReplyDirectory` with a specified buffer size.
-    pub fn new<S: ReplySender>(unique: u64, sender: S, size: usize) -> ReplyDirectoryPlus {
+    #[cfg_attr(not(feature = "abi-7-21"), expect(dead_code))]
+    pub(crate) fn new<S: ReplySender>(unique: u64, sender: S, size: usize) -> ReplyDirectoryPlus {
         ReplyDirectoryPlus {
             reply: Reply::new(unique, sender),
             buf: DirEntPlusList::new(size),
