@@ -47,7 +47,7 @@ impl fmt::Debug for Box<dyn ReplySender> {
 }
 
 /// Generic reply trait
-pub(crate) trait Reply {
+pub(crate) trait Reply: Send + 'static {
     /// Create a new reply for the given request
     fn new<S: ReplySender>(unique: u64, sender: S) -> Self;
 }
