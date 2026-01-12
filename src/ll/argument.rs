@@ -8,30 +8,30 @@ use std::os::unix::ffi::OsStrExt;
 use zerocopy::{FromBytes, Immutable, KnownLayout};
 
 /// An iterator that can be used to fetch typed arguments from a byte slice.
-pub struct ArgumentIterator<'a> {
+pub(crate) struct ArgumentIterator<'a> {
     data: &'a [u8],
 }
 
 impl<'a> ArgumentIterator<'a> {
     /// Create a new argument iterator for the given byte slice.
-    pub fn new(data: &'a [u8]) -> ArgumentIterator<'a> {
+    pub(crate) fn new(data: &'a [u8]) -> ArgumentIterator<'a> {
         ArgumentIterator { data }
     }
 
     /// Returns the size of the remaining data.
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.data.len()
     }
 
     /// Fetch a slice of all remaining bytes.
-    pub fn fetch_all(&mut self) -> &'a [u8] {
+    pub(crate) fn fetch_all(&mut self) -> &'a [u8] {
         let bytes = self.data;
         self.data = &[];
         bytes
     }
 
     /// Fetch a typed argument. Returns `None` if there's not enough data left.
-    pub fn fetch<T: FromBytes + KnownLayout + Immutable>(&mut self) -> Option<&'a T> {
+    pub(crate) fn fetch<T: FromBytes + KnownLayout + Immutable>(&mut self) -> Option<&'a T> {
         match zerocopy::Ref::<_, T>::from_prefix(self.data) {
             Err(_err) => {
                 // TODO: do something with _err
@@ -53,7 +53,10 @@ impl<'a> ArgumentIterator<'a> {
     }
 
     /// Fetch a slice of typed of arguments. Returns `None` if there's not enough data left.
-    pub fn fetch_slice<T: FromBytes + Immutable>(&mut self, count: usize) -> Option<&'a [T]> {
+    pub(crate) fn fetch_slice<T: FromBytes + Immutable>(
+        &mut self,
+        count: usize,
+    ) -> Option<&'a [T]> {
         match zerocopy::Ref::<_, [T]>::from_prefix_with_elems(self.data, count) {
             Err(_err) => {
                 // TODO: do something with _err
@@ -76,7 +79,7 @@ impl<'a> ArgumentIterator<'a> {
 
     /// Fetch a (zero-terminated) string (can be non-utf8). Returns `None` if there's not enough
     /// data left or no zero-termination could be found.
-    pub fn fetch_str(&mut self) -> Option<&'a OsStr> {
+    pub(crate) fn fetch_str(&mut self) -> Option<&'a OsStr> {
         let len = memchr::memchr(0, self.data)?;
         let (out, rest) = self.data.split_at(len);
         self.data = &rest[1..];
@@ -85,7 +88,7 @@ impl<'a> ArgumentIterator<'a> {
 }
 
 #[cfg(test)]
-pub mod tests {
+pub(crate) mod tests {
 
     use super::super::test::AlignedData;
     use super::*;

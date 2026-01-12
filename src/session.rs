@@ -24,7 +24,7 @@ use crate::{channel::ChannelSender, notify::Notifier};
 /// The max size of write requests from the kernel. The absolute minimum is 4k,
 /// FUSE recommends at least 128k, max 16M. The FUSE default is 16M on macOS
 /// and 128k on other systems.
-pub const MAX_WRITE_SIZE: usize = 16 * 1024 * 1024;
+pub(crate) const MAX_WRITE_SIZE: usize = 16 * 1024 * 1024;
 
 /// Size of the buffer for reading a request from the kernel. Since the kernel may send
 /// up to `MAX_WRITE_SIZE` bytes in a write request, we use that value plus some extra space.

@@ -1,15 +1,17 @@
 //! Low-level kernel communication.
 
 mod argument;
-pub mod fuse_abi;
+pub(crate) mod fuse_abi;
 pub(crate) mod notify;
 pub(crate) mod reply;
 pub(crate) mod request;
 
 use std::{convert::TryInto, num::NonZeroI32, time::SystemTime};
 
-pub use reply::Response;
-pub use request::{AnyRequest, FileHandle, INodeNo, Lock, Operation, Request, RequestId, Version};
+pub(crate) use reply::Response;
+pub(crate) use request::{
+    AnyRequest, FileHandle, INodeNo, Lock, Operation, Request, RequestId, Version,
+};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 /// Possible input arguments for atime & mtime, which can either be set to a specified time,
@@ -296,7 +298,7 @@ mod test {
         }
     }
 
-    pub fn ioslice_to_vec(s: &[IoSlice<'_>]) -> Vec<u8> {
+    pub(crate) fn ioslice_to_vec(s: &[IoSlice<'_>]) -> Vec<u8> {
         let mut v = Vec::with_capacity(s.iter().map(|x| x.len()).sum());
         for x in s {
             v.extend_from_slice(x);

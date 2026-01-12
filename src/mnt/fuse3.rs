@@ -25,12 +25,12 @@ fn ensure_last_os_error() -> io::Error {
 }
 
 #[derive(Debug)]
-pub struct Mount {
+pub(crate) struct Mount {
     fuse_session: *mut c_void,
     mountpoint: CString,
 }
 impl Mount {
-    pub fn new(mnt: &Path, options: &[MountOption]) -> io::Result<(Arc<File>, Mount)> {
+    pub(crate) fn new(mnt: &Path, options: &[MountOption]) -> io::Result<(Arc<File>, Mount)> {
         let mnt = CString::new(mnt.as_os_str().as_bytes()).unwrap();
         with_fuse_args(options, |args| {
             let ops = fuse_lowlevel_ops::default();
