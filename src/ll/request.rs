@@ -164,14 +164,6 @@ impl Lock {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "serializable", derive(Serialize, Deserialize))]
 pub(crate) struct Version(pub(crate) u32, pub(crate) u32);
-impl Version {
-    pub(crate) fn major(&self) -> u32 {
-        self.0
-    }
-    pub(crate) fn minor(&self) -> u32 {
-        self.1
-    }
-}
 impl Display for Version {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}.{}", self.0, self.1)

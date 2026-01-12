@@ -16,7 +16,7 @@ use std::thread::{self, JoinHandle};
 
 use crate::Filesystem;
 use crate::MountOption;
-use crate::ll::fuse_abi as abi;
+use crate::ll::{Version, fuse_abi as abi};
 use crate::request::Request;
 use crate::{channel::Channel, mnt::Mount};
 use crate::{channel::ChannelSender, notify::Notifier};
@@ -56,12 +56,9 @@ pub struct Session<FS: Filesystem> {
     pub(crate) allowed: SessionACL,
     /// User that launched the fuser process
     pub(crate) session_owner: u32,
-    /// FUSE protocol major version
-    pub(crate) proto_major: u32,
-    /// FUSE protocol minor version
-    pub(crate) proto_minor: u32,
-    /// True if the filesystem is initialized (init operation done)
-    pub(crate) initialized: bool,
+    /// FUSE protocol version, as reported by the kernel.
+    /// The field is set to `Some` when the init message is received.
+    pub(crate) proto_version: Option<Version>,
     /// True if the filesystem was destroyed (destroy operation done)
     pub(crate) destroyed: bool,
 }
@@ -115,9 +112,7 @@ impl<FS: Filesystem> Session<FS> {
             mount: Arc::new(Mutex::new(Some((mountpoint.to_owned(), mount)))),
             allowed,
             session_owner: geteuid().as_raw(),
-            proto_major: 0,
-            proto_minor: 0,
-            initialized: false,
+            proto_version: None,
             destroyed: false,
         })
     }
@@ -132,9 +127,7 @@ impl<FS: Filesystem> Session<FS> {
             mount: Arc::new(Mutex::new(None)),
             allowed: acl,
             session_owner: geteuid().as_raw(),
-            proto_major: 0,
-            proto_minor: 0,
-            initialized: false,
+            proto_version: None,
             destroyed: false,
         }
     }

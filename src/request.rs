@@ -129,15 +129,15 @@ impl<'a> Request<'a> {
                     error!("Unsupported FUSE ABI version {v}");
                     return Err(Errno::EPROTO);
                 }
-                // Remember ABI version supported by kernel
-                se.proto_major = v.major();
-                se.proto_minor = v.minor();
 
                 let mut config = KernelConfig::new(x.capabilities(), x.max_readahead());
                 // Call filesystem init method and give it a chance to return an error
                 se.filesystem
                     .init(self, &mut config)
                     .map_err(Errno::from_i32)?;
+
+                // Remember the ABI version supported by kernel and mark the session initialized.
+                se.proto_version = Some(v);
 
                 // Reply with our desired version and settings. If the kernel supports a
                 // larger major version, it'll re-send a matching init message. If it
@@ -150,11 +150,11 @@ impl<'a> Request<'a> {
                     config.max_readahead,
                     config.max_write
                 );
-                se.initialized = true;
+
                 return Ok(Some(x.reply(&config)));
             }
             // Any operation is invalid before initialization
-            _ if !se.initialized => {
+            _ if se.proto_version.is_none() => {
                 warn!("Ignoring FUSE operation before init: {}", self.request);
                 return Err(Errno::EIO);
             }
