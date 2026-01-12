@@ -38,7 +38,7 @@ pub use reply::ReplyPoll;
 #[cfg(target_os = "macos")]
 pub use reply::ReplyXTimes;
 pub use reply::ReplyXattr;
-pub use reply::{Reply, ReplyAttr, ReplyData, ReplyEmpty, ReplyEntry, ReplyOpen};
+pub use reply::{ReplyAttr, ReplyData, ReplyEmpty, ReplyEntry, ReplyOpen};
 pub use reply::{
     ReplyBmap, ReplyCreate, ReplyDirectory, ReplyDirectoryPlus, ReplyIoctl, ReplyLock, ReplyLseek,
     ReplyStatfs, ReplyWrite,
