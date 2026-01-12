@@ -187,7 +187,7 @@ fn receive_fusermount_message(socket: &UnixStream) -> Result<File, Error> {
         iov_base: io_vec_buf.as_mut_ptr() as *mut libc::c_void,
         iov_len: io_vec_buf.len(),
     };
-    let cmsg_buffer_len = unsafe { libc::CMSG_SPACE(mem::size_of::<c_int>() as libc::c_uint) };
+    let cmsg_buffer_len = unsafe { libc::CMSG_SPACE(size_of::<c_int>() as libc::c_uint) };
     let mut cmsg_buffer = vec![0u8; cmsg_buffer_len as usize];
     let mut message: libc::msghdr;
     #[cfg(all(target_os = "linux", not(target_env = "musl")))]

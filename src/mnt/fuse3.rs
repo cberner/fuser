@@ -39,7 +39,7 @@ impl Mount {
                 fuse_session_new(
                     args,
                     &ops as *const _,
-                    std::mem::size_of::<fuse_lowlevel_ops>(),
+                    size_of::<fuse_lowlevel_ops>(),
                     ptr::null_mut(),
                 )
             };

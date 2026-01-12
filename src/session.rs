@@ -149,7 +149,7 @@ impl<FS: Filesystem> Session<FS> {
         // Buffer for receiving requests from the kernel. Only one is allocated and
         // it is reused immediately after dispatching to conserve memory and allocations.
         let mut buffer = vec![0; BUFFER_SIZE];
-        let buf = aligned_sub_buf(&mut buffer, std::mem::align_of::<abi::fuse_in_header>());
+        let buf = aligned_sub_buf(&mut buffer, align_of::<abi::fuse_in_header>());
         loop {
             // Read the next request from the given channel to kernel driver
             // The kernel driver makes sure that we get exactly one request per read
