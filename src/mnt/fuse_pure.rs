@@ -24,11 +24,13 @@ use std::fs::File;
 use std::fs::OpenOptions;
 use std::io;
 use std::io::{Error, ErrorKind, Read};
+use std::os::fd::BorrowedFd;
 use std::os::unix::ffi::OsStrExt;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::os::unix::net::UnixStream;
+use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
@@ -362,7 +364,6 @@ fn fuse_mount_fusermount(
     Ok((file, receive_socket))
 }
 
-// TODO: This method was written by Codex, and seems to work, but it would be good to audit it more thoroughly.
 fn fuse_mount_mount_fusefs(
     fusermount_bin: &str,
     mountpoint: &OsStr,
@@ -373,13 +374,7 @@ fn fuse_mount_mount_fusefs(
         .write(true)
         .open("/dev/fuse")?;
 
-    // Ensure the file descriptor is preserved across the helper exec.
-    let current_flags = fcntl(&fuse_device, FcntlArg::F_GETFD)?;
-
-    if current_flags & FdFlag::FD_CLOEXEC.bits() != 0 {
-        let cleared = FdFlag::from_bits_retain(current_flags) & !FdFlag::FD_CLOEXEC;
-        fcntl(&fuse_device, FcntlArg::F_SETFD(cleared))?;
-    }
+    let fuse_fd = fuse_device.as_raw_fd();
 
     let mut builder = Command::new(fusermount_bin);
     builder.stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -389,9 +384,20 @@ fn fuse_mount_mount_fusefs(
         builder.arg(options_strs.join(","));
     }
 
-    builder
-        .arg(fuse_device.as_raw_fd().to_string())
-        .arg(mountpoint);
+    builder.arg(fuse_fd.to_string()).arg(mountpoint);
+
+    unsafe {
+        builder.pre_exec(move || {
+            let fd = BorrowedFd::borrow_raw(fuse_fd);
+            let current_flags = fcntl(fd, FcntlArg::F_GETFD)?;
+            let current_flags = FdFlag::from_bits_retain(current_flags);
+            if current_flags.contains(FdFlag::FD_CLOEXEC) {
+                let cleared = current_flags & !FdFlag::FD_CLOEXEC;
+                fcntl(fd, FcntlArg::F_SETFD(cleared))?;
+            }
+            Ok(())
+        });
+    }
 
     let output = builder.output()?;
     if !output.status.success() {
@@ -400,9 +406,6 @@ fn fuse_mount_mount_fusefs(
             String::from_utf8_lossy(&output.stderr).to_string(),
         ));
     }
-
-    // TODO: do not ignore error.
-    let _ = fcntl(&fuse_device, FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC));
 
     Ok((fuse_device, None))
 }
