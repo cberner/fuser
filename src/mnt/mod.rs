@@ -84,30 +84,26 @@ fn libc_umount(mnt: &CStr) -> io::Result<()> {
 /// yet destroyed by the kernel.
 #[cfg(any(test, fuser_mount_impl = "pure-rust"))]
 fn is_mounted(fuse_device: &File) -> bool {
-    use libc::{poll, pollfd};
-    use std::os::unix::prelude::AsRawFd;
+    use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
+    use std::os::unix::io::AsFd;
+    use std::slice;
 
-    let mut poll_result = pollfd {
-        fd: fuse_device.as_raw_fd(),
-        events: 0,
-        revents: 0,
-    };
     loop {
-        let res = unsafe { poll(&mut poll_result, 1, 0) };
+        let mut poll_fd = PollFd::new(fuse_device.as_fd(), PollFlags::empty());
+        let res = poll(slice::from_mut(&mut poll_fd), PollTimeout::ZERO);
         break match res {
-            0 => true,
-            1 => (poll_result.revents & libc::POLLERR) != 0,
-            -1 => {
-                let err = io::Error::last_os_error();
-                if err.kind() == io::ErrorKind::Interrupted {
-                    continue;
-                }
+            Ok(0) => true,
+            Ok(1) => poll_fd
+                .revents()
+                .is_some_and(|r| r.contains(PollFlags::POLLERR)),
+            Ok(_) => unreachable!(),
+            Err(nix::errno::Errno::EINTR) => continue,
+            Err(err) => {
                 // This should never happen. The fd is guaranteed good as `File` owns it.
                 // According to man poll ENOMEM is the only error code unhandled, so we panic
                 // consistent with rust's usual ENOMEM behaviour.
                 panic!("Poll failed with error {err}")
             }
-            _ => unreachable!(),
         };
     }
 }
