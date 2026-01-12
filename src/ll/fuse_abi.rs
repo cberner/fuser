@@ -487,8 +487,8 @@ pub(crate) struct fuse_forget_in {
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
 pub struct fuse_forget_one {
-    pub(crate) nodeid: u64,
-    pub(crate) nlookup: u64,
+    pub nodeid: u64,
+    pub nlookup: u64,
 }
 
 #[repr(C)]
