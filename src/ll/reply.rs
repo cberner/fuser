@@ -1,7 +1,6 @@
 use std::{
     convert::TryInto,
     io::IoSlice,
-    mem::size_of,
     os::unix::prelude::OsStrExt,
     path::Path,
     time::{Duration, SystemTime, UNIX_EPOCH},

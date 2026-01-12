@@ -1,4 +1,4 @@
-use std::{convert::TryInto, io::IoSlice, mem::size_of, num::TryFromIntError};
+use std::{convert::TryInto, io::IoSlice, num::TryFromIntError};
 
 #[allow(unused)]
 use std::{ffi::OsStr, os::unix::ffi::OsStrExt};

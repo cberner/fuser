@@ -35,7 +35,7 @@ impl<'a> ArgumentIterator<'a> {
         match zerocopy::Ref::<_, T>::from_prefix(self.data) {
             Err(_err) => {
                 // TODO: do something with _err
-                if self.data.as_ptr() as usize % core::mem::align_of::<T>() != 0 {
+                if self.data.as_ptr() as usize % align_of::<T>() != 0 {
                     // Panic on alignment errors as this is under the control
                     // of the programmer, we can still return None for size
                     // failures as this may be caused by insufficient external
@@ -57,7 +57,7 @@ impl<'a> ArgumentIterator<'a> {
         match zerocopy::Ref::<_, [T]>::from_prefix_with_elems(self.data, count) {
             Err(_err) => {
                 // TODO: do something with _err
-                if self.data.as_ptr() as usize % core::mem::align_of::<T>() != 0 {
+                if self.data.as_ptr() as usize % align_of::<T>() != 0 {
                     // Panic on alignment errors as this is under the control
                     // of the programmer, we can still return None for size
                     // failures as this may be caused by insufficient external

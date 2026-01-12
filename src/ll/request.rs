@@ -9,7 +9,7 @@ use super::{Errno, Response, fuse_abi as abi};
 #[cfg(feature = "serializable")]
 use serde::{Deserialize, Serialize};
 use std::{convert::TryFrom, fmt::Display, path::Path};
-use std::{error, fmt, mem};
+use std::{error, fmt};
 
 use super::argument::ArgumentIterator;
 
@@ -195,7 +195,7 @@ impl fmt::Display for RequestError {
             RequestError::ShortReadHeader(len) => write!(
                 f,
                 "Short read of FUSE request header ({len} < {})",
-                mem::size_of::<fuse_in_header>()
+                size_of::<fuse_in_header>()
             ),
             RequestError::UnknownOperation(opcode) => write!(f, "Unknown FUSE opcode ({opcode})"),
             RequestError::ShortRead(len, total) => {
@@ -2164,7 +2164,7 @@ impl<'a> TryFrom<&'a [u8]> for AnyRequest<'a> {
         }
         Ok(Self {
             header,
-            data: &data[mem::size_of::<fuse_in_header>()..header.len as usize],
+            data: &data[size_of::<fuse_in_header>()..header.len as usize],
         })
     }
 }
