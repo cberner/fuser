@@ -8,9 +8,9 @@
 
 use super::is_mounted;
 use super::mount_options::{MountOption, option_to_string};
-use libc::c_int;
 use log::{debug, error};
 use nix::fcntl::{FcntlArg, FdFlag, OFlag, fcntl};
+use nix::sys::socket::{ControlMessageOwned, MsgFlags, SockaddrStorage, recvmsg};
 use std::ffi::{CStr, CString, OsStr};
 use std::fs::File;
 #[cfg(any(
@@ -23,18 +23,18 @@ use std::fs::File;
 ))]
 use std::fs::OpenOptions;
 use std::io;
-use std::io::{Error, ErrorKind, Read};
+use std::io::{Error, ErrorKind, IoSliceMut, Read};
+use std::mem;
 use std::os::fd::BorrowedFd;
 use std::os::unix::ffi::OsStrExt;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::os::unix::fs::PermissionsExt;
-use std::os::unix::io::{AsRawFd, FromRawFd};
+use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
-use std::{mem, ptr};
 
 const FUSERMOUNT_BIN: &str = "fusermount";
 const FUSERMOUNT3_BIN: &str = "fusermount3";
@@ -68,7 +68,6 @@ impl Mount {
 
 impl Drop for Mount {
     fn drop(&mut self) {
-        use std::io::ErrorKind::PermissionDenied;
         if !is_mounted(&self.fuse_device) {
             // If the filesystem has already been unmounted, avoid unmounting it again.
             // Unmounting it a second time could cause a race with a newly mounted filesystem
@@ -81,7 +80,7 @@ impl Drop for Mount {
             return;
         }
         if let Err(err) = super::libc_umount(&self.mountpoint) {
-            if err.kind() == PermissionDenied {
+            if err.kind() == ErrorKind::PermissionDenied {
                 // Linux always returns EPERM for non-root users.  We have to let the
                 // library go through the setuid-root "fusermount -u" to unmount.
                 fuse_unmount_pure(&self.mountpoint)
@@ -176,95 +175,55 @@ fn detect_fusermount_bin() -> String {
 
 fn receive_fusermount_message(socket: &UnixStream) -> Result<File, Error> {
     let mut io_vec_buf = [0u8];
-    let mut io_vec = libc::iovec {
-        iov_base: io_vec_buf.as_mut_ptr() as *mut libc::c_void,
-        iov_len: io_vec_buf.len(),
-    };
-    let cmsg_buffer_len = unsafe { libc::CMSG_SPACE(size_of::<c_int>() as libc::c_uint) };
-    let mut cmsg_buffer = vec![0u8; cmsg_buffer_len as usize];
-    let mut message: libc::msghdr;
-    #[cfg(all(target_os = "linux", not(target_env = "musl")))]
-    {
-        message = libc::msghdr {
-            msg_name: ptr::null_mut(),
-            msg_namelen: 0,
-            msg_iov: &mut io_vec,
-            msg_iovlen: 1,
-            msg_control: cmsg_buffer.as_mut_ptr() as *mut libc::c_void,
-            msg_controllen: cmsg_buffer.len(),
-            msg_flags: 0,
-        };
-    }
-    #[cfg(all(target_os = "linux", target_env = "musl"))]
-    {
-        message = unsafe { std::mem::MaybeUninit::zeroed().assume_init() };
-        message.msg_name = ptr::null_mut();
-        message.msg_namelen = 0;
-        message.msg_iov = &mut io_vec;
-        message.msg_iovlen = 1;
-        message.msg_control = (&mut cmsg_buffer).as_mut_ptr() as *mut libc::c_void;
-        message.msg_controllen = cmsg_buffer.len() as u32;
-        message.msg_flags = 0;
-    }
-    #[cfg(any(
-        target_os = "macos",
-        target_os = "freebsd",
-        target_os = "dragonfly",
-        target_os = "openbsd",
-        target_os = "netbsd"
-    ))]
-    {
-        message = libc::msghdr {
-            msg_name: ptr::null_mut(),
-            msg_namelen: 0,
-            msg_iov: &mut io_vec,
-            msg_iovlen: 1,
-            msg_control: (&mut cmsg_buffer).as_mut_ptr() as *mut libc::c_void,
-            msg_controllen: cmsg_buffer.len() as u32,
-            msg_flags: 0,
-        };
-    }
+    let mut iov = [IoSliceMut::new(&mut io_vec_buf)];
+    let mut cmsg_buffer = nix::cmsg_space!(RawFd);
 
-    let mut result;
-    loop {
-        unsafe {
-            result = libc::recvmsg(socket.as_raw_fd(), &mut message, 0);
+    let msg = loop {
+        match recvmsg::<SockaddrStorage>(
+            socket.as_raw_fd(),
+            &mut iov,
+            Some(&mut cmsg_buffer),
+            MsgFlags::empty(),
+        ) {
+            Ok(msg) => break msg,
+            Err(nix::errno::Errno::EINTR) => continue,
+            Err(e) => return Err(e.into()),
         }
-        if result != -1 {
-            break;
-        }
-        let err = Error::last_os_error();
-        if err.kind() != ErrorKind::Interrupted {
-            return Err(err);
-        }
-    }
-    if result == 0 {
+    };
+
+    if msg.bytes == 0 {
         return Err(Error::new(
             ErrorKind::UnexpectedEof,
             "Unexpected EOF reading from fusermount",
         ));
     }
 
-    unsafe {
-        let control_msg = libc::CMSG_FIRSTHDR(&message);
-        if (*control_msg).cmsg_type != libc::SCM_RIGHTS {
-            return Err(Error::new(
-                ErrorKind::InvalidData,
-                format!(
-                    "Unknown control message from fusermount: {}",
-                    (*control_msg).cmsg_type
-                ),
-            ));
-        }
-        let fd_data = libc::CMSG_DATA(control_msg);
-
-        let fd = *(fd_data as *const c_int);
-        if fd < 0 {
-            Err(ErrorKind::InvalidData.into())
-        } else {
-            Ok(File::from_raw_fd(fd))
+    for cmsg in msg
+        .cmsgs()
+        .map_err(|e| Error::new(ErrorKind::InvalidData, e.to_string()))?
+    {
+        match cmsg {
+            ControlMessageOwned::ScmRights(fds) => {
+                if let Some(&fd) = fds.first() {
+                    if fd < 0 {
+                        return Err(ErrorKind::InvalidData.into());
+                    }
+                    return Ok(unsafe { File::from_raw_fd(fd) });
+                }
+            }
+            other => {
+                return Err(Error::new(
+                    ErrorKind::InvalidData,
+                    format!("Unknown control message from fusermount: {:?}", other),
+                ));
+            }
         }
     }
+
+    Err(Error::new(
+        ErrorKind::InvalidData,
+        "No SCM_RIGHTS message received from fusermount",
+    ))
 }
 
 fn fuse_mount_fusermount(
