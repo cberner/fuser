@@ -39,18 +39,6 @@ const FUSERMOUNT3_BIN: &str = "fusermount3";
 const FUSERMOUNT_COMM_ENV: &str = "_FUSE_COMMFD";
 const MOUNT_FUSEFS_BIN: &str = "mount_fusefs";
 
-#[cfg_attr(target_os = "freebsd", allow(dead_code))]
-#[cfg(target_os = "freebsd")]
-const BSD_MNT_NODEV: libc::c_int = 0x0000_0010;
-#[cfg_attr(target_os = "freebsd", allow(dead_code))]
-#[cfg(any(
-    target_os = "dragonfly",
-    target_os = "macos",
-    target_os = "netbsd",
-    target_os = "openbsd",
-))]
-const BSD_MNT_NODEV: libc::c_int = libc::MNT_NODEV;
-
 #[derive(Debug)]
 pub(crate) struct Mount {
     mountpoint: CString,
@@ -479,7 +467,7 @@ fn fuse_mount_sys(mountpoint: &OsStr, options: &[MountOption]) -> Result<Option<
         .iter()
         .filter(|x| option_group(x) == MountOptionGroup::KernelFlag)
     {
-        flags |= option_to_flag(flag);
+        flags |= option_to_flag(flag)?;
     }
 
     // Default name is "/dev/fuse", then use the subtype, and lastly prefer the name
@@ -582,41 +570,47 @@ pub(crate) fn option_group(option: &MountOption) -> MountOptionGroup {
 }
 
 #[cfg(target_os = "linux")]
-pub(crate) fn option_to_flag(option: &MountOption) -> libc::c_ulong {
+pub(crate) fn option_to_flag(option: &MountOption) -> io::Result<libc::c_ulong> {
     match option {
-        MountOption::Dev => 0, // There is no option for dev. It's the absence of NoDev
-        MountOption::NoDev => libc::MS_NODEV,
-        MountOption::Suid => 0,
-        MountOption::NoSuid => libc::MS_NOSUID,
-        MountOption::RW => 0,
-        MountOption::RO => libc::MS_RDONLY,
-        MountOption::Exec => 0,
-        MountOption::NoExec => libc::MS_NOEXEC,
-        MountOption::Atime => 0,
-        MountOption::NoAtime => libc::MS_NOATIME,
-        MountOption::Async => 0,
-        MountOption::Sync => libc::MS_SYNCHRONOUS,
-        MountOption::DirSync => libc::MS_DIRSYNC,
-        _ => unreachable!(),
+        MountOption::Dev => Ok(0), // There is no option for dev. It's the absence of NoDev
+        MountOption::NoDev => Ok(libc::MS_NODEV),
+        MountOption::Suid => Ok(0),
+        MountOption::NoSuid => Ok(libc::MS_NOSUID),
+        MountOption::RW => Ok(0),
+        MountOption::RO => Ok(libc::MS_RDONLY),
+        MountOption::Exec => Ok(0),
+        MountOption::NoExec => Ok(libc::MS_NOEXEC),
+        MountOption::Atime => Ok(0),
+        MountOption::NoAtime => Ok(libc::MS_NOATIME),
+        MountOption::Async => Ok(0),
+        MountOption::Sync => Ok(libc::MS_SYNCHRONOUS),
+        MountOption::DirSync => Ok(libc::MS_DIRSYNC),
+        option => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("Invalid mount option for flag conversion: {option:?}"),
+        )),
     }
 }
 
 #[cfg(target_os = "macos")]
-pub(crate) fn option_to_flag(option: &MountOption) -> libc::c_int {
+pub(crate) fn option_to_flag(option: &MountOption) -> io::Result<libc::c_int> {
     match option {
-        MountOption::Dev => 0, // There is no option for dev. It's the absence of NoDev
-        MountOption::NoDev => BSD_MNT_NODEV,
-        MountOption::Suid => 0,
-        MountOption::NoSuid => libc::MNT_NOSUID,
-        MountOption::RW => 0,
-        MountOption::RO => libc::MNT_RDONLY,
-        MountOption::Exec => 0,
-        MountOption::NoExec => libc::MNT_NOEXEC,
-        MountOption::Atime => 0,
-        MountOption::NoAtime => libc::MNT_NOATIME,
-        MountOption::Async => 0,
-        MountOption::Sync => libc::MNT_SYNCHRONOUS,
-        _ => unreachable!(),
+        MountOption::Dev => Ok(0), // There is no option for dev. It's the absence of NoDev
+        MountOption::NoDev => Ok(libc::MNT_NODEV),
+        MountOption::Suid => Ok(0),
+        MountOption::NoSuid => Ok(libc::MNT_NOSUID),
+        MountOption::RW => Ok(0),
+        MountOption::RO => Ok(libc::MNT_RDONLY),
+        MountOption::Exec => Ok(0),
+        MountOption::NoExec => Ok(libc::MNT_NOEXEC),
+        MountOption::Atime => Ok(0),
+        MountOption::NoAtime => Ok(libc::MNT_NOATIME),
+        MountOption::Async => Ok(0),
+        MountOption::Sync => Ok(libc::MNT_SYNCHRONOUS),
+        option => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("Invalid mount option for flag conversion: {option:?}"),
+        )),
     }
 }
 
@@ -635,21 +629,30 @@ pub(crate) fn option_to_flag(option: &MountOption) -> libc::c_int {
     target_os = "openbsd",
     target_os = "netbsd"
 ))]
-pub(crate) fn option_to_flag(option: &MountOption) -> libc::c_int {
+pub(crate) fn option_to_flag(option: &MountOption) -> io::Result<libc::c_int> {
     match option {
-        MountOption::Dev => 0,
-        MountOption::NoDev => BSD_MNT_NODEV,
-        MountOption::Suid => 0,
-        MountOption::NoSuid => libc::MNT_NOSUID,
-        MountOption::RW => 0,
-        MountOption::RO => libc::MNT_RDONLY,
-        MountOption::Exec => 0,
-        MountOption::NoExec => libc::MNT_NOEXEC,
-        MountOption::Atime => 0,
-        MountOption::NoAtime => libc::MNT_NOATIME,
-        MountOption::Async => 0,
-        MountOption::Sync => libc::MNT_SYNCHRONOUS,
-        MountOption::DirSync => libc::MNT_SYNCHRONOUS,
-        _ => unreachable!(),
+        MountOption::Dev => Ok(0),
+        #[cfg(target_os = "freebsd")]
+        MountOption::NoDev => Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "NoDev option is not supported on FreeBSD",
+        )),
+        #[cfg(not(target_os = "freebsd"))]
+        MountOption::NoDev => Ok(libc::MNT_NODEV),
+        MountOption::Suid => Ok(0),
+        MountOption::NoSuid => Ok(libc::MNT_NOSUID),
+        MountOption::RW => Ok(0),
+        MountOption::RO => Ok(libc::MNT_RDONLY),
+        MountOption::Exec => Ok(0),
+        MountOption::NoExec => Ok(libc::MNT_NOEXEC),
+        MountOption::Atime => Ok(0),
+        MountOption::NoAtime => Ok(libc::MNT_NOATIME),
+        MountOption::Async => Ok(0),
+        MountOption::Sync => Ok(libc::MNT_SYNCHRONOUS),
+        MountOption::DirSync => Ok(libc::MNT_SYNCHRONOUS),
+        option => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("Invalid mount option for flag conversion: {option:?}"),
+        )),
     }
 }
