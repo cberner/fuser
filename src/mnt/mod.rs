@@ -46,12 +46,12 @@ fn with_fuse_args<T, F: FnOnce(&fuse_args) -> T>(options: &[MountOption], f: F) 
     })
 }
 
-#[cfg(fuser_mount_impl = "pure-rust")]
-pub(crate) use fuse_pure::Mount;
 #[cfg(fuser_mount_impl = "libfuse2")]
 pub(crate) use fuse2::Mount;
 #[cfg(fuser_mount_impl = "libfuse3")]
 pub(crate) use fuse3::Mount;
+#[cfg(fuser_mount_impl = "pure-rust")]
+pub(crate) use fuse_pure::Mount;
 use std::ffi::CStr;
 
 #[inline]
@@ -84,7 +84,7 @@ fn libc_umount(mnt: &CStr) -> io::Result<()> {
 /// yet destroyed by the kernel.
 #[cfg(any(test, fuser_mount_impl = "pure-rust"))]
 fn is_mounted(fuse_device: &File) -> bool {
-    use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
+    use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
     use std::os::unix::io::AsFd;
     use std::slice;
 

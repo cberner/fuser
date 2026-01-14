@@ -3,9 +3,9 @@
 //! A request represents information about a filesystem operation the kernel driver wants us to
 //! perform.
 
-use super::fuse_abi::{InvalidOpcodeError, fuse_in_header, fuse_opcode};
+use super::fuse_abi::{fuse_in_header, fuse_opcode, InvalidOpcodeError};
 
-use super::{Errno, Response, fuse_abi as abi};
+use super::{fuse_abi as abi, Errno, Response};
 #[cfg(feature = "serializable")]
 use serde::{Deserialize, Serialize};
 use std::{convert::TryFrom, fmt::Display, path::Path};
@@ -260,11 +260,11 @@ mod op {
     use crate::ll::Response;
 
     use super::{
-        super::{TimeOrNow, argument::ArgumentIterator},
+        super::{argument::ArgumentIterator, TimeOrNow},
         FilenameInDir, Request,
     };
     use super::{
-        FileHandle, INodeNo, Lock, LockOwner, Operation, RequestId, abi::consts::*, abi::*,
+        abi::consts::*, abi::*, FileHandle, INodeNo, Lock, LockOwner, Operation, RequestId,
     };
     use std::{
         convert::TryInto,
@@ -587,6 +587,9 @@ mod op {
         arg: &'a fuse_rename_in,
         name: &'a Path,
         newname: &'a Path,
+        /// Rename flags (macOS only, from extended format).
+        /// On other platforms or when macFUSE sends short format, this is 0.
+        flags: u32,
     }
     impl_request!(Rename<'_>);
     impl<'a> Rename<'a> {
@@ -601,6 +604,14 @@ mod op {
                 dir: INodeNo(self.arg.newdir),
                 name: self.newname,
             }
+        }
+        /// Rename flags (macOS only: RENAME_SWAP, RENAME_EXCL).
+        ///
+        /// On macOS, if FUSE_RENAME_SWAP or FUSE_RENAME_EXCL capabilities were granted
+        /// during init, the kernel sends extended rename requests with flags.
+        /// On other platforms or when macFUSE sends the short format, this returns 0.
+        pub(crate) fn flags(&self) -> u32 {
+            self.flags
         }
     }
 
@@ -1651,12 +1662,74 @@ mod op {
                 header,
                 name: data.fetch_str()?.as_ref(),
             }),
-            fuse_opcode::FUSE_RENAME => Operation::Rename(Rename {
-                header,
-                arg: data.fetch()?,
-                name: data.fetch_str()?.as_ref(),
-                newname: data.fetch_str()?.as_ref(),
-            }),
+            fuse_opcode::FUSE_RENAME => {
+                let arg: &fuse_rename_in = data.fetch()?;
+
+                // macOS macFUSE protocol version detection for FUSE_RENAME
+                // =========================================================
+                //
+                // Background:
+                // macFUSE supports extended rename operations (RENAME_SWAP, RENAME_EXCL)
+                // via flags in the rename request. When these capabilities are negotiated
+                // during FUSE_INIT, macFUSE sends an extended 16-byte fuse_rename_in:
+                //   - newdir: u64 (8 bytes)
+                //   - flags: u32 (4 bytes)
+                //   - padding: u32 (4 bytes)
+                //
+                // The problem:
+                // - macFUSE 4.x had a bug where it sent the extended format unconditionally,
+                //   regardless of whether capabilities were actually granted.
+                // - macFUSE 5.x fixed this: it only sends extended format when capabilities
+                //   ARE granted; otherwise it sends the short 8-byte format.
+                //
+                // Our solution:
+                // We request FUSE_RENAME_SWAP/FUSE_RENAME_EXCL at INIT (see lib.rs), which
+                // should cause macFUSE 5.x to grant them and send extended format. However,
+                // we use runtime detection as a safety measure because:
+                //   1. The kernel may refuse to grant the capabilities
+                //   2. We need backward compatibility with macFUSE 4.x behavior
+                //
+                // Detection heuristic:
+                // Filenames cannot start with null bytes or ASCII control characters (< 32).
+                // If the first byte after newdir is in the control range, we have extended
+                // format (flags field starts there). If it's >= 32, it's the start of a
+                // filename, indicating short format.
+                //
+                // References:
+                // - Issue: https://github.com/osxfuse/osxfuse/issues/839
+                // - macFUSE kernel header: https://github.com/osxfuse/fuse/blob/master/include/fuse_kernel.h
+                #[cfg(target_os = "macos")]
+                let flags = {
+                    let first_byte = data.peek_byte(0);
+                    if first_byte.is_some_and(|b| b < 32) {
+                        // Extended format detected: extract flags as little-endian u32
+                        let flags_bytes = [
+                            data.peek_byte(0).unwrap_or(0),
+                            data.peek_byte(1).unwrap_or(0),
+                            data.peek_byte(2).unwrap_or(0),
+                            data.peek_byte(3).unwrap_or(0),
+                        ];
+                        let flags = u32::from_le_bytes(flags_bytes);
+                        // Skip flags (4 bytes) + padding (4 bytes) = 8 bytes total
+                        data.skip_bytes(8);
+                        flags
+                    } else {
+                        // Short format: filename starts immediately, no flags available
+                        0
+                    }
+                };
+
+                #[cfg(not(target_os = "macos"))]
+                let flags = 0u32;
+
+                Operation::Rename(Rename {
+                    header,
+                    arg,
+                    name: data.fetch_str()?.as_ref(),
+                    newname: data.fetch_str()?.as_ref(),
+                    flags,
+                })
+            }
             fuse_opcode::FUSE_LINK => Operation::Link(Link {
                 header,
                 arg: data.fetch()?,

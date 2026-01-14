@@ -11,7 +11,7 @@
     unreachable_pub
 )]
 
-use libc::{ENOSYS, EPERM, c_int};
+use libc::{c_int, ENOSYS, EPERM};
 use log::warn;
 use mnt::mount_options::parse_options_from_args;
 #[cfg(feature = "serializable")]
@@ -24,9 +24,9 @@ use std::time::Duration;
 use std::time::SystemTime;
 use std::{convert::AsRef, io::ErrorKind};
 
-pub use crate::ll::fuse_abi::FUSE_ROOT_ID;
 use crate::ll::fuse_abi::consts::*;
-pub use crate::ll::{TimeOrNow, fuse_abi::consts};
+pub use crate::ll::fuse_abi::FUSE_ROOT_ID;
+pub use crate::ll::{fuse_abi::consts, TimeOrNow};
 use crate::mnt::mount_options::check_option_conflicts;
 use crate::session::MAX_WRITE_SIZE;
 pub use ll::fuse_abi::fuse_forget_one;
@@ -67,10 +67,25 @@ mod session;
 const INIT_FLAGS: u64 = FUSE_ASYNC_READ | FUSE_BIG_WRITES;
 // TODO: Add FUSE_EXPORT_SUPPORT
 
-/// On macOS, we additionally support case insensitiveness, volume renames and xtimes
+/// On macOS, we additionally support case insensitiveness, volume renames, xtimes,
+/// and extended rename operations (swap, exclusive).
+///
+/// We request FUSE_RENAME_SWAP and FUSE_RENAME_EXCL to enable extended rename support.
+/// When granted, macFUSE 5.x sends the extended 16-byte fuse_rename_in format with flags.
+/// Note: macFUSE 4.x had a bug where it sent extended format unconditionally, regardless
+/// of whether capabilities were granted. Our request.rs handles both formats via runtime
+/// detection for backward compatibility.
+///
+/// See: https://github.com/osxfuse/osxfuse/issues/839
+///
 /// TODO: we should eventually let the filesystem implementation decide which flags to set
 #[cfg(target_os = "macos")]
-const INIT_FLAGS: u64 = FUSE_ASYNC_READ | FUSE_CASE_INSENSITIVE | FUSE_VOL_RENAME | FUSE_XTIMES;
+const INIT_FLAGS: u64 = FUSE_ASYNC_READ
+    | FUSE_CASE_INSENSITIVE
+    | FUSE_VOL_RENAME
+    | FUSE_XTIMES
+    | FUSE_RENAME_SWAP
+    | FUSE_RENAME_EXCL;
 // TODO: Add FUSE_EXPORT_SUPPORT and FUSE_BIG_WRITES (requires ABI 7.10)
 
 const fn default_init_flags(#[allow(unused_variables)] capabilities: u64) -> u64 {

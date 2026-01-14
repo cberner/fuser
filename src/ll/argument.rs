@@ -85,6 +85,28 @@ impl<'a> ArgumentIterator<'a> {
         self.data = &rest[1..];
         Some(OsStr::from_bytes(out))
     }
+
+    /// Skip a fixed number of bytes. Returns `true` if successful, `false` if not enough data.
+    ///
+    /// This is useful for runtime protocol detection where we need to skip optional
+    /// fields based on the actual kernel protocol version.
+    pub(crate) fn skip_bytes(&mut self, count: usize) -> bool {
+        if self.data.len() >= count {
+            self.data = &self.data[count..];
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Peek at the byte at the given offset without consuming it.
+    /// Returns `None` if the offset is beyond the remaining data.
+    ///
+    /// This is useful for runtime detection of protocol variants by inspecting
+    /// upcoming bytes before deciding how to parse.
+    pub(crate) fn peek_byte(&self, offset: usize) -> Option<u8> {
+        self.data.get(offset).copied()
+    }
 }
 
 #[cfg(test)]

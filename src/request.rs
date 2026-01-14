@@ -5,22 +5,22 @@
 //!
 //! TODO: This module is meant to go away soon in favor of `ll::Request`.
 
-use crate::ll::{Errno, Response, fuse_abi as abi};
+use crate::ll::{fuse_abi as abi, Errno, Response};
 use log::{debug, error, warn};
 use std::convert::TryFrom;
 #[cfg(feature = "abi-7-28")]
 use std::convert::TryInto;
 use std::path::Path;
 
-use crate::Filesystem;
-use crate::PollHandle;
 use crate::channel::ChannelSender;
 use crate::ll::Request as _;
 #[cfg(feature = "abi-7-21")]
 use crate::reply::ReplyDirectoryPlus;
 use crate::reply::{Reply, ReplyDirectory, ReplySender};
 use crate::session::{Session, SessionACL};
-use crate::{KernelConfig, ll};
+use crate::Filesystem;
+use crate::PollHandle;
+use crate::{ll, KernelConfig};
 
 /// Request data structure
 #[derive(Debug)]
@@ -271,7 +271,7 @@ impl<'a> Request<'a> {
                     x.src().name.as_ref(),
                     x.dest().dir.into(),
                     x.dest().name.as_ref(),
-                    0,
+                    x.flags(),
                     self.reply(),
                 );
             }
