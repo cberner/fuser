@@ -21,7 +21,6 @@
 #![warn(missing_debug_implementations)]
 #![allow(missing_docs)]
 
-use crate::consts::{FATTR_ATIME_NOW, FATTR_MTIME_NOW};
 use bitflags::bitflags;
 use std::convert::TryFrom;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
@@ -146,31 +145,138 @@ bitflags! {
         #[cfg(target_os = "macos")]
         const FOPEN_PURGE_UBC = 1 << 31;
     }
+
+    /// Flags for setattr operations (fuse_setattr_in.valid bitmask).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub(crate) struct FattrFlags: u32 {
+        const FATTR_MODE = 1 << 0;
+        const FATTR_UID = 1 << 1;
+        const FATTR_GID = 1 << 2;
+        const FATTR_SIZE = 1 << 3;
+        const FATTR_ATIME = 1 << 4;
+        const FATTR_MTIME = 1 << 5;
+        const FATTR_FH = 1 << 6;
+        const FATTR_ATIME_NOW = 1 << 7;
+        const FATTR_MTIME_NOW = 1 << 8;
+        const FATTR_LOCKOWNER = 1 << 9;
+        const FATTR_CTIME = 1 << 10;
+        #[cfg(target_os = "macos")]
+        const FATTR_CRTIME = 1 << 28;
+        #[cfg(target_os = "macos")]
+        const FATTR_CHGTIME = 1 << 29;
+        #[cfg(target_os = "macos")]
+        const FATTR_BKUPTIME = 1 << 30;
+        #[cfg(target_os = "macos")]
+        const FATTR_FLAGS = 1 << 31;
+    }
+
+    /// Init request/reply flags.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub(crate) struct InitFlags: u64 {
+        /// asynchronous read requests
+        const FUSE_ASYNC_READ = 1 << 0;
+        /// remote locking for POSIX file locks
+        const FUSE_POSIX_LOCKS = 1 << 1;
+        /// kernel sends file handle for fstat, etc...
+        const FUSE_FILE_OPS = 1 << 2;
+        /// handles the O_TRUNC open flag in the filesystem
+        const FUSE_ATOMIC_O_TRUNC = 1 << 3;
+        /// filesystem handles lookups of "." and ".."
+        const FUSE_EXPORT_SUPPORT = 1 << 4;
+        /// filesystem can handle write size larger than 4kB
+        const FUSE_BIG_WRITES = 1 << 5;
+        /// don't apply umask to file mode on create operations
+        const FUSE_DONT_MASK = 1 << 6;
+        /// kernel supports splice write on the device
+        const FUSE_SPLICE_WRITE = 1 << 7;
+        /// kernel supports splice move on the device
+        const FUSE_SPLICE_MOVE = 1 << 8;
+        /// kernel supports splice read on the device
+        const FUSE_SPLICE_READ = 1 << 9;
+        /// remote locking for BSD style file locks
+        const FUSE_FLOCK_LOCKS = 1 << 10;
+        /// kernel supports ioctl on directories
+        const FUSE_HAS_IOCTL_DIR = 1 << 11;
+        /// automatically invalidate cached pages
+        const FUSE_AUTO_INVAL_DATA = 1 << 12;
+        /// do READDIRPLUS (READDIR+LOOKUP in one)
+        const FUSE_DO_READDIRPLUS = 1 << 13;
+        /// adaptive readdirplus
+        const FUSE_READDIRPLUS_AUTO = 1 << 14;
+        /// asynchronous direct I/O submission
+        const FUSE_ASYNC_DIO = 1 << 15;
+        /// use writeback cache for buffered writes
+        const FUSE_WRITEBACK_CACHE = 1 << 16;
+        /// kernel supports zero-message opens
+        const FUSE_NO_OPEN_SUPPORT = 1 << 17;
+        /// allow parallel lookups and readdir
+        const FUSE_PARALLEL_DIROPS = 1 << 18;
+        /// fs handles killing suid/sgid/cap on write/chown/trunc
+        const FUSE_HANDLE_KILLPRIV = 1 << 19;
+        /// filesystem supports posix acls
+        const FUSE_POSIX_ACL = 1 << 20;
+        /// reading the device after abort returns ECONNABORTED
+        const FUSE_ABORT_ERROR = 1 << 21;
+        /// init_out.max_pages contains the max number of req pages
+        const FUSE_MAX_PAGES = 1 << 22;
+        /// cache READLINK responses
+        const FUSE_CACHE_SYMLINKS = 1 << 23;
+        /// kernel supports zero-message opendir
+        const FUSE_NO_OPENDIR_SUPPORT = 1 << 24;
+        /// only invalidate cached pages on explicit request
+        const FUSE_EXPLICIT_INVAL_DATA = 1 << 25;
+        /// extended fuse_init_in request
+        const FUSE_INIT_EXT = 1 << 30;
+        /// reserved, do not use
+        const FUSE_INIT_RESERVED = 1 << 31;
+        /// filesystem wants to use passthrough files
+        const FUSE_PASSTHROUGH = 1 << 37;
+
+        #[cfg(target_os = "macos")]
+        const FUSE_ALLOCATE = 1 << 27;
+        #[cfg(target_os = "macos")]
+        const FUSE_EXCHANGE_DATA = 1 << 28;
+        #[cfg(target_os = "macos")]
+        const FUSE_CASE_INSENSITIVE = 1 << 29;
+        #[cfg(target_os = "macos")]
+        const FUSE_VOL_RENAME = 1 << 30;
+        #[cfg(target_os = "macos")]
+        const FUSE_XTIMES = 1 << 31;
+    }
+}
+
+impl InitFlags {
+    /// Returns the flags as a pair of (low, high) u32 values.
+    /// The low value contains bits 0-31, the high value contains bits 32-63.
+    pub(crate) fn pair(self) -> (u32, u32) {
+        let bits = self.bits();
+        (bits as u32, (bits >> 32) as u32)
+    }
 }
 
 pub mod consts {
     // Bitmasks for fuse_setattr_in.valid
-    pub const FATTR_MODE: u32 = 1 << 0;
-    pub const FATTR_UID: u32 = 1 << 1;
-    pub const FATTR_GID: u32 = 1 << 2;
-    pub const FATTR_SIZE: u32 = 1 << 3;
-    pub const FATTR_ATIME: u32 = 1 << 4;
-    pub const FATTR_MTIME: u32 = 1 << 5;
-    pub const FATTR_FH: u32 = 1 << 6;
-    pub const FATTR_ATIME_NOW: u32 = 1 << 7;
-    pub const FATTR_MTIME_NOW: u32 = 1 << 8;
-    pub const FATTR_LOCKOWNER: u32 = 1 << 9;
+    pub const FATTR_MODE: u32 = super::FattrFlags::FATTR_MODE.bits();
+    pub const FATTR_UID: u32 = super::FattrFlags::FATTR_UID.bits();
+    pub const FATTR_GID: u32 = super::FattrFlags::FATTR_GID.bits();
+    pub const FATTR_SIZE: u32 = super::FattrFlags::FATTR_SIZE.bits();
+    pub const FATTR_ATIME: u32 = super::FattrFlags::FATTR_ATIME.bits();
+    pub const FATTR_MTIME: u32 = super::FattrFlags::FATTR_MTIME.bits();
+    pub const FATTR_FH: u32 = super::FattrFlags::FATTR_FH.bits();
+    pub const FATTR_ATIME_NOW: u32 = super::FattrFlags::FATTR_ATIME_NOW.bits();
+    pub const FATTR_MTIME_NOW: u32 = super::FattrFlags::FATTR_MTIME_NOW.bits();
+    pub const FATTR_LOCKOWNER: u32 = super::FattrFlags::FATTR_LOCKOWNER.bits();
     #[cfg(feature = "abi-7-23")]
-    pub const FATTR_CTIME: u32 = 1 << 10;
+    pub const FATTR_CTIME: u32 = super::FattrFlags::FATTR_CTIME.bits();
 
     #[cfg(target_os = "macos")]
-    pub const FATTR_CRTIME: u32 = 1 << 28;
+    pub const FATTR_CRTIME: u32 = super::FattrFlags::FATTR_CRTIME.bits();
     #[cfg(target_os = "macos")]
-    pub const FATTR_CHGTIME: u32 = 1 << 29;
+    pub const FATTR_CHGTIME: u32 = super::FattrFlags::FATTR_CHGTIME.bits();
     #[cfg(target_os = "macos")]
-    pub const FATTR_BKUPTIME: u32 = 1 << 30;
+    pub const FATTR_BKUPTIME: u32 = super::FattrFlags::FATTR_BKUPTIME.bits();
     #[cfg(target_os = "macos")]
-    pub const FATTR_FLAGS: u32 = 1 << 31;
+    pub const FATTR_FLAGS: u32 = super::FattrFlags::FATTR_FLAGS.bits();
 
     // Flags returned by the open request
     // bypass page cache for this open file
@@ -194,63 +300,92 @@ pub mod consts {
     pub const FOPEN_PURGE_UBC: u32 = super::FopenFlags::FOPEN_PURGE_UBC.bits();
 
     // Init request/reply flags
-    pub const FUSE_ASYNC_READ: u64 = 1 << 0; // asynchronous read requests
-    pub const FUSE_POSIX_LOCKS: u64 = 1 << 1; // remote locking for POSIX file locks
-    pub const FUSE_FILE_OPS: u64 = 1 << 2; // kernel sends file handle for fstat, etc...
-    pub const FUSE_ATOMIC_O_TRUNC: u64 = 1 << 3; // handles the O_TRUNC open flag in the filesystem
-    pub const FUSE_EXPORT_SUPPORT: u64 = 1 << 4; // filesystem handles lookups of "." and ".."
-    pub const FUSE_BIG_WRITES: u64 = 1 << 5; // filesystem can handle write size larger than 4kB
-    pub const FUSE_DONT_MASK: u64 = 1 << 6; // don't apply umask to file mode on create operations
-    pub const FUSE_SPLICE_WRITE: u64 = 1 << 7; // kernel supports splice write on the device
-    pub const FUSE_SPLICE_MOVE: u64 = 1 << 8; // kernel supports splice move on the device
-    pub const FUSE_SPLICE_READ: u64 = 1 << 9; // kernel supports splice read on the device
-    pub const FUSE_FLOCK_LOCKS: u64 = 1 << 10; // remote locking for BSD style file locks
-    pub const FUSE_HAS_IOCTL_DIR: u64 = 1 << 11; // kernel supports ioctl on directories
+    // asynchronous read requests
+    pub const FUSE_ASYNC_READ: u64 = super::InitFlags::FUSE_ASYNC_READ.bits();
+    // remote locking for POSIX file locks
+    pub const FUSE_POSIX_LOCKS: u64 = super::InitFlags::FUSE_POSIX_LOCKS.bits();
+    // kernel sends file handle for fstat, etc...
+    pub const FUSE_FILE_OPS: u64 = super::InitFlags::FUSE_FILE_OPS.bits();
+    // handles the O_TRUNC open flag in the filesystem
+    pub const FUSE_ATOMIC_O_TRUNC: u64 = super::InitFlags::FUSE_ATOMIC_O_TRUNC.bits();
+    // filesystem handles lookups of "." and ".."
+    pub const FUSE_EXPORT_SUPPORT: u64 = super::InitFlags::FUSE_EXPORT_SUPPORT.bits();
+    // filesystem can handle write size larger than 4kB
+    pub const FUSE_BIG_WRITES: u64 = super::InitFlags::FUSE_BIG_WRITES.bits();
+    // don't apply umask to file mode on create operations
+    pub const FUSE_DONT_MASK: u64 = super::InitFlags::FUSE_DONT_MASK.bits();
+    // kernel supports splice write on the device
+    pub const FUSE_SPLICE_WRITE: u64 = super::InitFlags::FUSE_SPLICE_WRITE.bits();
+    // kernel supports splice move on the device
+    pub const FUSE_SPLICE_MOVE: u64 = super::InitFlags::FUSE_SPLICE_MOVE.bits();
+    // kernel supports splice read on the device
+    pub const FUSE_SPLICE_READ: u64 = super::InitFlags::FUSE_SPLICE_READ.bits();
+    // remote locking for BSD style file locks
+    pub const FUSE_FLOCK_LOCKS: u64 = super::InitFlags::FUSE_FLOCK_LOCKS.bits();
+    // kernel supports ioctl on directories
+    pub const FUSE_HAS_IOCTL_DIR: u64 = super::InitFlags::FUSE_HAS_IOCTL_DIR.bits();
+    // automatically invalidate cached pages
     #[cfg(feature = "abi-7-20")]
-    pub const FUSE_AUTO_INVAL_DATA: u64 = 1 << 12; // automatically invalidate cached pages
+    pub const FUSE_AUTO_INVAL_DATA: u64 = super::InitFlags::FUSE_AUTO_INVAL_DATA.bits();
+    // do READDIRPLUS (READDIR+LOOKUP in one)
     #[cfg(feature = "abi-7-21")]
-    pub const FUSE_DO_READDIRPLUS: u64 = 1 << 13; // do READDIRPLUS (READDIR+LOOKUP in one)
+    pub const FUSE_DO_READDIRPLUS: u64 = super::InitFlags::FUSE_DO_READDIRPLUS.bits();
+    // adaptive readdirplus
     #[cfg(feature = "abi-7-21")]
-    pub const FUSE_READDIRPLUS_AUTO: u64 = 1 << 14; // adaptive readdirplus
+    pub const FUSE_READDIRPLUS_AUTO: u64 = super::InitFlags::FUSE_READDIRPLUS_AUTO.bits();
+    // asynchronous direct I/O submission
     #[cfg(feature = "abi-7-22")]
-    pub const FUSE_ASYNC_DIO: u64 = 1 << 15; // asynchronous direct I/O submission
+    pub const FUSE_ASYNC_DIO: u64 = super::InitFlags::FUSE_ASYNC_DIO.bits();
+    // use writeback cache for buffered writes
     #[cfg(feature = "abi-7-23")]
-    pub const FUSE_WRITEBACK_CACHE: u64 = 1 << 16; // use writeback cache for buffered writes
+    pub const FUSE_WRITEBACK_CACHE: u64 = super::InitFlags::FUSE_WRITEBACK_CACHE.bits();
+    // kernel supports zero-message opens
     #[cfg(feature = "abi-7-23")]
-    pub const FUSE_NO_OPEN_SUPPORT: u64 = 1 << 17; // kernel supports zero-message opens
+    pub const FUSE_NO_OPEN_SUPPORT: u64 = super::InitFlags::FUSE_NO_OPEN_SUPPORT.bits();
+    // allow parallel lookups and readdir
     #[cfg(feature = "abi-7-25")]
-    pub const FUSE_PARALLEL_DIROPS: u64 = 1 << 18; // allow parallel lookups and readdir
+    pub const FUSE_PARALLEL_DIROPS: u64 = super::InitFlags::FUSE_PARALLEL_DIROPS.bits();
+    // fs handles killing suid/sgid/cap on write/chown/trunc
     #[cfg(feature = "abi-7-26")]
-    pub const FUSE_HANDLE_KILLPRIV: u64 = 1 << 19; // fs handles killing suid/sgid/cap on write/chown/trunc
+    pub const FUSE_HANDLE_KILLPRIV: u64 = super::InitFlags::FUSE_HANDLE_KILLPRIV.bits();
+    // filesystem supports posix acls
     #[cfg(feature = "abi-7-26")]
-    pub const FUSE_POSIX_ACL: u64 = 1 << 20; // filesystem supports posix acls
+    pub const FUSE_POSIX_ACL: u64 = super::InitFlags::FUSE_POSIX_ACL.bits();
+    // reading the device after abort returns ECONNABORTED
     #[cfg(feature = "abi-7-27")]
-    pub const FUSE_ABORT_ERROR: u64 = 1 << 21; // reading the device after abort returns ECONNABORTED
+    pub const FUSE_ABORT_ERROR: u64 = super::InitFlags::FUSE_ABORT_ERROR.bits();
+    // init_out.max_pages contains the max number of req pages
     #[cfg(feature = "abi-7-28")]
-    pub const FUSE_MAX_PAGES: u64 = 1 << 22; // init_out.max_pages contains the max number of req pages
+    pub const FUSE_MAX_PAGES: u64 = super::InitFlags::FUSE_MAX_PAGES.bits();
+    // cache READLINK responses
     #[cfg(feature = "abi-7-28")]
-    pub const FUSE_CACHE_SYMLINKS: u64 = 1 << 23; // cache READLINK responses
+    pub const FUSE_CACHE_SYMLINKS: u64 = super::InitFlags::FUSE_CACHE_SYMLINKS.bits();
+    // kernel supports zero-message opendir
     #[cfg(feature = "abi-7-29")]
-    pub const FUSE_NO_OPENDIR_SUPPORT: u64 = 1 << 24; // kernel supports zero-message opendir
+    pub const FUSE_NO_OPENDIR_SUPPORT: u64 = super::InitFlags::FUSE_NO_OPENDIR_SUPPORT.bits();
+    // only invalidate cached pages on explicit request
     #[cfg(feature = "abi-7-30")]
-    pub const FUSE_EXPLICIT_INVAL_DATA: u64 = 1 << 25; // only invalidate cached pages on explicit request
+    pub const FUSE_EXPLICIT_INVAL_DATA: u64 = super::InitFlags::FUSE_EXPLICIT_INVAL_DATA.bits();
+    // extended fuse_init_in request
     #[cfg(feature = "abi-7-36")]
-    pub const FUSE_INIT_EXT: u64 = 1 << 30; // extended fuse_init_in request
+    pub const FUSE_INIT_EXT: u64 = super::InitFlags::FUSE_INIT_EXT.bits();
+    // reserved, do not use
     #[cfg(feature = "abi-7-36")]
-    pub const FUSE_INIT_RESERVED: u64 = 1 << 31; // reserved, do not use
+    pub const FUSE_INIT_RESERVED: u64 = super::InitFlags::FUSE_INIT_RESERVED.bits();
+    // filesystem wants to use passthrough files
     #[cfg(feature = "abi-7-40")]
-    pub const FUSE_PASSTHROUGH: u64 = 1 << 37; // filesystem wants to use passthrough files
+    pub const FUSE_PASSTHROUGH: u64 = super::InitFlags::FUSE_PASSTHROUGH.bits();
 
     #[cfg(target_os = "macos")]
-    pub const FUSE_ALLOCATE: u64 = 1 << 27;
+    pub const FUSE_ALLOCATE: u64 = super::InitFlags::FUSE_ALLOCATE.bits();
     #[cfg(target_os = "macos")]
-    pub const FUSE_EXCHANGE_DATA: u64 = 1 << 28;
+    pub const FUSE_EXCHANGE_DATA: u64 = super::InitFlags::FUSE_EXCHANGE_DATA.bits();
     #[cfg(target_os = "macos")]
-    pub const FUSE_CASE_INSENSITIVE: u64 = 1 << 29;
+    pub const FUSE_CASE_INSENSITIVE: u64 = super::InitFlags::FUSE_CASE_INSENSITIVE.bits();
     #[cfg(target_os = "macos")]
-    pub const FUSE_VOL_RENAME: u64 = 1 << 30;
+    pub const FUSE_VOL_RENAME: u64 = super::InitFlags::FUSE_VOL_RENAME.bits();
     #[cfg(target_os = "macos")]
-    pub const FUSE_XTIMES: u64 = 1 << 31;
+    pub const FUSE_XTIMES: u64 = super::InitFlags::FUSE_XTIMES.bits();
 
     // CUSE init request/reply flags
     pub const CUSE_UNRESTRICTED_IOCTL: u32 = 1 << 0; // use unrestricted ioctl
@@ -623,11 +758,11 @@ pub(crate) struct fuse_setattr_in {
 
 impl fuse_setattr_in {
     pub(crate) fn atime_now(&self) -> bool {
-        self.valid & FATTR_ATIME_NOW != 0
+        FattrFlags::from_bits_retain(self.valid).contains(FattrFlags::FATTR_ATIME_NOW)
     }
 
     pub(crate) fn mtime_now(&self) -> bool {
-        self.valid & FATTR_MTIME_NOW != 0
+        FattrFlags::from_bits_retain(self.valid).contains(FattrFlags::FATTR_MTIME_NOW)
     }
 }
 

@@ -25,6 +25,7 @@ use std::time::SystemTime;
 use std::{convert::AsRef, io::ErrorKind};
 
 pub use crate::ll::fuse_abi::FUSE_ROOT_ID;
+use crate::ll::fuse_abi::InitFlags;
 use crate::ll::fuse_abi::consts::*;
 pub use crate::ll::{TimeOrNow, fuse_abi::consts};
 use crate::mnt::mount_options::check_option_conflicts;
@@ -64,16 +65,19 @@ mod session;
 
 /// We generally support async reads
 #[cfg(not(target_os = "macos"))]
-const INIT_FLAGS: u64 = FUSE_ASYNC_READ | FUSE_BIG_WRITES;
+const INIT_FLAGS: InitFlags = InitFlags::FUSE_ASYNC_READ.union(InitFlags::FUSE_BIG_WRITES);
 // TODO: Add FUSE_EXPORT_SUPPORT
 
 /// On macOS, we additionally support case insensitiveness, volume renames and xtimes
 /// TODO: we should eventually let the filesystem implementation decide which flags to set
 #[cfg(target_os = "macos")]
-const INIT_FLAGS: u64 = FUSE_ASYNC_READ | FUSE_CASE_INSENSITIVE | FUSE_VOL_RENAME | FUSE_XTIMES;
+const INIT_FLAGS: InitFlags = InitFlags::FUSE_ASYNC_READ
+    .union(InitFlags::FUSE_CASE_INSENSITIVE)
+    .union(InitFlags::FUSE_VOL_RENAME)
+    .union(InitFlags::FUSE_XTIMES);
 // TODO: Add FUSE_EXPORT_SUPPORT and FUSE_BIG_WRITES (requires ABI 7.10)
 
-const fn default_init_flags(#[allow(unused_variables)] capabilities: u64) -> u64 {
+const fn default_init_flags(#[allow(unused_variables)] capabilities: InitFlags) -> InitFlags {
     #[cfg(not(feature = "abi-7-28"))]
     {
         INIT_FLAGS
@@ -82,8 +86,8 @@ const fn default_init_flags(#[allow(unused_variables)] capabilities: u64) -> u64
     #[cfg(feature = "abi-7-28")]
     {
         let mut flags = INIT_FLAGS;
-        if capabilities & FUSE_MAX_PAGES != 0 {
-            flags |= FUSE_MAX_PAGES;
+        if capabilities.contains(InitFlags::FUSE_MAX_PAGES) {
+            flags = flags.union(InitFlags::FUSE_MAX_PAGES);
         }
         flags
     }
@@ -148,8 +152,8 @@ pub struct FileAttr {
 /// Configuration of the fuse kernel module connection
 #[derive(Debug)]
 pub struct KernelConfig {
-    capabilities: u64,
-    requested: u64,
+    capabilities: InitFlags,
+    requested: InitFlags,
     max_readahead: u32,
     max_max_readahead: u32,
     max_background: u16,
@@ -162,7 +166,7 @@ pub struct KernelConfig {
 }
 
 impl KernelConfig {
-    fn new(capabilities: u64, max_readahead: u32) -> Self {
+    fn new(capabilities: InitFlags, max_readahead: u32) -> Self {
         Self {
             capabilities,
             requested: default_init_flags(capabilities),
@@ -275,8 +279,10 @@ impl KernelConfig {
     /// # Errors
     /// When the argument includes capabilities not supported by the kernel, returns the bits of the capabilities not supported.
     pub fn add_capabilities(&mut self, capabilities_to_add: u64) -> Result<(), u64> {
-        if capabilities_to_add & self.capabilities != capabilities_to_add {
-            return Err(capabilities_to_add - (capabilities_to_add & self.capabilities));
+        let capabilities_to_add = InitFlags::from_bits_retain(capabilities_to_add);
+        if !self.capabilities.contains(capabilities_to_add) {
+            let unsupported = capabilities_to_add & !self.capabilities;
+            return Err(unsupported.bits());
         }
         self.requested |= capabilities_to_add;
         Ok(())

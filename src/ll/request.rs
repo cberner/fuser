@@ -943,12 +943,15 @@ mod op {
     }
     impl_request!(Init<'a>);
     impl<'a> Init<'a> {
-        pub(crate) fn capabilities(&self) -> u64 {
+        pub(crate) fn capabilities(&self) -> InitFlags {
+            let flags = InitFlags::from_bits_retain(u64::from(self.arg.flags));
             #[cfg(feature = "abi-7-36")]
-            if self.arg.flags & (FUSE_INIT_EXT as u32) != 0 {
-                return u64::from(self.arg.flags) | (u64::from(self.arg.flags2) << 32);
+            if flags.contains(InitFlags::FUSE_INIT_EXT) {
+                return InitFlags::from_bits_retain(
+                    u64::from(self.arg.flags) | (u64::from(self.arg.flags2) << 32),
+                );
             }
-            u64::from(self.arg.flags)
+            flags
         }
         pub(crate) fn max_readahead(&self) -> u32 {
             self.arg.max_readahead
@@ -958,16 +961,18 @@ mod op {
         }
 
         pub(crate) fn reply(&self, config: &crate::KernelConfig) -> Response<'a> {
-            let flags = self.capabilities() & config.requested; // use requested features and reported as capable
+            let flags: InitFlags = self.capabilities() & config.requested; // use requested features and reported as capable
+            let flags = if cfg!(feature = "abi-7-36") {
+                flags | InitFlags::FUSE_INIT_EXT
+            } else {
+                flags
+            };
 
             let init = fuse_init_out {
                 major: FUSE_KERNEL_VERSION,
                 minor: FUSE_KERNEL_MINOR_VERSION,
                 max_readahead: config.max_readahead,
-                #[cfg(not(feature = "abi-7-36"))]
-                flags: flags as u32,
-                #[cfg(feature = "abi-7-36")]
-                flags: (flags | FUSE_INIT_EXT) as u32,
+                flags: flags.pair().0,
                 max_background: config.max_background,
                 congestion_threshold: config.congestion_threshold(),
                 max_write: config.max_write,
@@ -982,7 +987,7 @@ mod op {
                 #[cfg(all(feature = "abi-7-28", not(feature = "abi-7-36")))]
                 reserved: [0; 8],
                 #[cfg(feature = "abi-7-36")]
-                flags2: (flags >> 32) as u32,
+                flags2: flags.pair().1,
                 #[cfg(all(feature = "abi-7-36", not(feature = "abi-7-40")))]
                 reserved: [0; 7],
                 #[cfg(feature = "abi-7-40")]
