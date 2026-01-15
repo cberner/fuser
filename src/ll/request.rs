@@ -1370,15 +1370,12 @@ mod op {
     /// Preallocate or deallocate space to a file
     ///
     /// Implementations should return EINVAL if offset or length are < 0
-    #[cfg(feature = "abi-7-19")]
     #[derive(Debug)]
     pub(crate) struct FAllocate<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_fallocate_in,
     }
-    #[cfg(feature = "abi-7-19")]
     impl_request!(FAllocate<'a>);
-    #[cfg(feature = "abi-7-19")]
     impl FAllocate<'_> {
         /// The value set by the [`Open`] method. See [`FileHandle`].
         pub(crate) fn file_handle(&self) -> FileHandle {
@@ -1786,7 +1783,6 @@ mod op {
                     nodes: data.fetch_slice(arg.count as usize)?,
                 })
             }
-            #[cfg(feature = "abi-7-19")]
             fuse_opcode::FUSE_FALLOCATE => Operation::FAllocate(FAllocate {
                 header,
                 arg: data.fetch()?,
@@ -1887,7 +1883,6 @@ pub(crate) enum Operation<'a> {
     #[allow(dead_code)]
     NotifyReply(NotifyReply<'a>),
     BatchForget(BatchForget<'a>),
-    #[cfg(feature = "abi-7-19")]
     FAllocate(FAllocate<'a>),
     #[cfg(feature = "abi-7-21")]
     ReadDirPlus(ReadDirPlus<'a>),
@@ -2055,7 +2050,6 @@ impl fmt::Display for Operation<'_> {
             Operation::Poll(x) => write!(f, "POLL fh {:?}", x.file_handle()),
             Operation::NotifyReply(_) => write!(f, "NOTIFYREPLY"),
             Operation::BatchForget(x) => write!(f, "BATCHFORGET nodes {:?}", x.nodes()),
-            #[cfg(feature = "abi-7-19")]
             Operation::FAllocate(_) => write!(f, "FALLOCATE"),
             #[cfg(feature = "abi-7-21")]
             Operation::ReadDirPlus(x) => write!(
