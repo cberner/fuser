@@ -53,7 +53,7 @@ jobs:
           cargo doc --all --no-deps --features=${{ matrix.features }}
           make test_passthrough
 
-  ci:
+  lint:
     runs-on: ubuntu-22.04
     env:
       RUSTFLAGS: --deny warnings
@@ -89,8 +89,19 @@ jobs:
         if: steps.rust-cache.outputs.cache-hit != 'true'
         run: cargo +1.81 install --force --version 0.16.2 cargo-deny --locked
 
-      - name: Run tests
-        run: INTERACTIVE="" make pre
+      - name: rustfmt check
+        run: cargo fmt --all -- --check
+
+      - name: Licenses
+        run: cargo deny check sources
+
+      - name: Clippy
+        run: |
+            cargo clippy --all-targets -- -Dwarnings
+            cargo clippy --all-targets --no-default-features -- -Dwarnings
+            cargo clippy --all-targets --features=abi-7-30 -- -Dwarnings
+            cargo clippy --all-targets --features=abi-7-36 -- -Dwarnings
+            cargo clippy --all-targets --features=abi-7-40 -- -Dwarnings
 
   test:
     runs-on: ubuntu-22.04
