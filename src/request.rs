@@ -514,7 +514,6 @@ impl<'a> Request<'a> {
             ll::Operation::BatchForget(x) => {
                 se.filesystem.batch_forget(self, x.nodes()); // no reply
             }
-            #[cfg(feature = "abi-7-19")]
             ll::Operation::FAllocate(x) => {
                 se.filesystem.fallocate(
                     self,

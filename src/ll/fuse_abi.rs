@@ -27,9 +27,7 @@ use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
 pub(crate) const FUSE_KERNEL_VERSION: u32 = 7;
 
-#[cfg(not(feature = "abi-7-19"))]
-pub(crate) const FUSE_KERNEL_MINOR_VERSION: u32 = 18;
-#[cfg(all(feature = "abi-7-19", not(feature = "abi-7-20")))]
+#[cfg(not(feature = "abi-7-20"))]
 pub(crate) const FUSE_KERNEL_MINOR_VERSION: u32 = 19;
 #[cfg(all(feature = "abi-7-20", not(feature = "abi-7-21")))]
 pub(crate) const FUSE_KERNEL_MINOR_VERSION: u32 = 20;
@@ -477,7 +475,6 @@ pub(crate) enum fuse_opcode {
     FUSE_POLL = 40,
     FUSE_NOTIFY_REPLY = 41,
     FUSE_BATCH_FORGET = 42,
-    #[cfg(feature = "abi-7-19")]
     FUSE_FALLOCATE = 43,
     #[cfg(feature = "abi-7-21")]
     FUSE_READDIRPLUS = 44,
@@ -543,7 +540,6 @@ impl TryFrom<u32> for fuse_opcode {
             40 => Ok(fuse_opcode::FUSE_POLL),
             41 => Ok(fuse_opcode::FUSE_NOTIFY_REPLY),
             42 => Ok(fuse_opcode::FUSE_BATCH_FORGET),
-            #[cfg(feature = "abi-7-19")]
             43 => Ok(fuse_opcode::FUSE_FALLOCATE),
             #[cfg(feature = "abi-7-21")]
             44 => Ok(fuse_opcode::FUSE_READDIRPLUS),
@@ -1068,7 +1064,6 @@ pub(crate) struct fuse_notify_poll_wakeup_out {
     pub(crate) kh: u64,
 }
 
-#[cfg(feature = "abi-7-19")]
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
 pub(crate) struct fuse_fallocate_in {
