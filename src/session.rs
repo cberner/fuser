@@ -170,7 +170,12 @@ impl<FS: Filesystem> Session<FS> {
 
     /// Unmount the filesystem
     pub fn unmount(&mut self) {
-        drop(std::mem::take(&mut *self.mount.lock().unwrap()));
+        drop(std::mem::take(&mut *self.mount.lock().unwrap_or_else(
+            |poisoned| {
+                warn!("Ignored poisoned mount lock");
+                poisoned.into_inner()
+            },
+        )));
     }
 
     /// Returns a thread-safe object that can be used to unmount the Filesystem
@@ -194,9 +199,13 @@ pub struct SessionUnmounter {
 
 impl SessionUnmounter {
     /// Unmount the filesystem
-    pub fn unmount(&mut self) -> io::Result<()> {
-        drop(std::mem::take(&mut *self.mount.lock().unwrap()));
-        Ok(())
+    pub fn unmount(&mut self) {
+        drop(std::mem::take(&mut *self.mount.lock().unwrap_or_else(
+            |poisoned| {
+                warn!("Ignored poisoned mount lock");
+                poisoned.into_inner()
+            },
+        )));
     }
 }
 
@@ -211,7 +220,7 @@ fn aligned_sub_buf(buf: &mut [u8], alignment: usize) -> &mut [u8] {
 
 impl<FS: 'static + Filesystem + Send> Session<FS> {
     /// Run the session loop in a background thread
-    pub fn spawn(self) -> io::Result<BackgroundSession> {
+    pub fn spawn(self) -> BackgroundSession {
         BackgroundSession::new(self)
     }
 }
@@ -223,7 +232,12 @@ impl<FS: Filesystem> Drop for Session<FS> {
             self.destroyed = true;
         }
 
-        if let Some((mountpoint, _mount)) = std::mem::take(&mut *self.mount.lock().unwrap()) {
+        if let Some((mountpoint, _mount)) =
+            std::mem::take(&mut *self.mount.lock().unwrap_or_else(|poisoned| {
+                warn!("Ignored poisoned mount lock");
+                poisoned.into_inner()
+            }))
+        {
             info!("unmounting session at {}", mountpoint.display());
         }
     }
@@ -244,19 +258,23 @@ impl BackgroundSession {
     /// Create a new background session for the given session by running its
     /// session loop in a background thread. If the returned handle is dropped,
     /// the filesystem is unmounted and the given session ends.
-    pub fn new<FS: Filesystem + Send + 'static>(se: Session<FS>) -> io::Result<BackgroundSession> {
+    pub fn new<FS: Filesystem + Send + 'static>(se: Session<FS>) -> BackgroundSession {
         let sender = se.ch.sender();
         // Take the fuse_session, so that we can unmount it
-        let mount = std::mem::take(&mut *se.mount.lock().unwrap()).map(|(_, mount)| mount);
+        let mount = std::mem::take(&mut *se.mount.lock().unwrap_or_else(|poisoned| {
+            warn!("Ignored poisoned mount lock");
+            poisoned.into_inner()
+        }))
+        .map(|(_, mount)| mount);
         let guard = thread::spawn(move || {
             let mut se = se;
             se.run()
         });
-        Ok(BackgroundSession {
+        BackgroundSession {
             guard,
             sender,
             _mount: mount,
-        })
+        }
     }
     /// Unmount the filesystem and join the background thread.
     /// # Panics
