@@ -5,7 +5,7 @@
 //! interface is versioned and capabilities are exchanged during the initialization (mounting)
 //! of a filesystem.
 //!
-//! OSXFUSE (macOS): <https://github.com/osxfuse/fuse/blob/master/include/fuse_kernel.h>
+//! macfuse (macOS): <https://github.com/macfuse/library/blob/master/include/fuse_kernel.h>
 //! - supports ABI 7.8 in OSXFUSE 2.x
 //! - supports ABI 7.19 since OSXFUSE 3.0.0
 //!
