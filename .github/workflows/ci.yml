@@ -99,6 +99,19 @@ jobs:
         test_group: [mount_tests, pjdfs_tests, xfstests]
 
     steps:
+      # https://github.com/marketplace/actions/maximize-build-disk-space-only-remove-unwanted-software
+      - name: Maximize build space
+        uses: AdityaGarg8/remove-unwanted-software@v5
+        with:
+          remove-android: 'true'
+          remove-dotnet: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          # remove-docker-images: 'true'
+          remove-large-packages: 'true'
+          remove-cached-tools: 'true'
+          # verbose: 'true'
+
       - uses: actions/checkout@v4
 
       - name: Run tests
