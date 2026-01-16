@@ -1,6 +1,8 @@
-use std::fs::File;
-use std::os::fd::{AsFd, AsRawFd};
+use std::os::fd::AsFd;
+use std::os::unix::io::AsRawFd;
 use std::sync::{Arc, Weak};
+
+use crate::dev_fuse::DevFuse;
 
 #[repr(C)]
 struct fuse_backing_map {
@@ -45,13 +47,13 @@ nix::ioctl_write_ptr!(
 /// make that call (if the channel hasn't already been closed).
 #[derive(Debug)]
 pub struct BackingId {
-    pub(crate) channel: Weak<File>,
+    pub(crate) channel: Weak<DevFuse>,
     /// The `backing_id` field passed to and from the kernel
     pub(crate) backing_id: u32,
 }
 
 impl BackingId {
-    pub(crate) fn create(channel: &Arc<File>, fd: impl AsFd) -> std::io::Result<Self> {
+    pub(crate) fn create(channel: &Arc<DevFuse>, fd: impl AsFd) -> std::io::Result<Self> {
         let map = fuse_backing_map {
             fd: fd.as_fd().as_raw_fd() as u32,
             flags: 0,
