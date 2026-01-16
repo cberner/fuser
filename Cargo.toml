@@ -19,6 +19,7 @@ bitflags = "2.9"
 libc = "0.2.51"
 log = "0.4.6"
 memchr = "2.7.2"
+num_enum = "0.7.5"
 page_size = "0.6.0"
 serde = { version = "1.0.102", features = ["std", "derive"], optional = true }
 smallvec = "1.6.1"

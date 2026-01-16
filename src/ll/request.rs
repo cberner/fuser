@@ -3,7 +3,7 @@
 //! A request represents information about a filesystem operation the kernel driver wants us to
 //! perform.
 
-use super::fuse_abi::{InvalidOpcodeError, fuse_in_header, fuse_opcode};
+use super::fuse_abi::{fuse_in_header, fuse_opcode};
 
 use super::argument::ArgumentIterator;
 use super::fuse_abi as abi;
@@ -2119,8 +2119,9 @@ impl_request!(AnyRequest<'_>);
 impl<'a> AnyRequest<'a> {
     pub(crate) fn operation(&self) -> Result<Operation<'a>, RequestError> {
         // Parse/check opcode
-        let opcode = fuse_opcode::try_from(self.header.opcode)
-            .map_err(|_: InvalidOpcodeError| RequestError::UnknownOperation(self.header.opcode))?;
+        let opcode = fuse_opcode::try_from(self.header.opcode).map_err(
+            |e: num_enum::TryFromPrimitiveError<_>| RequestError::UnknownOperation(e.number),
+        )?;
         // Parse/check operation arguments
         op::parse(self.header, &opcode, self.data).ok_or(RequestError::InsufficientData)
     }
