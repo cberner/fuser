@@ -122,7 +122,8 @@ pub struct FileAttr {
     pub ino: u64,
     /// Size in bytes
     pub size: u64,
-    /// Size in blocks
+    /// Allocated size in 512-byte blocks. May be smaller than the actual file size
+    /// if the file is compressed, for example.
     pub blocks: u64,
     /// Time of last access
     pub atime: SystemTime,
@@ -144,7 +145,7 @@ pub struct FileAttr {
     pub gid: u32,
     /// Rdev
     pub rdev: u32,
-    /// Block size
+    /// Block size to be reported by `stat()`. If unsure, set to 4096.
     pub blksize: u32,
     /// Flags (macOS only, see chflags(2))
     pub flags: u32,
