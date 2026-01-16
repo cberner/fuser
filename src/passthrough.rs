@@ -1,8 +1,8 @@
+use crate::dev_fuse::DevFuse;
+use log::error;
 use std::os::fd::AsFd;
 use std::os::unix::io::AsRawFd;
 use std::sync::{Arc, Weak};
-
-use crate::dev_fuse::DevFuse;
 
 #[repr(C)]
 struct fuse_backing_map {
@@ -71,7 +71,10 @@ impl BackingId {
 impl Drop for BackingId {
     fn drop(&mut self) {
         if let Some(ch) = self.channel.upgrade() {
-            let _ = unsafe { fuse_dev_ioc_backing_close(ch.as_raw_fd(), &self.backing_id) };
+            if let Err(e) = unsafe { fuse_dev_ioc_backing_close(ch.as_raw_fd(), &self.backing_id) }
+            {
+                error!("Failed to close backing fd: {e}");
+            }
         }
     }
 }
