@@ -8,6 +8,7 @@
 use libc::{EAGAIN, EINTR, ENODEV, ENOENT};
 use log::{info, warn};
 use nix::unistd::geteuid;
+use std::fs::File;
 use std::io;
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::path::{Path, PathBuf};
@@ -16,6 +17,7 @@ use std::thread::{self, JoinHandle};
 
 use crate::Filesystem;
 use crate::MountOption;
+use crate::dev_fuse::DevFuse;
 use crate::ll::{Version, fuse_abi as abi};
 use crate::request::Request;
 use crate::{channel::Channel, mnt::Mount};
@@ -120,7 +122,7 @@ impl<FS: Filesystem> Session<FS> {
     /// Wrap an existing /dev/fuse file descriptor. This doesn't mount the
     /// filesystem anywhere; that must be done separately.
     pub fn from_fd(filesystem: FS, fd: OwnedFd, acl: SessionACL) -> Self {
-        let ch = Channel::new(Arc::new(fd.into()));
+        let ch = Channel::new(Arc::new(DevFuse(File::from(fd))));
         Session {
             filesystem,
             ch,

@@ -15,10 +15,10 @@ mod fuse3_sys;
 mod fuse_pure;
 pub(crate) mod mount_options;
 
+#[cfg(any(test, fuser_mount_impl = "pure-rust"))]
+use crate::dev_fuse::DevFuse;
 #[cfg(any(test, fuser_mount_impl = "libfuse2", fuser_mount_impl = "libfuse3"))]
 use fuse2_sys::fuse_args;
-#[cfg(any(test, fuser_mount_impl = "pure-rust"))]
-use std::fs::File;
 use std::io;
 
 #[cfg(any(test, fuser_mount_impl = "libfuse2", fuser_mount_impl = "libfuse3"))]
@@ -83,7 +83,7 @@ fn libc_umount(mnt: &CStr) -> io::Result<()> {
 /// Warning: This will return true if the filesystem has been detached (lazy unmounted), but not
 /// yet destroyed by the kernel.
 #[cfg(any(test, fuser_mount_impl = "pure-rust"))]
-fn is_mounted(fuse_device: &File) -> bool {
+fn is_mounted(fuse_device: &DevFuse) -> bool {
     use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
     use std::os::unix::io::AsFd;
     use std::slice;

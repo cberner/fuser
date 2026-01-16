@@ -15,6 +15,8 @@ use std::{
     sync::Arc,
 };
 
+use crate::dev_fuse::DevFuse;
+
 /// Ensures that an os error is never 0/Success
 fn ensure_last_os_error() -> io::Error {
     let err = io::Error::last_os_error();
@@ -30,7 +32,7 @@ pub(crate) struct Mount {
     mountpoint: CString,
 }
 impl Mount {
-    pub(crate) fn new(mnt: &Path, options: &[MountOption]) -> io::Result<(Arc<File>, Mount)> {
+    pub(crate) fn new(mnt: &Path, options: &[MountOption]) -> io::Result<(Arc<DevFuse>, Mount)> {
         let mnt = CString::new(mnt.as_os_str().as_bytes()).unwrap();
         with_fuse_args(options, |args| {
             let ops = fuse_lowlevel_ops::default();
@@ -63,7 +65,7 @@ impl Mount {
             // don't want it being closed out from under us:
             let fd = nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(0))?;
             let file = unsafe { File::from_raw_fd(fd) };
-            Ok((Arc::new(file), mount))
+            Ok((Arc::new(DevFuse(file)), mount))
         })
     }
 }

@@ -21,7 +21,6 @@ use std::fs::File;
     target_os = "openbsd",
     target_os = "netbsd",
 ))]
-use std::fs::OpenOptions;
 use std::io;
 use std::io::{Error, ErrorKind, IoSliceMut, Read};
 use std::mem;
@@ -36,6 +35,8 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 
+use crate::dev_fuse::DevFuse;
+
 const FUSERMOUNT_BIN: &str = "fusermount";
 const FUSERMOUNT3_BIN: &str = "fusermount3";
 const FUSERMOUNT_COMM_ENV: &str = "_FUSE_COMMFD";
@@ -45,13 +46,13 @@ const MOUNT_FUSEFS_BIN: &str = "mount_fusefs";
 pub(crate) struct Mount {
     mountpoint: CString,
     auto_unmount_socket: Option<UnixStream>,
-    fuse_device: Arc<File>,
+    fuse_device: Arc<DevFuse>,
 }
 impl Mount {
     pub(crate) fn new(
         mountpoint: &Path,
         options: &[MountOption],
-    ) -> io::Result<(Arc<File>, Mount)> {
+    ) -> io::Result<(Arc<DevFuse>, Mount)> {
         let mountpoint = mountpoint.canonicalize()?;
         let (file, sock) = fuse_mount_pure(mountpoint.as_os_str(), options)?;
         let file = Arc::new(file);
@@ -94,7 +95,7 @@ impl Drop for Mount {
 fn fuse_mount_pure(
     mountpoint: &OsStr,
     options: &[MountOption],
-) -> Result<(File, Option<UnixStream>), io::Error> {
+) -> Result<(DevFuse, Option<UnixStream>), io::Error> {
     if options.contains(&MountOption::AutoUnmount) {
         // Auto unmount is only supported via fusermount
         return fuse_mount_fusermount(mountpoint, options);
@@ -173,7 +174,7 @@ fn detect_fusermount_bin() -> String {
     FUSERMOUNT3_BIN.to_string()
 }
 
-fn receive_fusermount_message(socket: &UnixStream) -> Result<File, Error> {
+fn receive_fusermount_message(socket: &UnixStream) -> Result<DevFuse, Error> {
     let mut io_vec_buf = [0u8];
     let mut iov = [IoSliceMut::new(&mut io_vec_buf)];
     let mut cmsg_buffer = nix::cmsg_space!(RawFd);
@@ -208,7 +209,7 @@ fn receive_fusermount_message(socket: &UnixStream) -> Result<File, Error> {
                     if fd < 0 {
                         return Err(ErrorKind::InvalidData.into());
                     }
-                    return Ok(unsafe { File::from_raw_fd(fd) });
+                    return Ok(DevFuse(unsafe { File::from_raw_fd(fd) }));
                 }
             }
             other => {
@@ -229,7 +230,7 @@ fn receive_fusermount_message(socket: &UnixStream) -> Result<File, Error> {
 fn fuse_mount_fusermount(
     mountpoint: &OsStr,
     options: &[MountOption],
-) -> Result<(File, Option<UnixStream>), Error> {
+) -> Result<(DevFuse, Option<UnixStream>), Error> {
     let fusermount_bin = detect_fusermount_bin();
 
     if fusermount_bin.ends_with(MOUNT_FUSEFS_BIN) {
@@ -315,11 +316,8 @@ fn fuse_mount_mount_fusefs(
     fusermount_bin: &str,
     mountpoint: &OsStr,
     options: &[MountOption],
-) -> Result<(File, Option<UnixStream>), Error> {
-    let fuse_device = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open("/dev/fuse")?;
+) -> Result<(DevFuse, Option<UnixStream>), Error> {
+    let fuse_device = DevFuse::open()?;
 
     let fuse_fd = fuse_device.as_raw_fd();
 
@@ -359,23 +357,17 @@ fn fuse_mount_mount_fusefs(
 
 // If returned option is none. Then fusermount binary should be tried
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-fn fuse_mount_sys(mountpoint: &OsStr, options: &[MountOption]) -> Result<Option<File>, Error> {
-    let fuse_device_name = "/dev/fuse";
-
+fn fuse_mount_sys(mountpoint: &OsStr, options: &[MountOption]) -> Result<Option<DevFuse>, Error> {
     let mountpoint_mode = File::open(mountpoint)?.metadata()?.permissions().mode();
 
     // Auto unmount requests must be sent to fusermount binary
     assert!(!options.contains(&MountOption::AutoUnmount));
 
-    let file = match OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(fuse_device_name)
-    {
-        Ok(file) => file,
+    let file = match DevFuse::open() {
+        Ok(dev_fuse) => dev_fuse,
         Err(error) => {
             if error.kind() == ErrorKind::NotFound {
-                error!("{} not found. Try 'modprobe fuse'", fuse_device_name);
+                error!("{} not found. Try 'modprobe fuse'", DevFuse::PATH);
             }
             return Err(error);
         }
@@ -433,7 +425,7 @@ fn fuse_mount_sys(mountpoint: &OsStr, options: &[MountOption]) -> Result<Option<
     }
 
     // Default name is "/dev/fuse", then use the subtype, and lastly prefer the name
-    let mut source = fuse_device_name;
+    let mut source = DevFuse::PATH;
     if let Some(MountOption::Subtype(subtype)) = options
         .iter()
         .find(|x| matches!(**x, MountOption::Subtype(_)))
@@ -493,7 +485,7 @@ fn fuse_mount_sys(mountpoint: &OsStr, options: &[MountOption]) -> Result<Option<
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
 #[allow(dead_code)]
-fn fuse_mount_sys(_mountpoint: &OsStr, _options: &[MountOption]) -> Result<Option<File>, Error> {
+fn fuse_mount_sys(_mountpoint: &OsStr, _options: &[MountOption]) -> Result<Option<DevFuse>, Error> {
     Ok(None)
 }
 
