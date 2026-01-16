@@ -24,6 +24,7 @@ use std::time::Duration;
 use std::time::SystemTime;
 use std::{convert::AsRef, io::ErrorKind};
 
+pub use crate::ll::RequestId;
 pub use crate::ll::fuse_abi::FUSE_ROOT_ID;
 use crate::ll::fuse_abi::InitFlags;
 use crate::ll::fuse_abi::consts::*;

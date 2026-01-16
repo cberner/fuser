@@ -352,11 +352,7 @@ impl<'a> Request<'a> {
                     self.request.nodeid().into(),
                     x.file_handle().into(),
                     x.offset(),
-                    ReplyDirectory::new(
-                        self.request.unique().into(),
-                        self.ch.clone(),
-                        x.size() as usize,
-                    ),
+                    ReplyDirectory::new(self.request.unique(), self.ch.clone(), x.size() as usize),
                 );
             }
             ll::Operation::ReleaseDir(x) => {
@@ -533,7 +529,7 @@ impl<'a> Request<'a> {
                     x.file_handle().into(),
                     x.offset(),
                     ReplyDirectoryPlus::new(
-                        self.request.unique().into(),
+                        self.request.unique(),
                         self.ch.clone(),
                         x.size() as usize,
                     ),
@@ -611,13 +607,13 @@ impl<'a> Request<'a> {
     /// Create a reply object for this request that can be passed to the filesystem
     /// implementation and makes sure that a request is replied exactly once
     fn reply<T: Reply>(&self) -> T {
-        Reply::new(self.request.unique().into(), self.ch.clone())
+        Reply::new(self.request.unique(), self.ch.clone())
     }
 
     /// Returns the unique identifier of this request
     #[inline]
-    pub fn unique(&self) -> u64 {
-        self.request.unique().into()
+    pub fn unique(&self) -> ll::RequestId {
+        self.request.unique()
     }
 
     /// Returns the uid of this request

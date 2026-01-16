@@ -1,5 +1,9 @@
 # FUSE for Rust - Changelog
 
+## 0.17 - Unreleased
+
+* Change integers to newtypes in various public APIs
+
 ## 0.16.0 - 2025-09-12
 * Add support for passthrough file descriptors
 * Change `KernelConfig` capabilities flags parameters to `u64`
