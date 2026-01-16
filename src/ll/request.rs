@@ -5,7 +5,7 @@
 
 use super::fuse_abi::{InvalidOpcodeError, fuse_in_header, fuse_opcode};
 
-use super::{Errno, Response, fuse_abi as abi};
+use super::fuse_abi as abi;
 use nix::unistd::{Gid, Pid, Uid};
 #[cfg(feature = "serializable")]
 use serde::{Deserialize, Serialize};
@@ -219,11 +219,6 @@ pub(crate) trait Request: Sized {
 
     /// Returns the PID of the process that triggered this request.
     fn pid(&self) -> Pid;
-
-    /// Create an error response for this Request
-    fn reply_err(&self, errno: Errno) -> Response<'_> {
-        Response::new_error(errno)
-    }
 }
 
 macro_rules! impl_request {
