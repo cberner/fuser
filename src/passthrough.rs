@@ -31,12 +31,13 @@ nix::ioctl_write_ptr!(
 
 /// A reference to a previously opened fd intended to be used for passthrough
 ///
-/// You can create these via `ReplyOpen::open_backing()` and send them via
-/// `ReplyOpen::opened_passthrough()`.
+/// You can create these via [`ReplyOpen::open_backing()`](crate::ReplyOpen::open_backing)
+/// and send them via [`ReplyOpen::opened_passthrough()`](crate::ReplyOpen::opened_passthrough).
 ///
 /// When working with backing IDs you need to ensure that they live "long enough".  A good practice
-/// is to create them in the `Filesystem::open()` impl, store them in the struct of your Filesystem
-/// impl, then drop them in the `Filesystem::release()` impl.  Dropping them immediately after
+/// is to create them in the [`Filesystem::open()`](crate::Filesystem::open) impl,
+/// store them in the struct of your Filesystem impl, then drop them in the
+/// [`Filesystem::release()`](crate::Filesystem::release) impl. Dropping them immediately after
 /// sending them in the `Filesystem::open()` impl can lead to the kernel returning EIO when userspace
 /// attempts to access the file.
 ///
