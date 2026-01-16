@@ -9,9 +9,8 @@ pub(crate) mod request;
 use std::{convert::TryInto, num::NonZeroI32, time::SystemTime};
 
 pub(crate) use reply::Response;
-pub(crate) use request::{
-    AnyRequest, FileHandle, INodeNo, Lock, Operation, Request, RequestId, Version,
-};
+pub use request::RequestId;
+pub(crate) use request::{AnyRequest, FileHandle, INodeNo, Lock, Operation, Request, Version};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 /// Possible input arguments for atime & mtime, which can either be set to a specified time,

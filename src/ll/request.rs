@@ -37,9 +37,9 @@ pub(crate) enum RequestError {
 /// will send an [`Interrupt`] request to cancel requests in progress.  It's
 /// important to handle this for any requests that may block indefinitely, like
 /// [`SetLkW`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serializable", derive(Serialize, Deserialize))]
-pub(crate) struct RequestId(pub(crate) u64);
+pub struct RequestId(pub u64);
 impl From<RequestId> for u64 {
     fn from(fh: RequestId) -> Self {
         fh.0

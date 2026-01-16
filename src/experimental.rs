@@ -2,6 +2,7 @@
 
 use crate::{
     FileAttr, FileType, Filesystem, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry, Request,
+    RequestId,
 };
 use std::ffi::OsStr;
 use std::time::Duration;
@@ -13,11 +14,11 @@ pub struct RequestContext {
     uid: u32,
     gid: u32,
     pid: u32,
-    request_id: u64,
+    request_id: RequestId,
 }
 
 impl RequestContext {
-    fn new(uid: u32, gid: u32, pid: u32, request_id: u64) -> Self {
+    fn new(uid: u32, gid: u32, pid: u32, request_id: RequestId) -> Self {
         Self {
             uid,
             gid,
@@ -42,7 +43,7 @@ impl RequestContext {
     }
 
     /// The unique ID of the request
-    pub fn request_id(&self) -> u64 {
+    pub fn request_id(&self) -> RequestId {
         self.request_id
     }
 }
