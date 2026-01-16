@@ -18,7 +18,7 @@ use crate::channel::ChannelSender;
 use crate::ll::Request as _;
 #[cfg(feature = "abi-7-21")]
 use crate::reply::ReplyDirectoryPlus;
-use crate::reply::{Reply, ReplyDirectory, ReplySender};
+use crate::reply::{Reply, ReplyDirectory, ReplyRaw};
 use crate::session::{Session, SessionACL};
 use crate::{KernelConfig, ll};
 
@@ -53,18 +53,12 @@ impl<'a> Request<'a> {
     /// request and sends back the returned reply to the kernel
     pub(crate) fn dispatch<FS: Filesystem>(&self, se: &mut Session<FS>) {
         debug!("{}", self.request);
-        let unique = self.request.unique();
-
         let res = match self.dispatch_req(se) {
             Ok(Some(resp)) => resp,
             Ok(None) => return,
             Err(errno) => self.request.reply_err(errno),
-        }
-        .with_iovec(unique, |iov| self.ch.send(iov));
-
-        if let Err(err) = res {
-            warn!("Request {unique:?}: Failed to send reply: {err}");
-        }
+        };
+        self.reply::<ReplyRaw>().send_ll(&res);
     }
 
     fn dispatch_req<FS: Filesystem>(
