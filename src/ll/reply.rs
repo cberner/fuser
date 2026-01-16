@@ -119,15 +119,9 @@ impl<'a> Response<'a> {
     }
 
     pub(crate) fn new_open(fh: FileHandle, flags: FopenFlags, backing_id: u32) -> Self {
-        #[cfg(not(feature = "abi-7-40"))]
-        let _ = backing_id;
-
         let r = abi::fuse_open_out {
             fh: fh.into(),
             open_flags: flags.bits(),
-            #[cfg(not(feature = "abi-7-40"))]
-            padding: 0,
-            #[cfg(feature = "abi-7-40")]
             backing_id,
         };
         Self::from_struct(&r)
@@ -194,9 +188,6 @@ impl<'a> Response<'a> {
         flags: FopenFlags,
         backing_id: u32,
     ) -> Self {
-        #[cfg(not(feature = "abi-7-40"))]
-        let _ = backing_id;
-
         let r = abi::fuse_create_out(
             abi::fuse_entry_out {
                 nodeid: attr.attr.ino,
@@ -210,9 +201,6 @@ impl<'a> Response<'a> {
             abi::fuse_open_out {
                 fh: fh.into(),
                 open_flags: flags.bits(),
-                #[cfg(not(feature = "abi-7-40"))]
-                padding: 0,
-                #[cfg(feature = "abi-7-40")]
                 backing_id,
             },
         );

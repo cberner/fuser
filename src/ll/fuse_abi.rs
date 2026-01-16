@@ -588,18 +588,12 @@ pub(crate) struct fuse_setattr_in {
     // NOTE: this field is defined as u64 in fuse_kernel.h in libfuse. However, it is treated as signed
     // to match stat.st_mtime
     pub(crate) mtime: i64,
-    #[cfg(not(feature = "abi-7-23"))]
-    pub(crate) unused2: u64,
-    #[cfg(feature = "abi-7-23")]
     // NOTE: this field is defined as u64 in fuse_kernel.h in libfuse. However, it is treated as signed
     // to match stat.st_ctime
-    pub(crate) ctime: i64,
+    pub(crate) ctime: i64, // Used since ABI 7.23.
     pub(crate) atimensec: u32,
     pub(crate) mtimensec: u32,
-    #[cfg(not(feature = "abi-7-23"))]
-    pub(crate) unused3: u32,
-    #[cfg(feature = "abi-7-23")]
-    pub(crate) ctimensec: u32,
+    pub(crate) ctimensec: u32, // Used since ABI 7.23.
     pub(crate) mode: u32,
     pub(crate) unused4: u32,
     pub(crate) uid: u32,
@@ -660,10 +654,7 @@ pub(crate) struct fuse_create_out(pub(crate) fuse_entry_out, pub(crate) fuse_ope
 pub(crate) struct fuse_open_out {
     pub(crate) fh: u64,
     pub(crate) open_flags: u32,
-    #[cfg(not(feature = "abi-7-40"))]
-    pub(crate) padding: u32,
-    #[cfg(feature = "abi-7-40")]
-    pub(crate) backing_id: u32,
+    pub(crate) backing_id: u32, // Used since ABI 7.40.
 }
 
 #[repr(C)]
@@ -914,10 +905,7 @@ pub(crate) struct fuse_poll_in {
     pub(crate) fh: u64,
     pub(crate) kh: u64,
     pub(crate) flags: u32,
-    #[cfg(not(feature = "abi-7-21"))]
-    pub(crate) padding: u32,
-    #[cfg(feature = "abi-7-21")]
-    pub(crate) events: u32,
+    pub(crate) events: u32, // Used since ABI 7.21.
 }
 
 #[repr(C)]
