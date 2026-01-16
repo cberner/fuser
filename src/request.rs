@@ -27,9 +27,6 @@ use crate::{KernelConfig, ll};
 pub struct Request<'a> {
     /// Channel sender for sending the reply
     ch: ChannelSender,
-    /// Request raw data
-    #[allow(unused)]
-    data: &'a [u8],
     /// Parsed request
     request: ll::AnyRequest<'a>,
 }
@@ -45,7 +42,7 @@ impl<'a> Request<'a> {
             }
         };
 
-        Some(Self { ch, data, request })
+        Some(Self { ch, request })
     }
 
     /// Dispatch request to the given filesystem.
