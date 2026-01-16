@@ -5,6 +5,7 @@
 
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
+use zerocopy::error::ConvertError;
 use zerocopy::{FromBytes, Immutable, KnownLayout};
 
 /// An iterator that can be used to fetch typed arguments from a byte slice.
@@ -33,18 +34,15 @@ impl<'a> ArgumentIterator<'a> {
     /// Fetch a typed argument. Returns `None` if there's not enough data left.
     pub(crate) fn fetch<T: FromBytes + KnownLayout + Immutable>(&mut self) -> Option<&'a T> {
         match zerocopy::Ref::<_, T>::from_prefix(self.data) {
-            Err(_err) => {
-                // TODO: do something with _err
-                if self.data.as_ptr() as usize % align_of::<T>() != 0 {
-                    // Panic on alignment errors as this is under the control
-                    // of the programmer, we can still return None for size
-                    // failures as this may be caused by insufficient external
-                    // data.
-                    panic!("Data unaligned");
-                } else {
-                    None
-                }
+            Err(ConvertError::Alignment(_)) => {
+                // Panic on alignment errors as this is under the control
+                // of the programmer, we can still return None for size
+                // failures as this may be caused by insufficient external
+                // data.
+                panic!("Data unaligned");
             }
+            Err(ConvertError::Size(_)) => None,
+            Err(ConvertError::Validity(infallible)) => match infallible {},
             Ok((x, rest)) => {
                 self.data = rest;
                 Some(zerocopy::Ref::<&[u8], T>::into_ref(x))
@@ -58,18 +56,15 @@ impl<'a> ArgumentIterator<'a> {
         count: usize,
     ) -> Option<&'a [T]> {
         match zerocopy::Ref::<_, [T]>::from_prefix_with_elems(self.data, count) {
-            Err(_err) => {
-                // TODO: do something with _err
-                if self.data.as_ptr() as usize % align_of::<T>() != 0 {
-                    // Panic on alignment errors as this is under the control
-                    // of the programmer, we can still return None for size
-                    // failures as this may be caused by insufficient external
-                    // data.
-                    panic!("Data unaligned");
-                } else {
-                    None
-                }
+            Err(ConvertError::Alignment(_)) => {
+                // Panic on alignment errors as this is under the control
+                // of the programmer, we can still return None for size
+                // failures as this may be caused by insufficient external
+                // data.
+                panic!("Data unaligned");
             }
+            Err(ConvertError::Size(_)) => None,
+            Err(ConvertError::Validity(infallible)) => match infallible {},
             Ok((x, rest)) => {
                 self.data = rest;
                 Some(zerocopy::Ref::<&[u8], [T]>::into_ref(x))
