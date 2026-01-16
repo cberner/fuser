@@ -123,16 +123,14 @@ fn fuse_mount_pure(
 
 fn fuse_unmount_pure(mountpoint: &CStr) {
     #[cfg(target_os = "linux")]
-    unsafe {
-        let result = libc::umount2(mountpoint.as_ptr(), libc::MNT_DETACH);
-        if result == 0 {
+    {
+        if nix::mount::umount2(mountpoint, nix::mount::MntFlags::MNT_DETACH).is_ok() {
             return;
         }
     }
     #[cfg(target_os = "macos")]
-    unsafe {
-        let result = libc::unmount(mountpoint.as_ptr(), libc::MNT_FORCE);
-        if result == 0 {
+    {
+        if nix::mount::unmount(mountpoint, nix::mount::MntFlags::MNT_FORCE).is_ok() {
             return;
         }
     }
@@ -402,27 +400,31 @@ fn fuse_mount_sys(mountpoint: &OsStr, options: &[MountOption]) -> Result<Option<
         mount_options.push_str(&option_to_string(option));
     }
 
-    let mut flags = 0;
+    #[cfg(target_os = "linux")]
+    let mut flags = nix::mount::MsFlags::empty();
+    #[cfg(target_os = "macos")]
+    let mut flags = nix::mount::MntFlags::empty();
+
     if !options.contains(&MountOption::Dev) {
         // Default to nodev
         #[cfg(target_os = "linux")]
         {
-            flags |= libc::MS_NODEV;
+            flags |= nix::mount::MsFlags::MS_NODEV;
         }
         #[cfg(target_os = "macos")]
         {
-            flags |= libc::MNT_NODEV;
+            flags |= nix::mount::MntFlags::MNT_NODEV;
         }
     }
     if !options.contains(&MountOption::Suid) {
         // Default to nosuid
         #[cfg(target_os = "linux")]
         {
-            flags |= libc::MS_NOSUID;
+            flags |= nix::mount::MsFlags::MS_NOSUID;
         }
         #[cfg(target_os = "macos")]
         {
-            flags |= libc::MNT_NOSUID;
+            flags |= nix::mount::MntFlags::MNT_NOSUID;
         }
     }
     for flag in options
@@ -447,48 +449,27 @@ fn fuse_mount_sys(mountpoint: &OsStr, options: &[MountOption]) -> Result<Option<
         source = name;
     }
 
-    let c_source = CString::new(source).unwrap();
-    let c_mountpoint = CString::new(mountpoint.as_bytes()).unwrap();
+    #[cfg(target_os = "linux")]
+    let result = nix::mount::mount(
+        Some(source),
+        mountpoint,
+        Some("fuse"),
+        flags,
+        Some(mount_options.as_str()),
+    );
+    #[cfg(target_os = "macos")]
+    let result = nix::mount::mount(source, mountpoint, flags, Some(mount_options.as_str()));
 
-    let result = unsafe {
-        #[cfg(target_os = "linux")]
-        {
-            let c_options = CString::new(mount_options.clone()).unwrap();
-            let c_type = CString::new("fuse").unwrap();
-            libc::mount(
-                c_source.as_ptr(),
-                c_mountpoint.as_ptr(),
-                c_type.as_ptr(),
-                flags,
-                c_options.as_ptr() as *const libc::c_void,
-            )
-        }
-        #[cfg(target_os = "macos")]
-        {
-            let mut c_options = CString::new(mount_options.clone()).unwrap();
-            libc::mount(
-                c_source.as_ptr(),
-                c_mountpoint.as_ptr(),
-                flags,
-                c_options.as_ptr() as *mut libc::c_void,
-            )
-        }
-    };
-    if result == -1 {
-        let err = Error::last_os_error();
-        if err.kind() == ErrorKind::PermissionDenied {
-            return Ok(None); // Retry with fusermount
-        } else {
-            return Err(Error::new(
-                err.kind(),
-                format!(
-                    "Error calling mount() at {mountpoint:?} with {mount_options:?} and flags={flags}: {err}"
-                ),
-            ));
-        }
+    match result {
+        Ok(()) => Ok(Some(file)),
+        Err(nix::errno::Errno::EPERM) => Ok(None), // Retry with fusermount
+        Err(e) => Err(Error::new(
+            ErrorKind::Other,
+            format!(
+                "Error calling mount() at {mountpoint:?} with {mount_options:?} and flags={flags:?}: {e}"
+            ),
+        )),
     }
-
-    Ok(Some(file))
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
@@ -532,21 +513,21 @@ pub(crate) fn option_group(option: &MountOption) -> MountOptionGroup {
 }
 
 #[cfg(target_os = "linux")]
-pub(crate) fn option_to_flag(option: &MountOption) -> io::Result<libc::c_ulong> {
+pub(crate) fn option_to_flag(option: &MountOption) -> io::Result<nix::mount::MsFlags> {
     match option {
-        MountOption::Dev => Ok(0), // There is no option for dev. It's the absence of NoDev
-        MountOption::NoDev => Ok(libc::MS_NODEV),
-        MountOption::Suid => Ok(0),
-        MountOption::NoSuid => Ok(libc::MS_NOSUID),
-        MountOption::RW => Ok(0),
-        MountOption::RO => Ok(libc::MS_RDONLY),
-        MountOption::Exec => Ok(0),
-        MountOption::NoExec => Ok(libc::MS_NOEXEC),
-        MountOption::Atime => Ok(0),
-        MountOption::NoAtime => Ok(libc::MS_NOATIME),
-        MountOption::Async => Ok(0),
-        MountOption::Sync => Ok(libc::MS_SYNCHRONOUS),
-        MountOption::DirSync => Ok(libc::MS_DIRSYNC),
+        MountOption::Dev => Ok(nix::mount::MsFlags::empty()), // There is no option for dev. It's the absence of NoDev
+        MountOption::NoDev => Ok(nix::mount::MsFlags::MS_NODEV),
+        MountOption::Suid => Ok(nix::mount::MsFlags::empty()),
+        MountOption::NoSuid => Ok(nix::mount::MsFlags::MS_NOSUID),
+        MountOption::RW => Ok(nix::mount::MsFlags::empty()),
+        MountOption::RO => Ok(nix::mount::MsFlags::MS_RDONLY),
+        MountOption::Exec => Ok(nix::mount::MsFlags::empty()),
+        MountOption::NoExec => Ok(nix::mount::MsFlags::MS_NOEXEC),
+        MountOption::Atime => Ok(nix::mount::MsFlags::empty()),
+        MountOption::NoAtime => Ok(nix::mount::MsFlags::MS_NOATIME),
+        MountOption::Async => Ok(nix::mount::MsFlags::empty()),
+        MountOption::Sync => Ok(nix::mount::MsFlags::MS_SYNCHRONOUS),
+        MountOption::DirSync => Ok(nix::mount::MsFlags::MS_DIRSYNC),
         option => Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!("Invalid mount option for flag conversion: {option:?}"),
@@ -555,20 +536,20 @@ pub(crate) fn option_to_flag(option: &MountOption) -> io::Result<libc::c_ulong> 
 }
 
 #[cfg(target_os = "macos")]
-pub(crate) fn option_to_flag(option: &MountOption) -> io::Result<libc::c_int> {
+pub(crate) fn option_to_flag(option: &MountOption) -> io::Result<nix::mount::MntFlags> {
     match option {
-        MountOption::Dev => Ok(0), // There is no option for dev. It's the absence of NoDev
-        MountOption::NoDev => Ok(libc::MNT_NODEV),
-        MountOption::Suid => Ok(0),
-        MountOption::NoSuid => Ok(libc::MNT_NOSUID),
-        MountOption::RW => Ok(0),
-        MountOption::RO => Ok(libc::MNT_RDONLY),
-        MountOption::Exec => Ok(0),
-        MountOption::NoExec => Ok(libc::MNT_NOEXEC),
-        MountOption::Atime => Ok(0),
-        MountOption::NoAtime => Ok(libc::MNT_NOATIME),
-        MountOption::Async => Ok(0),
-        MountOption::Sync => Ok(libc::MNT_SYNCHRONOUS),
+        MountOption::Dev => Ok(nix::mount::MntFlags::empty()), // There is no option for dev. It's the absence of NoDev
+        MountOption::NoDev => Ok(nix::mount::MntFlags::MNT_NODEV),
+        MountOption::Suid => Ok(nix::mount::MntFlags::empty()),
+        MountOption::NoSuid => Ok(nix::mount::MntFlags::MNT_NOSUID),
+        MountOption::RW => Ok(nix::mount::MntFlags::empty()),
+        MountOption::RO => Ok(nix::mount::MntFlags::MNT_RDONLY),
+        MountOption::Exec => Ok(nix::mount::MntFlags::empty()),
+        MountOption::NoExec => Ok(nix::mount::MntFlags::MNT_NOEXEC),
+        MountOption::Atime => Ok(nix::mount::MntFlags::empty()),
+        MountOption::NoAtime => Ok(nix::mount::MntFlags::MNT_NOATIME),
+        MountOption::Async => Ok(nix::mount::MntFlags::empty()),
+        MountOption::Sync => Ok(nix::mount::MntFlags::MNT_SYNCHRONOUS),
         option => Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!("Invalid mount option for flag conversion: {option:?}"),
@@ -591,27 +572,27 @@ pub(crate) fn option_to_flag(option: &MountOption) -> io::Result<libc::c_int> {
     target_os = "openbsd",
     target_os = "netbsd"
 ))]
-pub(crate) fn option_to_flag(option: &MountOption) -> io::Result<libc::c_int> {
+pub(crate) fn option_to_flag(option: &MountOption) -> io::Result<nix::mount::MntFlags> {
     match option {
-        MountOption::Dev => Ok(0),
+        MountOption::Dev => Ok(nix::mount::MntFlags::empty()),
         #[cfg(target_os = "freebsd")]
         MountOption::NoDev => Err(io::Error::new(
             io::ErrorKind::Unsupported,
             "NoDev option is not supported on FreeBSD",
         )),
         #[cfg(not(target_os = "freebsd"))]
-        MountOption::NoDev => Ok(libc::MNT_NODEV),
-        MountOption::Suid => Ok(0),
-        MountOption::NoSuid => Ok(libc::MNT_NOSUID),
-        MountOption::RW => Ok(0),
-        MountOption::RO => Ok(libc::MNT_RDONLY),
-        MountOption::Exec => Ok(0),
-        MountOption::NoExec => Ok(libc::MNT_NOEXEC),
-        MountOption::Atime => Ok(0),
-        MountOption::NoAtime => Ok(libc::MNT_NOATIME),
-        MountOption::Async => Ok(0),
-        MountOption::Sync => Ok(libc::MNT_SYNCHRONOUS),
-        MountOption::DirSync => Ok(libc::MNT_SYNCHRONOUS),
+        MountOption::NoDev => Ok(nix::mount::MntFlags::MNT_NODEV),
+        MountOption::Suid => Ok(nix::mount::MntFlags::empty()),
+        MountOption::NoSuid => Ok(nix::mount::MntFlags::MNT_NOSUID),
+        MountOption::RW => Ok(nix::mount::MntFlags::empty()),
+        MountOption::RO => Ok(nix::mount::MntFlags::MNT_RDONLY),
+        MountOption::Exec => Ok(nix::mount::MntFlags::empty()),
+        MountOption::NoExec => Ok(nix::mount::MntFlags::MNT_NOEXEC),
+        MountOption::Atime => Ok(nix::mount::MntFlags::empty()),
+        MountOption::NoAtime => Ok(nix::mount::MntFlags::MNT_NOATIME),
+        MountOption::Async => Ok(nix::mount::MntFlags::MNT_ASYNC),
+        MountOption::Sync => Ok(nix::mount::MntFlags::MNT_SYNCHRONOUS),
+        MountOption::DirSync => Ok(nix::mount::MntFlags::MNT_SYNCHRONOUS),
         option => Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!("Invalid mount option for flag conversion: {option:?}"),
