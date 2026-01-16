@@ -75,7 +75,7 @@ impl<'a> Request<'a> {
         // Implement allow_root & access check for auto_unmount
         if (se.allowed == SessionACL::RootAndOwner
             && self.request.uid() != se.session_owner
-            && self.request.uid() != 0)
+            && !self.request.uid().is_root())
             || (se.allowed == SessionACL::Owner && self.request.uid() != se.session_owner)
         {
             #[cfg(feature = "abi-7-21")]
@@ -623,18 +623,18 @@ impl<'a> Request<'a> {
     /// Returns the uid of this request
     #[inline]
     pub fn uid(&self) -> u32 {
-        self.request.uid()
+        self.request.uid().as_raw()
     }
 
     /// Returns the gid of this request
     #[inline]
     pub fn gid(&self) -> u32 {
-        self.request.gid()
+        self.request.gid().as_raw()
     }
 
     /// Returns the pid of this request
     #[inline]
     pub fn pid(&self) -> u32 {
-        self.request.pid()
+        self.request.pid().as_raw() as u32
     }
 }

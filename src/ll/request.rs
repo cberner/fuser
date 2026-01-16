@@ -6,6 +6,7 @@
 use super::fuse_abi::{InvalidOpcodeError, fuse_in_header, fuse_opcode};
 
 use super::{Errno, Response, fuse_abi as abi};
+use nix::unistd::{Gid, Pid, Uid};
 #[cfg(feature = "serializable")]
 use serde::{Deserialize, Serialize};
 use std::{convert::TryFrom, fmt::Display, path::Path};
@@ -211,13 +212,13 @@ pub(crate) trait Request: Sized {
     fn nodeid(&self) -> INodeNo;
 
     /// Returns the UID that the process that triggered this request runs under.
-    fn uid(&self) -> u32;
+    fn uid(&self) -> Uid;
 
     /// Returns the GID that the process that triggered this request runs under.
-    fn gid(&self) -> u32;
+    fn gid(&self) -> Gid;
 
     /// Returns the PID of the process that triggered this request.
-    fn pid(&self) -> u32;
+    fn pid(&self) -> Pid;
 
     /// Create an error response for this Request
     fn reply_err(&self, errno: Errno) -> Response<'_> {
@@ -239,18 +240,18 @@ macro_rules! impl_request {
             }
 
             #[inline]
-            fn uid(&self) -> u32 {
-                self.header.uid
+            fn uid(&self) -> nix::unistd::Uid {
+                nix::unistd::Uid::from_raw(self.header.uid)
             }
 
             #[inline]
-            fn gid(&self) -> u32 {
-                self.header.gid
+            fn gid(&self) -> nix::unistd::Gid {
+                nix::unistd::Gid::from_raw(self.header.gid)
             }
 
             #[inline]
-            fn pid(&self) -> u32 {
-                self.header.pid
+            fn pid(&self) -> nix::unistd::Pid {
+                nix::unistd::Pid::from_raw(self.header.pid as i32)
             }
         }
     };
@@ -2276,9 +2277,9 @@ mod tests {
         assert_eq!(req.header.opcode, 26);
         assert_eq!(req.unique(), RequestId(0xdead_beef_baad_f00d));
         assert_eq!(req.nodeid(), INodeNo(0x1122_3344_5566_7788));
-        assert_eq!(req.uid(), 0xc001_d00d);
-        assert_eq!(req.gid(), 0xc001_cafe);
-        assert_eq!(req.pid(), 0xc0de_ba5e);
+        assert_eq!(req.uid(), Uid::from_raw(0xc001_d00d));
+        assert_eq!(req.gid(), Gid::from_raw(0xc001_cafe));
+        assert_eq!(req.pid(), Pid::from_raw(0xc0de_ba5e_u32 as i32));
         match req.operation().unwrap() {
             Operation::Init(x) => {
                 assert_eq!(x.version(), Version(7, 8));
@@ -2295,9 +2296,9 @@ mod tests {
         assert_eq!(req.header.opcode, 8);
         assert_eq!(req.unique(), RequestId(0xdead_beef_baad_f00d));
         assert_eq!(req.nodeid(), INodeNo(0x1122_3344_5566_7788));
-        assert_eq!(req.uid(), 0xc001_d00d);
-        assert_eq!(req.gid(), 0xc001_cafe);
-        assert_eq!(req.pid(), 0xc0de_ba5e);
+        assert_eq!(req.uid(), Uid::from_raw(0xc001_d00d));
+        assert_eq!(req.gid(), Gid::from_raw(0xc001_cafe));
+        assert_eq!(req.pid(), Pid::from_raw(0xc0de_ba5e_u32 as i32));
         match req.operation().unwrap() {
             Operation::MkNod(x) => {
                 assert_eq!(x.mode(), 0o644);
