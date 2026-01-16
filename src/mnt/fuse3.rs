@@ -2,11 +2,11 @@ use super::fuse3_sys::{
     fuse_lowlevel_ops, fuse_session_destroy, fuse_session_fd, fuse_session_mount, fuse_session_new,
     fuse_session_unmount,
 };
-use super::{MountOption, with_fuse_args};
+use super::{with_fuse_args, MountOption};
 use log::warn;
 use std::os::fd::BorrowedFd;
 use std::{
-    ffi::{CString, c_void},
+    ffi::{c_void, CString},
     fs::File,
     io,
     os::unix::{ffi::OsStrExt, io::FromRawFd},

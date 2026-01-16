@@ -7,10 +7,10 @@
 #![allow(missing_docs)]
 
 use super::is_mounted;
-use super::mount_options::{MountOption, option_to_string};
+use super::mount_options::{option_to_string, MountOption};
 use log::{debug, error};
-use nix::fcntl::{FcntlArg, FdFlag, OFlag, fcntl};
-use nix::sys::socket::{ControlMessageOwned, MsgFlags, SockaddrStorage, recvmsg};
+use nix::fcntl::{fcntl, FcntlArg, FdFlag, OFlag};
+use nix::sys::socket::{recvmsg, ControlMessageOwned, MsgFlags, SockaddrStorage};
 use std::ffi::{CStr, CString, OsStr};
 use std::fs::File;
 #[cfg(any(

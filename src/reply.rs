@@ -8,12 +8,13 @@
 
 use crate::ll::fuse_abi::FopenFlags;
 use crate::ll::{
-    self, Generation,
+    self,
     reply::{DirEntPlusList, DirEntryPlus},
+    Generation,
 };
 use crate::ll::{
-    INodeNo,
     reply::{DirEntList, DirEntOffset, DirEntry},
+    INodeNo,
 };
 #[cfg(feature = "abi-7-40")]
 use crate::passthrough::BackingId;
@@ -701,7 +702,7 @@ mod test {
     use super::*;
     use crate::{FileAttr, FileType};
     use std::io::IoSlice;
-    use std::sync::mpsc::{SyncSender, sync_channel};
+    use std::sync::mpsc::{sync_channel, SyncSender};
     use std::thread;
     use std::time::{Duration, UNIX_EPOCH};
     use zerocopy::{Immutable, IntoBytes};
