@@ -278,7 +278,8 @@ impl Reply for ReplyOpen {
 impl ReplyOpen {
     /// Reply to a request with the given open result
     /// # Panics
-    /// When attempting to use kernel passthrough. Use `opened_passthrough()` instead.
+    /// When attempting to use kernel passthrough.
+    /// Use [`opened_passthrough()`](Self::opened_passthrough) instead.
     pub fn opened(self, fh: u64, flags: u32) {
         let flags = FopenFlags::from_bits_retain(flags);
         assert!(!flags.contains(FopenFlags::FOPEN_PASSTHROUGH));
@@ -287,7 +288,7 @@ impl ReplyOpen {
     }
 
     /// Registers a fd for passthrough, returning a `BackingId`.  Once you have the backing ID,
-    /// you can pass it as the 3rd parameter of `OpenReply::opened_passthrough()`.  This is done in
+    /// you can pass it as the 3rd parameter of [`ReplyOpen::opened_passthrough()`]. This is done in
     /// two separate steps because it may make sense to reuse backing IDs (to avoid having to
     /// repeatedly reopen the underlying file or potentially keep thousands of fds open).
     #[cfg(feature = "abi-7-40")]
@@ -295,8 +296,8 @@ impl ReplyOpen {
         self.reply.sender.as_ref().unwrap().open_backing(fd.as_fd())
     }
 
-    /// Reply to a request with an opened backing id.  Call `ReplyOpen::open_backing()` to get one of
-    /// these.
+    /// Reply to a request with an opened backing id. Call [`ReplyOpen::open_backing()`]
+    /// to get one of these.
     #[cfg(feature = "abi-7-40")]
     pub fn opened_passthrough(self, fh: u64, flags: u32, backing_id: &BackingId) {
         let flags = FopenFlags::from_bits_retain(flags) | FopenFlags::FOPEN_PASSTHROUGH;
