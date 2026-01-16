@@ -172,7 +172,7 @@ bitflags! {
 
     /// Init request/reply flags.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-    pub(crate) struct InitFlags: u64 {
+    pub struct InitFlags: u64 {
         /// asynchronous read requests
         const FUSE_ASYNC_READ = 1 << 0;
         /// remote locking for POSIX file locks

@@ -4,8 +4,8 @@
 
 use clap::{Arg, ArgAction, Command, crate_version};
 use fuser::{
-    BackingId, FileAttr, FileType, Filesystem, KernelConfig, MountOption, OpenFlags, ReplyAttr,
-    ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen, Request, consts,
+    BackingId, FileAttr, FileType, Filesystem, InitFlags, KernelConfig, MountOption, OpenFlags,
+    ReplyAttr, ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen, Request,
 };
 use libc::ENOENT;
 use std::collections::HashMap;
@@ -142,7 +142,9 @@ impl Filesystem for PassthroughFs {
         _req: &Request,
         config: &mut KernelConfig,
     ) -> std::result::Result<(), c_int> {
-        config.add_capabilities(consts::FUSE_PASSTHROUGH).unwrap();
+        config
+            .add_capabilities(InitFlags::FUSE_PASSTHROUGH)
+            .unwrap();
         config.set_max_stack_depth(2).unwrap();
         Ok(())
     }
