@@ -63,7 +63,10 @@ fn libc_umount(mnt: &CStr) -> io::Result<()> {
         target_os = "openbsd",
         target_os = "netbsd"
     ))]
-    let r = unsafe { libc::unmount(mnt.as_ptr(), 0) };
+    {
+        nix::mount::unmount(mnt, nix::mount::MntFlags::empty())?;
+        Ok(())
+    }
 
     #[cfg(not(any(
         target_os = "macos",
@@ -72,10 +75,8 @@ fn libc_umount(mnt: &CStr) -> io::Result<()> {
         target_os = "openbsd",
         target_os = "netbsd"
     )))]
-    let r = unsafe { libc::umount(mnt.as_ptr()) };
-    if r < 0 {
-        Err(io::Error::last_os_error())
-    } else {
+    {
+        nix::mount::umount(mnt)?;
         Ok(())
     }
 }
