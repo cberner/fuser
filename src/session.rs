@@ -7,7 +7,7 @@
 
 use libc::{EAGAIN, EINTR, ENODEV, ENOENT};
 use log::{info, warn};
-use nix::unistd::geteuid;
+use nix::unistd::{Uid, geteuid};
 use std::fs::File;
 use std::io;
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
@@ -57,7 +57,7 @@ pub struct Session<FS: Filesystem> {
     /// Used to implement `allow_root` and `auto_unmount`
     pub(crate) allowed: SessionACL,
     /// User that launched the fuser process
-    pub(crate) session_owner: u32,
+    pub(crate) session_owner: Uid,
     /// FUSE protocol version, as reported by the kernel.
     /// The field is set to `Some` when the init message is received.
     pub(crate) proto_version: Option<Version>,
@@ -113,7 +113,7 @@ impl<FS: Filesystem> Session<FS> {
             ch,
             mount: Arc::new(Mutex::new(Some((mountpoint.to_owned(), mount)))),
             allowed,
-            session_owner: geteuid().as_raw(),
+            session_owner: geteuid(),
             proto_version: None,
             destroyed: false,
         })
@@ -128,7 +128,7 @@ impl<FS: Filesystem> Session<FS> {
             ch,
             mount: Arc::new(Mutex::new(None)),
             allowed: acl,
-            session_owner: geteuid().as_raw(),
+            session_owner: geteuid(),
             proto_version: None,
             destroyed: false,
         }
