@@ -53,7 +53,7 @@ impl<'a> Request<'a> {
         let res = match self.dispatch_req(se) {
             Ok(Some(resp)) => resp,
             Ok(None) => return,
-            Err(errno) => self.request.reply_err(errno),
+            Err(errno) => Response::new_error(errno),
         };
         self.reply::<ReplyRaw>().send_ll(&res);
     }
