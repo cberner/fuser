@@ -22,8 +22,8 @@ use libc::{EACCES, EINVAL, EISDIR, ENOBUFS, ENOENT, ENOTDIR};
 use clap::Parser;
 
 use fuser::{
-    FUSE_ROOT_ID, FileAttr, FileType, Filesystem, MountOption, ReplyAttr, ReplyData,
-    ReplyDirectory, ReplyEntry, ReplyOpen, Request, consts,
+    FUSE_ROOT_ID, FileAttr, FileType, Filesystem, MountOption, OpenAccMode, OpenFlags, ReplyAttr,
+    ReplyData, ReplyDirectory, ReplyEntry, ReplyOpen, Request, consts,
 };
 
 struct ClockFS<'a> {
@@ -120,10 +120,10 @@ impl Filesystem for ClockFS<'_> {
         }
     }
 
-    fn open(&mut self, _req: &Request, ino: u64, flags: i32, reply: ReplyOpen) {
+    fn open(&mut self, _req: &Request, ino: u64, flags: OpenFlags, reply: ReplyOpen) {
         if ino == FUSE_ROOT_ID {
             reply.error(EISDIR);
-        } else if flags & libc::O_ACCMODE != libc::O_RDONLY {
+        } else if flags.acc_mode() != OpenAccMode::O_RDONLY {
             reply.error(EACCES);
         } else if ino != Self::FILE_INO {
             eprintln!("Got open for nonexistent inode {ino}");

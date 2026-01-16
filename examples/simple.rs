@@ -9,9 +9,9 @@ use fuser::consts::FUSE_HANDLE_KILLPRIV;
 // use fuser::consts::FUSE_WRITE_KILL_PRIV;
 use fuser::TimeOrNow::Now;
 use fuser::{
-    FUSE_ROOT_ID, Filesystem, KernelConfig, MountOption, ReplyAttr, ReplyCreate, ReplyData,
-    ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen, ReplyStatfs, ReplyWrite, ReplyXattr,
-    Request, TimeOrNow,
+    FUSE_ROOT_ID, Filesystem, KernelConfig, MountOption, OpenAccMode, OpenFlags, ReplyAttr,
+    ReplyCreate, ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen, ReplyStatfs,
+    ReplyWrite, ReplyXattr, Request, TimeOrNow,
 };
 #[cfg(feature = "abi-7-26")]
 use log::info;
@@ -1347,29 +1347,24 @@ impl Filesystem for SimpleFS {
         }
     }
 
-    fn open(&mut self, req: &Request, inode: u64, flags: i32, reply: ReplyOpen) {
+    fn open(&mut self, req: &Request, inode: u64, flags: OpenFlags, reply: ReplyOpen) {
         debug!("open() called for {inode:?}");
-        let (access_mask, read, write) = match flags & libc::O_ACCMODE {
-            libc::O_RDONLY => {
+        let (access_mask, read, write) = match flags.acc_mode() {
+            OpenAccMode::O_RDONLY => {
                 // Behavior is undefined, but most filesystems return EACCES
-                if flags & libc::O_TRUNC != 0 {
+                if flags.0 & libc::O_TRUNC != 0 {
                     reply.error(libc::EACCES);
                     return;
                 }
-                if flags & FMODE_EXEC != 0 {
+                if flags.0 & FMODE_EXEC != 0 {
                     // Open is from internal exec syscall
                     (libc::X_OK, true, false)
                 } else {
                     (libc::R_OK, true, false)
                 }
             }
-            libc::O_WRONLY => (libc::W_OK, false, true),
-            libc::O_RDWR => (libc::R_OK | libc::W_OK, true, true),
-            // Exactly one access mode flag must be specified
-            _ => {
-                reply.error(libc::EINVAL);
-                return;
-            }
+            OpenAccMode::O_WRONLY => (libc::W_OK, false, true),
+            OpenAccMode::O_RDWR => (libc::R_OK | libc::W_OK, true, true),
         };
 
         match self.get_inode(inode) {
