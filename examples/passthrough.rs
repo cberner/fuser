@@ -4,7 +4,7 @@
 
 use clap::{Arg, ArgAction, Command, crate_version};
 use fuser::{
-    BackingId, FileAttr, FileType, Filesystem, KernelConfig, MountOption, ReplyAttr,
+    BackingId, FileAttr, FileType, Filesystem, KernelConfig, MountOption, OpenFlags, ReplyAttr,
     ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen, Request, consts,
 };
 use libc::ENOENT;
@@ -163,7 +163,7 @@ impl Filesystem for PassthroughFs {
         }
     }
 
-    fn open(&mut self, _req: &Request, ino: u64, _flags: i32, reply: ReplyOpen) {
+    fn open(&mut self, _req: &Request, ino: u64, _flags: OpenFlags, reply: ReplyOpen) {
         if ino != 2 {
             reply.error(ENOENT);
             return;
