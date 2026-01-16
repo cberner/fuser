@@ -25,7 +25,7 @@ use std::time::SystemTime;
 use std::{convert::AsRef, io::ErrorKind};
 
 pub use crate::ll::fuse_abi::FUSE_ROOT_ID;
-use crate::ll::fuse_abi::InitFlags;
+pub use crate::ll::fuse_abi::InitFlags;
 use crate::ll::fuse_abi::consts::*;
 pub use crate::ll::{TimeOrNow, fuse_abi::consts};
 use crate::mnt::mount_options::check_option_conflicts;
@@ -282,11 +282,10 @@ impl KernelConfig {
     ///
     /// # Errors
     /// When the argument includes capabilities not supported by the kernel, returns the bits of the capabilities not supported.
-    pub fn add_capabilities(&mut self, capabilities_to_add: u64) -> Result<(), u64> {
-        let capabilities_to_add = InitFlags::from_bits_retain(capabilities_to_add);
+    pub fn add_capabilities(&mut self, capabilities_to_add: InitFlags) -> Result<(), InitFlags> {
         if !self.capabilities.contains(capabilities_to_add) {
             let unsupported = capabilities_to_add & !self.capabilities;
-            return Err(unsupported.bits());
+            return Err(unsupported);
         }
         self.requested |= capabilities_to_add;
         Ok(())

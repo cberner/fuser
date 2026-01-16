@@ -3,15 +3,13 @@
 
 use clap::{Arg, ArgAction, Command, crate_version};
 use fuser::consts::FOPEN_DIRECT_IO;
-#[cfg(feature = "abi-7-26")]
-use fuser::consts::FUSE_HANDLE_KILLPRIV;
 // #[cfg(feature = "abi-7-31")]
 // use fuser::consts::FUSE_WRITE_KILL_PRIV;
 use fuser::TimeOrNow::Now;
 use fuser::{
-    FUSE_ROOT_ID, Filesystem, KernelConfig, MountOption, OpenAccMode, OpenFlags, ReplyAttr,
-    ReplyCreate, ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen, ReplyStatfs,
-    ReplyWrite, ReplyXattr, Request, TimeOrNow,
+    FUSE_ROOT_ID, Filesystem, InitFlags, KernelConfig, MountOption, OpenAccMode, OpenFlags,
+    ReplyAttr, ReplyCreate, ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen,
+    ReplyStatfs, ReplyWrite, ReplyXattr, Request, TimeOrNow,
 };
 #[cfg(feature = "abi-7-26")]
 use log::info;
@@ -478,8 +476,11 @@ impl Filesystem for SimpleFS {
         _req: &Request,
         #[allow(unused_variables)] config: &mut KernelConfig,
     ) -> Result<(), c_int> {
-        #[cfg(feature = "abi-7-26")]
-        config.add_capabilities(FUSE_HANDLE_KILLPRIV).unwrap();
+        if cfg!(feature = "abi-7-26") {
+            config
+                .add_capabilities(InitFlags::FUSE_HANDLE_KILLPRIV)
+                .unwrap();
+        }
 
         fs::create_dir_all(Path::new(&self.data_dir).join("inodes")).unwrap();
         fs::create_dir_all(Path::new(&self.data_dir).join("contents")).unwrap();
