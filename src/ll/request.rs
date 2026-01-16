@@ -266,6 +266,7 @@ mod op {
     use super::{
         FileHandle, INodeNo, Lock, LockOwner, Operation, RequestId, abi::consts::*, abi::*,
     };
+    use crate::OpenFlags;
     use std::{
         convert::TryInto,
         ffi::OsStr,
@@ -642,8 +643,8 @@ mod op {
     }
     impl_request!(Open<'_>);
     impl Open<'_> {
-        pub(crate) fn flags(&self) -> i32 {
-            self.arg.flags
+        pub(crate) fn flags(&self) -> OpenFlags {
+            OpenFlags(self.arg.flags)
         }
     }
 

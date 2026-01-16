@@ -22,7 +22,7 @@ use std::{
 use libc::{EACCES, EBADF, EBUSY, EINVAL, ENOENT, ENOTDIR};
 
 use fuser::{
-    FUSE_ROOT_ID, FileAttr, FileType, MountOption, PollHandle, Request,
+    FUSE_ROOT_ID, FileAttr, FileType, MountOption, OpenAccMode, OpenFlags, PollHandle, Request,
     consts::{FOPEN_DIRECT_IO, FOPEN_NONSEEKABLE, FUSE_POLL_SCHEDULE_NOTIFY},
 };
 
@@ -169,14 +169,14 @@ impl fuser::Filesystem for FSelFS {
         reply.ok();
     }
 
-    fn open(&mut self, _req: &Request, ino: u64, flags: i32, reply: fuser::ReplyOpen) {
+    fn open(&mut self, _req: &Request, ino: u64, flags: OpenFlags, reply: fuser::ReplyOpen) {
         let idx = FSelData::ino_to_idx(ino);
         if idx >= NUMFILES {
             reply.error(ENOENT);
             return;
         }
 
-        if (flags & libc::O_ACCMODE) != libc::O_RDONLY {
+        if flags.acc_mode() != OpenAccMode::O_RDONLY {
             reply.error(EACCES);
             return;
         }

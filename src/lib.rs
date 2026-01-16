@@ -29,6 +29,8 @@ use crate::ll::fuse_abi::InitFlags;
 use crate::ll::fuse_abi::consts::*;
 pub use crate::ll::{TimeOrNow, fuse_abi::consts};
 use crate::mnt::mount_options::check_option_conflicts;
+pub use crate::open_flags::OpenAccMode;
+pub use crate::open_flags::OpenFlags;
 use crate::session::MAX_WRITE_SIZE;
 pub use ll::fuse_abi::fuse_forget_one;
 pub use mnt::mount_options::MountOption;
@@ -58,6 +60,7 @@ pub mod experimental;
 mod ll;
 mod mnt;
 mod notify;
+mod open_flags;
 #[cfg(feature = "abi-7-40")]
 mod passthrough;
 mod reply;
@@ -515,7 +518,7 @@ pub trait Filesystem {
     /// anything in fh. There are also some flags (`direct_io`, `keep_cache`) which the
     /// filesystem may set, to change the way the file is opened. See `fuse_file_info`
     /// structure in <`fuse_common.h`> for more details.
-    fn open(&mut self, _req: &Request<'_>, _ino: u64, _flags: i32, reply: ReplyOpen) {
+    fn open(&mut self, _req: &Request<'_>, _ino: u64, _flags: OpenFlags, reply: ReplyOpen) {
         reply.opened(0, 0);
     }
 
