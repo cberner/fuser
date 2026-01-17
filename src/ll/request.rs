@@ -1479,10 +1479,8 @@ mod op {
         /// [`libc::RENAME_EXCHANGE`], [`libc::RENAME_NOREPLACE`] and
         /// [`libc::RENAME_WHITEOUT`].  If you don't handle a particular flag
         /// reply with an EINVAL error.
-        ///
-        /// TODO: Replace with enum/flags type
-        pub(crate) fn flags(&self) -> u32 {
-            self.arg.flags
+        pub(crate) fn flags(&self) -> crate::RenameFlags {
+            crate::RenameFlags::from_bits_retain(self.arg.flags)
         }
     }
 

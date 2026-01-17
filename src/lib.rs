@@ -74,6 +74,7 @@ pub use crate::ll::write_flags::WriteFlags;
 use crate::mnt::mount_options::check_option_conflicts;
 pub use crate::open_flags::OpenAccMode;
 pub use crate::open_flags::OpenFlags;
+pub use crate::rename_flags::RenameFlags;
 use crate::session::MAX_WRITE_SIZE;
 
 mod channel;
@@ -87,6 +88,7 @@ mod notify;
 mod open_flags;
 #[cfg(feature = "abi-7-40")]
 mod passthrough;
+mod rename_flags;
 mod reply;
 mod request;
 mod session;
@@ -538,7 +540,7 @@ pub trait Filesystem {
         name: &OsStr,
         newparent: INodeNo,
         newname: &OsStr,
-        flags: u32,
+        flags: RenameFlags,
         reply: ReplyEmpty,
     ) {
         warn!(
