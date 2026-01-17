@@ -22,6 +22,7 @@ use fuser::Errno;
 use fuser::FileAttr;
 use fuser::FileHandle;
 use fuser::FileType;
+use fuser::FopenFlags;
 use fuser::INodeNo;
 use fuser::MountOption;
 use fuser::OpenAccMode;
@@ -34,8 +35,6 @@ use fuser::ReplyEmpty;
 use fuser::ReplyEntry;
 use fuser::ReplyOpen;
 use fuser::Request;
-use fuser::consts::FOPEN_DIRECT_IO;
-use fuser::consts::FOPEN_NONSEEKABLE;
 use fuser::consts::FUSE_POLL_SCHEDULE_NOTIFY;
 
 const NUMFILES: u8 = 16;
@@ -210,7 +209,10 @@ impl fuser::Filesystem for FSelFS {
             d.open_mask |= 1 << idx;
         }
 
-        reply.opened(idx.into(), FOPEN_DIRECT_IO | FOPEN_NONSEEKABLE);
+        reply.opened(
+            idx.into(),
+            FopenFlags::FOPEN_DIRECT_IO | FopenFlags::FOPEN_NONSEEKABLE,
+        );
     }
 
     fn release(

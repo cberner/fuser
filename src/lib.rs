@@ -65,6 +65,7 @@ pub use crate::ll::Errno;
 pub use crate::ll::RequestId;
 pub use crate::ll::TimeOrNow;
 pub use crate::ll::copy_file_range_flags::CopyFileRangeFlags;
+pub use crate::ll::fuse_abi::FopenFlags;
 pub use crate::ll::fuse_abi::InitFlags;
 pub use crate::ll::fuse_abi::consts;
 use crate::ll::fuse_abi::consts::*;
@@ -575,7 +576,7 @@ pub trait Filesystem {
     /// filesystem may set, to change the way the file is opened. See `fuse_file_info`
     /// structure in <`fuse_common.h`> for more details.
     fn open(&mut self, _req: &Request<'_>, _ino: INodeNo, _flags: OpenFlags, reply: ReplyOpen) {
-        reply.opened(0, 0);
+        reply.opened(0, FopenFlags::empty());
     }
 
     /// Read data.
@@ -705,7 +706,7 @@ pub trait Filesystem {
     /// directory stream operations in case the contents of the directory can change
     /// between opendir and releasedir.
     fn opendir(&mut self, _req: &Request<'_>, _ino: INodeNo, _flags: OpenFlags, reply: ReplyOpen) {
-        reply.opened(0, 0);
+        reply.opened(0, FopenFlags::empty());
     }
 
     /// Read directory.
