@@ -1880,7 +1880,7 @@ impl Filesystem for SimpleFS {
         dest_fh: FileHandle,
         dest_offset: i64,
         size: u64,
-        _flags: u32,
+        _flags: fuser::CopyFileRangeFlags,
         reply: ReplyWrite,
     ) {
         debug!(

@@ -272,6 +272,8 @@ mod op {
     use super::{
         FileHandle, INodeNo, Lock, LockOwner, Operation, RequestId, abi::consts::*, abi::*,
     };
+    #[cfg(feature = "abi-7-28")]
+    use crate::CopyFileRangeFlags;
     use crate::{OpenFlags, WriteFlags};
     use std::{
         convert::TryInto,
@@ -1534,9 +1536,8 @@ mod op {
         pub(crate) fn len(&self) -> u64 {
             self.arg.len
         }
-        // API TODO: Return a specific flags type
-        pub(crate) fn flags(&self) -> u64 {
-            self.arg.flags
+        pub(crate) fn flags(&self) -> CopyFileRangeFlags {
+            CopyFileRangeFlags::from_bits_retain(self.arg.flags)
         }
     }
 
