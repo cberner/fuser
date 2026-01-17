@@ -1,5 +1,7 @@
 use std::fmt;
-use std::fmt::{Formatter, LowerHex, UpperHex};
+use std::fmt::Formatter;
+use std::fmt::LowerHex;
+use std::fmt::UpperHex;
 
 /// How the file should be opened: read-only, write-only, or read-write.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]

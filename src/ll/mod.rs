@@ -8,11 +8,19 @@ pub(crate) mod reply;
 pub(crate) mod request;
 pub(crate) mod write_flags;
 
-use std::{convert::TryInto, num::NonZeroI32, time::SystemTime};
+use std::convert::TryInto;
+use std::num::NonZeroI32;
+use std::time::SystemTime;
 
 pub(crate) use reply::Response;
+pub(crate) use request::AnyRequest;
+pub(crate) use request::FileHandle;
+pub(crate) use request::INodeNo;
+pub(crate) use request::Lock;
+pub(crate) use request::Operation;
+pub(crate) use request::Request;
 pub use request::RequestId;
-pub(crate) use request::{AnyRequest, FileHandle, INodeNo, Lock, Operation, Request, Version};
+pub(crate) use request::Version;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 /// Possible input arguments for atime & mtime, which can either be set to a specified time,
@@ -273,7 +281,8 @@ impl From<Generation> for u64 {
 #[cfg(test)]
 mod test {
     use std::io::IoSlice;
-    use std::ops::{Deref, DerefMut};
+    use std::ops::Deref;
+    use std::ops::DerefMut;
     /// If we want to be able to cast bytes to our fuse C struct types we need it
     /// to be aligned.  This struct helps getting &[u8]s which are 8 byte aligned.
     #[cfg(test)]

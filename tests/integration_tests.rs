@@ -1,7 +1,9 @@
-use fuser::{Filesystem, Session};
 use std::rc::Rc;
 use std::thread;
 use std::time::Duration;
+
+use fuser::Filesystem;
+use fuser::Session;
 use tempfile::TempDir;
 
 #[test]

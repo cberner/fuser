@@ -1,35 +1,72 @@
 #![allow(clippy::needless_return)]
 #![allow(clippy::unnecessary_cast)] // libc::S_* are u16 or u32 depending on the platform
 
-use clap::{Arg, ArgAction, Command, crate_version};
-use fuser::consts::FOPEN_DIRECT_IO;
-// #[cfg(feature = "abi-7-31")]
-// use fuser::consts::FUSE_WRITE_KILL_PRIV;
-use fuser::TimeOrNow::Now;
-use fuser::{
-    Errno, FileHandle, Filesystem, INodeNo, InitFlags, KernelConfig, MountOption, OpenAccMode,
-    OpenFlags, ReplyAttr, ReplyCreate, ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry,
-    ReplyOpen, ReplyStatfs, ReplyWrite, ReplyXattr, Request, TimeOrNow, WriteFlags,
-};
-#[cfg(feature = "abi-7-26")]
-use log::info;
-use log::{LevelFilter, error};
-use log::{debug, warn};
-use serde::{Deserialize, Serialize};
 use std::cmp::min;
 use std::collections::BTreeMap;
+use std::env;
 use std::ffi::OsStr;
-use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader, ErrorKind, Read, Seek, SeekFrom, Write};
+use std::fs;
+use std::fs::File;
+use std::fs::OpenOptions;
+use std::io;
+use std::io::BufRead;
+use std::io::BufReader;
+use std::io::ErrorKind;
+use std::io::Read;
+use std::io::Seek;
+use std::io::SeekFrom;
+use std::io::Write;
 use std::os::raw::c_int;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::FileExt;
 #[cfg(target_os = "linux")]
 use std::os::unix::io::IntoRawFd;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use std::{env, fs, io};
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
+use std::time::Duration;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+
+use clap::Arg;
+use clap::ArgAction;
+use clap::Command;
+use clap::crate_version;
+use fuser::Errno;
+use fuser::FileHandle;
+use fuser::Filesystem;
+use fuser::INodeNo;
+use fuser::InitFlags;
+use fuser::KernelConfig;
+use fuser::MountOption;
+use fuser::OpenAccMode;
+use fuser::OpenFlags;
+use fuser::ReplyAttr;
+use fuser::ReplyCreate;
+use fuser::ReplyData;
+use fuser::ReplyDirectory;
+use fuser::ReplyEmpty;
+use fuser::ReplyEntry;
+use fuser::ReplyOpen;
+use fuser::ReplyStatfs;
+use fuser::ReplyWrite;
+use fuser::ReplyXattr;
+use fuser::Request;
+use fuser::TimeOrNow;
+// #[cfg(feature = "abi-7-31")]
+// use fuser::consts::FUSE_WRITE_KILL_PRIV;
+use fuser::TimeOrNow::Now;
+use fuser::WriteFlags;
+use fuser::consts::FOPEN_DIRECT_IO;
+use log::LevelFilter;
+use log::debug;
+use log::error;
+#[cfg(feature = "abi-7-26")]
+use log::info;
+use log::warn;
+use serde::Deserialize;
+use serde::Serialize;
 
 const BLOCK_SIZE: u32 = 512;
 const MAX_NAME_LENGTH: u32 = 255;
@@ -2001,7 +2038,9 @@ fn get_groups(pid: u32) -> Vec<u32> {
     {
         // Use libprocstat to query the kernel for the process's groups.
         // Link with: #[link(name = "procstat")]
-        use libc::{c_int, c_uint, gid_t};
+        use libc::c_int;
+        use libc::c_uint;
+        use libc::gid_t;
 
         #[repr(C)]
         struct procstat {

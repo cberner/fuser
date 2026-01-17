@@ -1,6 +1,7 @@
+use std::collections::HashSet;
+use std::ffi::OsStr;
 use std::io;
 use std::io::ErrorKind;
-use std::{collections::HashSet, ffi::OsStr};
 
 /// Mount options accepted by the FUSE filesystem type
 /// See 'man mount.fuse' for details

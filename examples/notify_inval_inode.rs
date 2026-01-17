@@ -6,23 +6,34 @@
 // Due to the above provenance, unlike the rest of fuser this file is
 // licensed under the terms of the GNU GPLv2.
 
-use std::{
-    convert::TryInto,
-    ffi::OsStr,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicU64, Ordering::SeqCst},
-    },
-    thread,
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::convert::TryInto;
+use std::ffi::OsStr;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering::SeqCst;
+use std::thread;
+use std::time::Duration;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use clap::Parser;
-
-use fuser::{
-    Errno, FileAttr, FileHandle, FileType, Filesystem, INodeNo, MountOption, OpenAccMode,
-    OpenFlags, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry, ReplyOpen, Request, consts,
-};
+use fuser::Errno;
+use fuser::FileAttr;
+use fuser::FileHandle;
+use fuser::FileType;
+use fuser::Filesystem;
+use fuser::INodeNo;
+use fuser::MountOption;
+use fuser::OpenAccMode;
+use fuser::OpenFlags;
+use fuser::ReplyAttr;
+use fuser::ReplyData;
+use fuser::ReplyDirectory;
+use fuser::ReplyEntry;
+use fuser::ReplyOpen;
+use fuser::Request;
+use fuser::consts;
 
 struct ClockFS<'a> {
     file_contents: Arc<Mutex<String>>,

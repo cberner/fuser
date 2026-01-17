@@ -1,8 +1,11 @@
-use crate::dev_fuse::DevFuse;
-use log::error;
 use std::os::fd::AsFd;
 use std::os::unix::io::AsRawFd;
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
+use std::sync::Weak;
+
+use log::error;
+
+use crate::dev_fuse::DevFuse;
 
 #[repr(C)]
 struct fuse_backing_map {

@@ -1,5 +1,7 @@
-use fuser::{Filesystem, MountOption};
 use std::env;
+
+use fuser::Filesystem;
+use fuser::MountOption;
 
 struct NullFS;
 

@@ -25,7 +25,10 @@
 
 use bitflags::bitflags;
 use num_enum::TryFromPrimitive;
-use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
+use zerocopy::FromBytes;
+use zerocopy::Immutable;
+use zerocopy::IntoBytes;
+use zerocopy::KnownLayout;
 
 pub(crate) const FUSE_KERNEL_VERSION: u32 = 7;
 

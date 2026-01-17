@@ -5,8 +5,11 @@
 
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
+
+use zerocopy::FromBytes;
+use zerocopy::Immutable;
+use zerocopy::KnownLayout;
 use zerocopy::error::ConvertError;
-use zerocopy::{FromBytes, Immutable, KnownLayout};
 
 /// An iterator that can be used to fetch typed arguments from a byte slice.
 pub(crate) struct ArgumentIterator<'a> {
@@ -85,9 +88,10 @@ impl<'a> ArgumentIterator<'a> {
 #[cfg(test)]
 pub(crate) mod tests {
 
+    use zerocopy::FromBytes;
+
     use super::super::test::AlignedData;
     use super::*;
-    use zerocopy::FromBytes;
 
     const TEST_DATA: AlignedData<[u8; 10]> =
         AlignedData([0x66, 0x6f, 0x6f, 0x00, 0x62, 0x61, 0x72, 0x00, 0x62, 0x61]);

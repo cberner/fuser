@@ -6,7 +6,8 @@
 #![warn(missing_debug_implementations)]
 #![allow(missing_docs)]
 
-use libc::{c_char, c_int};
+use libc::c_char;
+use libc::c_int;
 
 #[repr(C)]
 #[derive(Debug)]

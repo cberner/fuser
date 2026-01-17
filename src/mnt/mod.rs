@@ -15,21 +15,23 @@ mod fuse3_sys;
 mod fuse_pure;
 pub(crate) mod mount_options;
 
-#[cfg(any(test, fuser_mount_impl = "pure-rust"))]
-use crate::dev_fuse::DevFuse;
-#[cfg(any(test, fuser_mount_impl = "libfuse2", fuser_mount_impl = "libfuse3"))]
-use fuse2_sys::fuse_args;
 use std::io;
 
 #[cfg(any(test, fuser_mount_impl = "libfuse2", fuser_mount_impl = "libfuse3"))]
+use fuse2_sys::fuse_args;
+#[cfg(any(test, fuser_mount_impl = "libfuse2", fuser_mount_impl = "libfuse3"))]
 use mount_options::MountOption;
+
+#[cfg(any(test, fuser_mount_impl = "pure-rust"))]
+use crate::dev_fuse::DevFuse;
 
 /// Helper function to provide options as a `fuse_args` struct
 /// (which contains an argc count and an argv pointer)
 #[cfg(any(test, fuser_mount_impl = "libfuse2", fuser_mount_impl = "libfuse3"))]
 fn with_fuse_args<T, F: FnOnce(&fuse_args) -> T>(options: &[MountOption], f: F) -> T {
-    use mount_options::option_to_string;
     use std::ffi::CString;
+
+    use mount_options::option_to_string;
 
     let mut args = vec![CString::new("rust-fuse").unwrap()];
     for x in options {
@@ -46,13 +48,14 @@ fn with_fuse_args<T, F: FnOnce(&fuse_args) -> T>(options: &[MountOption], f: F) 
     })
 }
 
+use std::ffi::CStr;
+
 #[cfg(fuser_mount_impl = "pure-rust")]
 pub(crate) use fuse_pure::Mount;
 #[cfg(fuser_mount_impl = "libfuse2")]
 pub(crate) use fuse2::Mount;
 #[cfg(fuser_mount_impl = "libfuse3")]
 pub(crate) use fuse3::Mount;
-use std::ffi::CStr;
 
 #[inline]
 fn libc_umount(mnt: &CStr) -> io::Result<()> {
@@ -85,9 +88,13 @@ fn libc_umount(mnt: &CStr) -> io::Result<()> {
 /// yet destroyed by the kernel.
 #[cfg(any(test, fuser_mount_impl = "pure-rust"))]
 fn is_mounted(fuse_device: &DevFuse) -> bool {
-    use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
     use std::os::unix::io::AsFd;
     use std::slice;
+
+    use nix::poll::PollFd;
+    use nix::poll::PollFlags;
+    use nix::poll::PollTimeout;
+    use nix::poll::poll;
 
     loop {
         let mut poll_fd = PollFd::new(fuse_device.as_fd(), PollFlags::empty());
@@ -111,8 +118,10 @@ fn is_mounted(fuse_device: &DevFuse) -> bool {
 
 #[cfg(test)]
 mod test {
+    use std::ffi::CStr;
+    use std::mem::ManuallyDrop;
+
     use super::*;
-    use std::{ffi::CStr, mem::ManuallyDrop};
 
     #[test]
     fn fuse_args() {

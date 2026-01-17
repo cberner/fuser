@@ -1,6 +1,9 @@
-use std::fs::{File, OpenOptions};
+use std::fs::File;
+use std::fs::OpenOptions;
 use std::io;
-use std::os::fd::{AsFd, AsRawFd, BorrowedFd};
+use std::os::fd::AsFd;
+use std::os::fd::AsRawFd;
+use std::os::fd::BorrowedFd;
 
 /// A newtype for `File` that represents the `/dev/fuse` device.
 #[derive(Debug)]

@@ -7,23 +7,36 @@
 // Due to the above provenance, unlike the rest of fuser this file is
 // licensed under the terms of the GNU GPLv2.
 
-use std::{
-    convert::TryInto,
-    ffi::OsStr,
-    os::unix::ffi::OsStrExt,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicU64, Ordering::SeqCst},
-    },
-    thread,
-    time::{Duration, UNIX_EPOCH},
-};
+use std::convert::TryInto;
+use std::ffi::OsStr;
+use std::os::unix::ffi::OsStrExt;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering::SeqCst;
+use std::thread;
+use std::time::Duration;
+use std::time::UNIX_EPOCH;
 
-use fuser::{
-    Errno, FileAttr, FileHandle, FileType, INodeNo, MountOption, OpenAccMode, OpenFlags,
-    PollHandle, ReplyAttr, ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen, Request,
-    consts::{FOPEN_DIRECT_IO, FOPEN_NONSEEKABLE, FUSE_POLL_SCHEDULE_NOTIFY},
-};
+use fuser::Errno;
+use fuser::FileAttr;
+use fuser::FileHandle;
+use fuser::FileType;
+use fuser::INodeNo;
+use fuser::MountOption;
+use fuser::OpenAccMode;
+use fuser::OpenFlags;
+use fuser::PollHandle;
+use fuser::ReplyAttr;
+use fuser::ReplyData;
+use fuser::ReplyDirectory;
+use fuser::ReplyEmpty;
+use fuser::ReplyEntry;
+use fuser::ReplyOpen;
+use fuser::Request;
+use fuser::consts::FOPEN_DIRECT_IO;
+use fuser::consts::FOPEN_NONSEEKABLE;
+use fuser::consts::FUSE_POLL_SCHEDULE_NOTIFY;
 
 const NUMFILES: u8 = 16;
 const MAXBYTES: u64 = 10;
