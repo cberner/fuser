@@ -3,7 +3,7 @@ use fuser::experimental::{
     AsyncFilesystem, DirEntListBuilder, GetAttrResponse, LookupResponse, RequestContext,
     TokioAdapter,
 };
-use fuser::{FileAttr, FileType, INodeNo, MountOption, experimental};
+use fuser::{FileAttr, FileHandle, FileType, INodeNo, MountOption, experimental};
 use libc::ENOENT;
 use std::ffi::OsStr;
 use std::time::{Duration, UNIX_EPOCH};
@@ -69,7 +69,7 @@ impl AsyncFilesystem for HelloFS {
         &self,
         _context: &RequestContext,
         ino: INodeNo,
-        _file_handle: Option<u64>,
+        _file_handle: Option<FileHandle>,
     ) -> experimental::Result<GetAttrResponse> {
         match ino.0 {
             1 => Ok(GetAttrResponse::new(TTL, HELLO_DIR_ATTR)),
@@ -82,7 +82,7 @@ impl AsyncFilesystem for HelloFS {
         &self,
         _context: &RequestContext,
         ino: INodeNo,
-        _file_handle: u64,
+        _file_handle: FileHandle,
         offset: i64,
         _size: u32,
         _flags: i32,
@@ -101,7 +101,7 @@ impl AsyncFilesystem for HelloFS {
         &self,
         _context: &RequestContext,
         ino: INodeNo,
-        _file_handle: u64,
+        _file_handle: FileHandle,
         offset: i64,
         mut builder: DirEntListBuilder<'_>,
     ) -> experimental::Result<()> {

@@ -7,9 +7,9 @@ use fuser::consts::FOPEN_DIRECT_IO;
 // use fuser::consts::FUSE_WRITE_KILL_PRIV;
 use fuser::TimeOrNow::Now;
 use fuser::{
-    Filesystem, INodeNo, InitFlags, KernelConfig, MountOption, OpenAccMode, OpenFlags, ReplyAttr,
-    ReplyCreate, ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen, ReplyStatfs,
-    ReplyWrite, ReplyXattr, Request, TimeOrNow, WriteFlags,
+    FileHandle, Filesystem, INodeNo, InitFlags, KernelConfig, MountOption, OpenAccMode, OpenFlags,
+    ReplyAttr, ReplyCreate, ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen,
+    ReplyStatfs, ReplyWrite, ReplyXattr, Request, TimeOrNow, WriteFlags,
 };
 #[cfg(feature = "abi-7-26")]
 use log::info;
@@ -532,7 +532,13 @@ impl Filesystem for SimpleFS {
 
     fn forget(&mut self, _req: &Request<'_>, _ino: INodeNo, _nlookup: u64) {}
 
-    fn getattr(&mut self, _req: &Request<'_>, ino: INodeNo, _fh: Option<u64>, reply: ReplyAttr) {
+    fn getattr(
+        &mut self,
+        _req: &Request<'_>,
+        ino: INodeNo,
+        _fh: Option<FileHandle>,
+        reply: ReplyAttr,
+    ) {
         match self.get_inode(ino) {
             Ok(attrs) => reply.attr(&Duration::new(0, 0), &attrs.into()),
             Err(error_code) => reply.error(error_code),
@@ -550,7 +556,7 @@ impl Filesystem for SimpleFS {
         _atime: Option<TimeOrNow>,
         _mtime: Option<TimeOrNow>,
         _ctime: Option<SystemTime>,
-        fh: Option<u64>,
+        fh: Option<FileHandle>,
         _crtime: Option<SystemTime>,
         _chgtime: Option<SystemTime>,
         _bkuptime: Option<SystemTime>,
@@ -652,7 +658,7 @@ impl Filesystem for SimpleFS {
                 // This is important as it preserves the semantic that a file handle opened
                 // with W_OK will never fail to truncate, even if the file has been subsequently
                 // chmod'ed
-                if Self::check_file_handle_write(handle) {
+                if Self::check_file_handle_write(handle.into()) {
                     if let Err(error_code) = self.truncate(ino, size, 0, 0) {
                         reply.error(error_code);
                         return;
@@ -1404,7 +1410,7 @@ impl Filesystem for SimpleFS {
         &mut self,
         _req: &Request<'_>,
         ino: INodeNo,
-        fh: u64,
+        fh: FileHandle,
         offset: i64,
         size: u32,
         _flags: i32,
@@ -1413,7 +1419,7 @@ impl Filesystem for SimpleFS {
     ) {
         debug!("read() called on {ino:?} offset={offset:?} size={size:?}");
         assert!(offset >= 0);
-        if !Self::check_file_handle_read(fh) {
+        if !Self::check_file_handle_read(fh.into()) {
             reply.error(libc::EACCES);
             return;
         }
@@ -1439,7 +1445,7 @@ impl Filesystem for SimpleFS {
         &mut self,
         _req: &Request<'_>,
         ino: INodeNo,
-        fh: u64,
+        fh: FileHandle,
         offset: i64,
         data: &[u8],
         _write_flags: WriteFlags,
@@ -1449,7 +1455,7 @@ impl Filesystem for SimpleFS {
     ) {
         debug!("write() called with {:?} size={:?}", ino, data.len());
         assert!(offset >= 0);
-        if !Self::check_file_handle_write(fh) {
+        if !Self::check_file_handle_write(fh.into()) {
             reply.error(libc::EACCES);
             return;
         }
@@ -1487,7 +1493,7 @@ impl Filesystem for SimpleFS {
         &mut self,
         _req: &Request<'_>,
         _ino: INodeNo,
-        _fh: u64,
+        _fh: FileHandle,
         _flags: i32,
         _lock_owner: Option<u64>,
         _flush: bool,
@@ -1541,7 +1547,7 @@ impl Filesystem for SimpleFS {
         &mut self,
         _req: &Request<'_>,
         ino: INodeNo,
-        _fh: u64,
+        _fh: FileHandle,
         offset: i64,
         mut reply: ReplyDirectory,
     ) {
@@ -1577,7 +1583,7 @@ impl Filesystem for SimpleFS {
         &mut self,
         _req: &Request<'_>,
         _ino: INodeNo,
-        _fh: u64,
+        _fh: FileHandle,
         _flags: i32,
         reply: ReplyEmpty,
     ) {
@@ -1835,7 +1841,7 @@ impl Filesystem for SimpleFS {
         &mut self,
         _req: &Request<'_>,
         ino: INodeNo,
-        _fh: u64,
+        _fh: FileHandle,
         offset: i64,
         length: i64,
         mode: i32,
@@ -1868,10 +1874,10 @@ impl Filesystem for SimpleFS {
         &mut self,
         _req: &Request<'_>,
         src_inode: INodeNo,
-        src_fh: u64,
+        src_fh: FileHandle,
         src_offset: i64,
         dest_inode: INodeNo,
-        dest_fh: u64,
+        dest_fh: FileHandle,
         dest_offset: i64,
         size: u64,
         _flags: u32,
@@ -1880,11 +1886,11 @@ impl Filesystem for SimpleFS {
         debug!(
             "copy_file_range() called with src=({src_fh}, {src_inode}, {src_offset}) dest=({dest_fh}, {dest_inode}, {dest_offset}) size={size}"
         );
-        if !Self::check_file_handle_read(src_fh) {
+        if !Self::check_file_handle_read(src_fh.into()) {
             reply.error(libc::EACCES);
             return;
         }
-        if !Self::check_file_handle_write(dest_fh) {
+        if !Self::check_file_handle_write(dest_fh.into()) {
             reply.error(libc::EACCES);
             return;
         }

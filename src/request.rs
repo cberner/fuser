@@ -158,7 +158,7 @@ impl<'a> Request<'a> {
                 se.filesystem.getattr(
                     self,
                     self.request.nodeid(),
-                    _attr.file_handle().map(std::convert::Into::into),
+                    _attr.file_handle(),
                     self.reply(),
                 );
             }
@@ -173,7 +173,7 @@ impl<'a> Request<'a> {
                     x.atime(),
                     x.mtime(),
                     x.ctime(),
-                    x.file_handle().map(std::convert::Into::into),
+                    x.file_handle(),
                     x.crtime(),
                     x.chgtime(),
                     x.bkuptime(),
@@ -251,7 +251,7 @@ impl<'a> Request<'a> {
                 se.filesystem.read(
                     self,
                     self.request.nodeid(),
-                    x.file_handle().into(),
+                    x.file_handle(),
                     x.offset(),
                     x.size(),
                     x.flags(),
@@ -263,7 +263,7 @@ impl<'a> Request<'a> {
                 se.filesystem.write(
                     self,
                     self.request.nodeid(),
-                    x.file_handle().into(),
+                    x.file_handle(),
                     x.offset(),
                     x.data(),
                     x.write_flags(),
@@ -276,7 +276,7 @@ impl<'a> Request<'a> {
                 se.filesystem.flush(
                     self,
                     self.request.nodeid(),
-                    x.file_handle().into(),
+                    x.file_handle(),
                     x.lock_owner().into(),
                     self.reply(),
                 );
@@ -285,7 +285,7 @@ impl<'a> Request<'a> {
                 se.filesystem.release(
                     self,
                     self.request.nodeid(),
-                    x.file_handle().into(),
+                    x.file_handle(),
                     x.flags(),
                     x.lock_owner().map(std::convert::Into::into),
                     x.flush(),
@@ -296,7 +296,7 @@ impl<'a> Request<'a> {
                 se.filesystem.fsync(
                     self,
                     self.request.nodeid(),
-                    x.file_handle().into(),
+                    x.file_handle(),
                     x.fdatasync(),
                     self.reply(),
                 );
@@ -309,7 +309,7 @@ impl<'a> Request<'a> {
                 se.filesystem.readdir(
                     self,
                     self.request.nodeid(),
-                    x.file_handle().into(),
+                    x.file_handle(),
                     x.offset(),
                     ReplyDirectory::new(self.request.unique(), self.ch.clone(), x.size() as usize),
                 );
@@ -318,7 +318,7 @@ impl<'a> Request<'a> {
                 se.filesystem.releasedir(
                     self,
                     self.request.nodeid(),
-                    x.file_handle().into(),
+                    x.file_handle(),
                     x.flags(),
                     self.reply(),
                 );
@@ -327,7 +327,7 @@ impl<'a> Request<'a> {
                 se.filesystem.fsyncdir(
                     self,
                     self.request.nodeid(),
-                    x.file_handle().into(),
+                    x.file_handle(),
                     x.fdatasync(),
                     self.reply(),
                 );
@@ -383,7 +383,7 @@ impl<'a> Request<'a> {
                 se.filesystem.getlk(
                     self,
                     self.request.nodeid(),
-                    x.file_handle().into(),
+                    x.file_handle(),
                     x.lock_owner().into(),
                     x.lock().range.0,
                     x.lock().range.1,
@@ -396,7 +396,7 @@ impl<'a> Request<'a> {
                 se.filesystem.setlk(
                     self,
                     self.request.nodeid(),
-                    x.file_handle().into(),
+                    x.file_handle(),
                     x.lock_owner().into(),
                     x.lock().range.0,
                     x.lock().range.1,
@@ -410,7 +410,7 @@ impl<'a> Request<'a> {
                 se.filesystem.setlk(
                     self,
                     self.request.nodeid(),
-                    x.file_handle().into(),
+                    x.file_handle(),
                     x.lock_owner().into(),
                     x.lock().range.0,
                     x.lock().range.1,
@@ -437,7 +437,7 @@ impl<'a> Request<'a> {
                 se.filesystem.ioctl(
                     self,
                     self.request.nodeid(),
-                    x.file_handle().into(),
+                    x.file_handle(),
                     x.flags(),
                     x.command(),
                     x.in_data(),
@@ -451,7 +451,7 @@ impl<'a> Request<'a> {
                 se.filesystem.poll(
                     self,
                     self.request.nodeid(),
-                    x.file_handle().into(),
+                    x.file_handle(),
                     ph,
                     x.events(),
                     x.flags(),
@@ -469,7 +469,7 @@ impl<'a> Request<'a> {
                 se.filesystem.fallocate(
                     self,
                     self.request.nodeid(),
-                    x.file_handle().into(),
+                    x.file_handle(),
                     x.offset(),
                     x.len(),
                     x.mode(),
@@ -481,7 +481,7 @@ impl<'a> Request<'a> {
                 se.filesystem.readdirplus(
                     self,
                     self.request.nodeid(),
-                    x.file_handle().into(),
+                    x.file_handle(),
                     x.offset(),
                     ReplyDirectoryPlus::new(
                         self.request.unique(),
@@ -507,7 +507,7 @@ impl<'a> Request<'a> {
                 se.filesystem.lseek(
                     self,
                     self.request.nodeid(),
-                    x.file_handle().into(),
+                    x.file_handle(),
                     x.offset(),
                     x.whence(),
                     self.reply(),
@@ -519,10 +519,10 @@ impl<'a> Request<'a> {
                 se.filesystem.copy_file_range(
                     self,
                     i.inode,
-                    i.file_handle.into(),
+                    i.file_handle,
                     i.offset,
                     o.inode,
-                    o.file_handle.into(),
+                    o.file_handle,
                     o.offset,
                     x.len(),
                     x.flags().try_into().unwrap(),
