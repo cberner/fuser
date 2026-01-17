@@ -1024,8 +1024,8 @@ mod op {
     impl_request!(OpenDir<'a>);
     impl OpenDir<'_> {
         /// Flags as passed to open
-        pub(crate) fn flags(&self) -> i32 {
-            self.arg.flags
+        pub(crate) fn flags(&self) -> OpenFlags {
+            OpenFlags(self.arg.flags)
         }
     }
 
