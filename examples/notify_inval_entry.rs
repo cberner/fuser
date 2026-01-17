@@ -22,8 +22,8 @@ use libc::{ENOBUFS, ENOENT, ENOTDIR};
 use clap::Parser;
 
 use fuser::{
-    FileAttr, FileType, Filesystem, INodeNo, MountOption, ReplyAttr, ReplyDirectory, ReplyEntry,
-    Request,
+    FileAttr, FileHandle, FileType, Filesystem, INodeNo, MountOption, ReplyAttr, ReplyDirectory,
+    ReplyEntry, Request,
 };
 
 struct ClockFS<'a> {
@@ -91,7 +91,13 @@ impl Filesystem for ClockFS<'_> {
         }
     }
 
-    fn getattr(&mut self, _req: &Request<'_>, ino: INodeNo, _fh: Option<u64>, reply: ReplyAttr) {
+    fn getattr(
+        &mut self,
+        _req: &Request<'_>,
+        ino: INodeNo,
+        _fh: Option<FileHandle>,
+        reply: ReplyAttr,
+    ) {
         match ClockFS::stat(ino) {
             Some(a) => reply.attr(&self.timeout, &a),
             None => reply.error(ENOENT),
@@ -102,7 +108,7 @@ impl Filesystem for ClockFS<'_> {
         &mut self,
         _req: &Request<'_>,
         ino: INodeNo,
-        _fh: u64,
+        _fh: FileHandle,
         offset: i64,
         mut reply: ReplyDirectory,
     ) {

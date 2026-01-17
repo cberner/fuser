@@ -4,8 +4,8 @@
 
 use clap::{Arg, ArgAction, Command, crate_version};
 use fuser::{
-    FileAttr, FileType, Filesystem, INodeNo, MountOption, ReplyAttr, ReplyData, ReplyDirectory,
-    ReplyEntry, ReplyIoctl, Request,
+    FileAttr, FileHandle, FileType, Filesystem, INodeNo, MountOption, ReplyAttr, ReplyData,
+    ReplyDirectory, ReplyEntry, ReplyIoctl, Request,
 };
 use libc::{EINVAL, ENOENT};
 use log::debug;
@@ -81,7 +81,13 @@ impl Filesystem for FiocFS {
         }
     }
 
-    fn getattr(&mut self, _req: &Request<'_>, ino: INodeNo, _fh: Option<u64>, reply: ReplyAttr) {
+    fn getattr(
+        &mut self,
+        _req: &Request<'_>,
+        ino: INodeNo,
+        _fh: Option<FileHandle>,
+        reply: ReplyAttr,
+    ) {
         match ino.0 {
             1 => reply.attr(&TTL, &self.root_attr),
             2 => reply.attr(&TTL, &self.fioc_file_attr),
@@ -93,7 +99,7 @@ impl Filesystem for FiocFS {
         &mut self,
         _req: &Request<'_>,
         ino: INodeNo,
-        _fh: u64,
+        _fh: FileHandle,
         offset: i64,
         _size: u32,
         _flags: i32,
@@ -111,7 +117,7 @@ impl Filesystem for FiocFS {
         &mut self,
         _req: &Request<'_>,
         ino: INodeNo,
-        _fh: u64,
+        _fh: FileHandle,
         offset: i64,
         mut reply: ReplyDirectory,
     ) {
@@ -139,7 +145,7 @@ impl Filesystem for FiocFS {
         &mut self,
         _req: &Request<'_>,
         ino: INodeNo,
-        _fh: u64,
+        _fh: FileHandle,
         _flags: u32,
         cmd: u32,
         in_data: &[u8],

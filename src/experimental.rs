@@ -1,8 +1,8 @@
 #![allow(missing_docs, missing_debug_implementations)]
 
 use crate::{
-    FileAttr, FileType, Filesystem, INodeNo, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry,
-    Request, RequestId,
+    FileAttr, FileHandle, FileType, Filesystem, INodeNo, ReplyAttr, ReplyData, ReplyDirectory,
+    ReplyEntry, Request, RequestId,
 };
 use std::ffi::OsStr;
 use std::time::Duration;
@@ -142,7 +142,13 @@ impl<T: AsyncFilesystem> Filesystem for TokioAdapter<T> {
         }
     }
 
-    fn getattr(&mut self, req: &Request<'_>, ino: INodeNo, fh: Option<u64>, reply: ReplyAttr) {
+    fn getattr(
+        &mut self,
+        req: &Request<'_>,
+        ino: INodeNo,
+        fh: Option<FileHandle>,
+        reply: ReplyAttr,
+    ) {
         match self
             .runtime
             .block_on(self.inner.getattr(&req.into(), ino, fh))
@@ -156,7 +162,7 @@ impl<T: AsyncFilesystem> Filesystem for TokioAdapter<T> {
         &mut self,
         req: &Request<'_>,
         ino: INodeNo,
-        fh: u64,
+        fh: FileHandle,
         offset: i64,
         size: u32,
         flags: i32,
@@ -183,7 +189,7 @@ impl<T: AsyncFilesystem> Filesystem for TokioAdapter<T> {
         &mut self,
         req: &Request<'_>,
         ino: INodeNo,
-        fh: u64,
+        fh: FileHandle,
         offset: i64,
         mut reply: ReplyDirectory,
     ) {
@@ -214,14 +220,14 @@ pub trait AsyncFilesystem {
         &self,
         context: &RequestContext,
         ino: INodeNo,
-        file_handle: Option<u64>,
+        file_handle: Option<FileHandle>,
     ) -> Result<GetAttrResponse>;
 
     async fn read(
         &self,
         context: &RequestContext,
         ino: INodeNo,
-        file_handle: u64,
+        file_handle: FileHandle,
         offset: i64,
         size: u32,
         flags: i32,
@@ -235,7 +241,7 @@ pub trait AsyncFilesystem {
         &self,
         context: &RequestContext,
         ino: INodeNo,
-        file_handle: u64,
+        file_handle: FileHandle,
         offset: i64,
         builder: DirEntListBuilder<'_>,
     ) -> Result<()>;

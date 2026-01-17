@@ -1,7 +1,7 @@
 use clap::{Arg, ArgAction, Command, crate_version};
 use fuser::{
-    FileAttr, FileType, Filesystem, INodeNo, MountOption, ReplyAttr, ReplyData, ReplyDirectory,
-    ReplyEntry, Request,
+    FileAttr, FileHandle, FileType, Filesystem, INodeNo, MountOption, ReplyAttr, ReplyData,
+    ReplyDirectory, ReplyEntry, Request,
 };
 use libc::ENOENT;
 use std::ffi::OsStr;
@@ -58,7 +58,13 @@ impl Filesystem for HelloFS {
         }
     }
 
-    fn getattr(&mut self, _req: &Request<'_>, ino: INodeNo, _fh: Option<u64>, reply: ReplyAttr) {
+    fn getattr(
+        &mut self,
+        _req: &Request<'_>,
+        ino: INodeNo,
+        _fh: Option<FileHandle>,
+        reply: ReplyAttr,
+    ) {
         match u64::from(ino) {
             1 => reply.attr(&TTL, &HELLO_DIR_ATTR),
             2 => reply.attr(&TTL, &HELLO_TXT_ATTR),
@@ -70,7 +76,7 @@ impl Filesystem for HelloFS {
         &mut self,
         _req: &Request<'_>,
         ino: INodeNo,
-        _fh: u64,
+        _fh: FileHandle,
         offset: i64,
         _size: u32,
         _flags: i32,
@@ -88,7 +94,7 @@ impl Filesystem for HelloFS {
         &mut self,
         _req: &Request<'_>,
         ino: INodeNo,
-        _fh: u64,
+        _fh: FileHandle,
         offset: i64,
         mut reply: ReplyDirectory,
     ) {

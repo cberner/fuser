@@ -27,6 +27,7 @@ use std::{convert::AsRef, io::ErrorKind};
 pub use crate::ll::RequestId;
 pub use crate::ll::fuse_abi::InitFlags;
 use crate::ll::fuse_abi::consts::*;
+pub use crate::ll::request::FileHandle;
 pub use crate::ll::request::INodeNo;
 pub use crate::ll::write_flags::WriteFlags;
 pub use crate::ll::{TimeOrNow, fuse_abi::consts};
@@ -404,7 +405,13 @@ pub trait Filesystem {
     }
 
     /// Get file attributes.
-    fn getattr(&mut self, _req: &Request<'_>, ino: INodeNo, fh: Option<u64>, reply: ReplyAttr) {
+    fn getattr(
+        &mut self,
+        _req: &Request<'_>,
+        ino: INodeNo,
+        fh: Option<FileHandle>,
+        reply: ReplyAttr,
+    ) {
         warn!("[Not Implemented] getattr(ino: {ino:#x?}, fh: {fh:#x?})");
         reply.error(ENOSYS);
     }
@@ -421,7 +428,7 @@ pub trait Filesystem {
         _atime: Option<TimeOrNow>,
         _mtime: Option<TimeOrNow>,
         _ctime: Option<SystemTime>,
-        fh: Option<u64>,
+        fh: Option<FileHandle>,
         _crtime: Option<SystemTime>,
         _chgtime: Option<SystemTime>,
         _bkuptime: Option<SystemTime>,
@@ -562,7 +569,7 @@ pub trait Filesystem {
         &mut self,
         _req: &Request<'_>,
         ino: INodeNo,
-        fh: u64,
+        fh: FileHandle,
         offset: i64,
         size: u32,
         flags: i32,
@@ -592,7 +599,7 @@ pub trait Filesystem {
         &mut self,
         _req: &Request<'_>,
         ino: INodeNo,
-        fh: u64,
+        fh: FileHandle,
         offset: i64,
         data: &[u8],
         write_flags: WriteFlags,
@@ -623,7 +630,7 @@ pub trait Filesystem {
         &mut self,
         _req: &Request<'_>,
         ino: INodeNo,
-        fh: u64,
+        fh: FileHandle,
         lock_owner: u64,
         reply: ReplyEmpty,
     ) {
@@ -643,7 +650,7 @@ pub trait Filesystem {
         &mut self,
         _req: &Request<'_>,
         _ino: INodeNo,
-        _fh: u64,
+        _fh: FileHandle,
         _flags: i32,
         _lock_owner: Option<u64>,
         _flush: bool,
@@ -659,7 +666,7 @@ pub trait Filesystem {
         &mut self,
         _req: &Request<'_>,
         ino: INodeNo,
-        fh: u64,
+        fh: FileHandle,
         datasync: bool,
         reply: ReplyEmpty,
     ) {
@@ -687,7 +694,7 @@ pub trait Filesystem {
         &mut self,
         _req: &Request<'_>,
         ino: INodeNo,
-        fh: u64,
+        fh: FileHandle,
         offset: i64,
         reply: ReplyDirectory,
     ) {
@@ -704,7 +711,7 @@ pub trait Filesystem {
         &mut self,
         _req: &Request<'_>,
         ino: INodeNo,
-        fh: u64,
+        fh: FileHandle,
         offset: i64,
         reply: ReplyDirectoryPlus,
     ) {
@@ -720,7 +727,7 @@ pub trait Filesystem {
         &mut self,
         _req: &Request<'_>,
         _ino: INodeNo,
-        _fh: u64,
+        _fh: FileHandle,
         _flags: i32,
         reply: ReplyEmpty,
     ) {
@@ -735,7 +742,7 @@ pub trait Filesystem {
         &mut self,
         _req: &Request<'_>,
         ino: INodeNo,
-        fh: u64,
+        fh: FileHandle,
         datasync: bool,
         reply: ReplyEmpty,
     ) {
@@ -838,7 +845,7 @@ pub trait Filesystem {
         &mut self,
         _req: &Request<'_>,
         ino: INodeNo,
-        fh: u64,
+        fh: FileHandle,
         lock_owner: u64,
         start: u64,
         end: u64,
@@ -864,7 +871,7 @@ pub trait Filesystem {
         &mut self,
         _req: &Request<'_>,
         ino: INodeNo,
-        fh: u64,
+        fh: FileHandle,
         lock_owner: u64,
         start: u64,
         end: u64,
@@ -900,7 +907,7 @@ pub trait Filesystem {
         &mut self,
         _req: &Request<'_>,
         ino: INodeNo,
-        fh: u64,
+        fh: FileHandle,
         flags: u32,
         cmd: u32,
         in_data: &[u8],
@@ -920,7 +927,7 @@ pub trait Filesystem {
         &mut self,
         _req: &Request<'_>,
         ino: INodeNo,
-        fh: u64,
+        fh: FileHandle,
         ph: PollHandle,
         events: u32,
         flags: u32,
@@ -938,7 +945,7 @@ pub trait Filesystem {
         &mut self,
         _req: &Request<'_>,
         ino: INodeNo,
-        fh: u64,
+        fh: FileHandle,
         offset: i64,
         length: i64,
         mode: i32,
@@ -956,7 +963,7 @@ pub trait Filesystem {
         &mut self,
         _req: &Request<'_>,
         ino: INodeNo,
-        fh: u64,
+        fh: FileHandle,
         offset: i64,
         whence: i32,
         reply: ReplyLseek,
@@ -973,10 +980,10 @@ pub trait Filesystem {
         &mut self,
         _req: &Request<'_>,
         ino_in: INodeNo,
-        fh_in: u64,
+        fh_in: FileHandle,
         offset_in: i64,
         ino_out: INodeNo,
-        fh_out: u64,
+        fh_out: FileHandle,
         offset_out: i64,
         len: u64,
         flags: u32,

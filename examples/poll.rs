@@ -22,8 +22,8 @@ use std::{
 use libc::{EACCES, EBADF, EBUSY, EINVAL, ENOENT, ENOTDIR};
 
 use fuser::{
-    FileAttr, FileType, INodeNo, MountOption, OpenAccMode, OpenFlags, PollHandle, ReplyAttr,
-    ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen, Request,
+    FileAttr, FileHandle, FileType, INodeNo, MountOption, OpenAccMode, OpenFlags, PollHandle,
+    ReplyAttr, ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen, Request,
     consts::{FOPEN_DIRECT_IO, FOPEN_NONSEEKABLE, FUSE_POLL_SCHEDULE_NOTIFY},
 };
 
@@ -102,7 +102,13 @@ impl fuser::Filesystem for FSelFS {
         reply.entry(&Duration::ZERO, &self.get_data().filestat(idx), 0);
     }
 
-    fn getattr(&mut self, _req: &Request<'_>, ino: INodeNo, _fh: Option<u64>, reply: ReplyAttr) {
+    fn getattr(
+        &mut self,
+        _req: &Request<'_>,
+        ino: INodeNo,
+        _fh: Option<FileHandle>,
+        reply: ReplyAttr,
+    ) {
         if ino == INodeNo::ROOT {
             let a = FileAttr {
                 ino: INodeNo::ROOT,
@@ -136,7 +142,7 @@ impl fuser::Filesystem for FSelFS {
         &mut self,
         _req: &Request<'_>,
         ino: INodeNo,
-        _fh: u64,
+        _fh: FileHandle,
         offset: i64,
         mut reply: ReplyDirectory,
     ) {
@@ -200,13 +206,13 @@ impl fuser::Filesystem for FSelFS {
         &mut self,
         _req: &Request<'_>,
         _ino: INodeNo,
-        _fh: u64,
+        _fh: FileHandle,
         _flags: i32,
         _lock_owner: Option<u64>,
         _flush: bool,
         reply: ReplyEmpty,
     ) {
-        let idx = _fh;
+        let idx: u64 = _fh.into();
         if idx >= NUMFILES.into() {
             reply.error(EBADF);
             return;
@@ -219,13 +225,14 @@ impl fuser::Filesystem for FSelFS {
         &mut self,
         _req: &Request<'_>,
         _ino: INodeNo,
-        fh: u64,
+        fh: FileHandle,
         _offset: i64,
         size: u32,
         _flags: i32,
         _lock_owner: Option<u64>,
         reply: ReplyData,
     ) {
+        let fh: u64 = fh.into();
         let Ok(idx): Result<u8, _> = fh.try_into() else {
             reply.error(EINVAL);
             return;
@@ -251,13 +258,14 @@ impl fuser::Filesystem for FSelFS {
         &mut self,
         _req: &Request,
         _ino: INodeNo,
-        fh: u64,
+        fh: FileHandle,
         ph: PollHandle,
         _events: u32,
         flags: u32,
         reply: fuser::ReplyPoll,
     ) {
         static POLLED_ZERO: AtomicU64 = AtomicU64::new(0);
+        let fh: u64 = fh.into();
         let Ok(idx): Result<u8, _> = fh.try_into() else {
             reply.error(EINVAL);
             return;

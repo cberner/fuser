@@ -4,8 +4,8 @@
 
 use clap::{Arg, ArgAction, Command, crate_version};
 use fuser::{
-    BackingId, FileAttr, FileType, Filesystem, INodeNo, InitFlags, KernelConfig, MountOption,
-    OpenFlags, ReplyAttr, ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen, Request,
+    BackingId, FileAttr, FileHandle, FileType, Filesystem, INodeNo, InitFlags, KernelConfig,
+    MountOption, OpenFlags, ReplyAttr, ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen, Request,
 };
 use libc::ENOENT;
 use std::collections::HashMap;
@@ -157,7 +157,13 @@ impl Filesystem for PassthroughFs {
         }
     }
 
-    fn getattr(&mut self, _req: &Request<'_>, ino: INodeNo, _fh: Option<u64>, reply: ReplyAttr) {
+    fn getattr(
+        &mut self,
+        _req: &Request<'_>,
+        ino: INodeNo,
+        _fh: Option<FileHandle>,
+        reply: ReplyAttr,
+    ) {
         match ino.0 {
             1 => reply.attr(&TTL, &self.root_attr),
             2 => reply.attr(&TTL, &self.passthrough_file_attr),
@@ -187,13 +193,13 @@ impl Filesystem for PassthroughFs {
         &mut self,
         _req: &Request<'_>,
         _ino: INodeNo,
-        _fh: u64,
+        _fh: FileHandle,
         _flags: i32,
         _lock_owner: Option<u64>,
         _flush: bool,
         reply: ReplyEmpty,
     ) {
-        self.backing_cache.put(_fh);
+        self.backing_cache.put(_fh.into());
         reply.ok();
     }
 
@@ -201,7 +207,7 @@ impl Filesystem for PassthroughFs {
         &mut self,
         _req: &Request<'_>,
         ino: INodeNo,
-        _fh: u64,
+        _fh: FileHandle,
         offset: i64,
         mut reply: ReplyDirectory,
     ) {

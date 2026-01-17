@@ -117,17 +117,19 @@ impl Display for INodeNo {
 /// [`Release`]/[`ReleaseDir`] request will be made.  This is an opportunity for
 /// the filesystem implementation to free any internal per-FileHandle data
 /// structures it has allocated.
-///
-/// We implement conversion from `FileHandle` to[ `u64`] but not vice-versa because
-/// not all [`u64`]s are valid `FileHandles`, but the reverse is true.  So to produce
-/// a `FileHandle` from a [`u64`] we must be explicit.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serializable", derive(Serialize, Deserialize))]
-pub(crate) struct FileHandle(pub(crate) u64);
+pub struct FileHandle(pub u64);
 
 impl From<FileHandle> for u64 {
     fn from(fh: FileHandle) -> Self {
         fh.0
+    }
+}
+
+impl Display for FileHandle {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        Display::fmt(&self.0, f)
     }
 }
 
