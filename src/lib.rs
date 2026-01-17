@@ -673,7 +673,7 @@ pub trait Filesystem {
     /// anything in fh, though that makes it impossible to implement standard conforming
     /// directory stream operations in case the contents of the directory can change
     /// between opendir and releasedir.
-    fn opendir(&mut self, _req: &Request<'_>, _ino: INodeNo, _flags: i32, reply: ReplyOpen) {
+    fn opendir(&mut self, _req: &Request<'_>, _ino: INodeNo, _flags: OpenFlags, reply: ReplyOpen) {
         reply.opened(0, 0);
     }
 

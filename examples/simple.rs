@@ -1499,24 +1499,19 @@ impl Filesystem for SimpleFS {
         reply.ok();
     }
 
-    fn opendir(&mut self, _req: &Request<'_>, _ino: INodeNo, _flags: i32, reply: ReplyOpen) {
+    fn opendir(&mut self, _req: &Request<'_>, _ino: INodeNo, _flags: OpenFlags, reply: ReplyOpen) {
         debug!("opendir() called on {_ino:?}");
-        let (access_mask, read, write) = match _flags & libc::O_ACCMODE {
-            libc::O_RDONLY => {
+        let (access_mask, read, write) = match _flags.acc_mode() {
+            OpenAccMode::O_RDONLY => {
                 // Behavior is undefined, but most filesystems return EACCES
-                if _flags & libc::O_TRUNC != 0 {
+                if _flags.0 & libc::O_TRUNC != 0 {
                     reply.error(libc::EACCES);
                     return;
                 }
                 (libc::R_OK, true, false)
             }
-            libc::O_WRONLY => (libc::W_OK, false, true),
-            libc::O_RDWR => (libc::R_OK | libc::W_OK, true, true),
-            // Exactly one access mode flag must be specified
-            _ => {
-                reply.error(libc::EINVAL);
-                return;
-            }
+            OpenAccMode::O_WRONLY => (libc::W_OK, false, true),
+            OpenAccMode::O_RDWR => (libc::R_OK | libc::W_OK, true, true),
         };
 
         match self.get_inode(_ino) {
