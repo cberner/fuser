@@ -281,8 +281,7 @@ impl ReplyOpen {
     /// # Panics
     /// When attempting to use kernel passthrough.
     /// Use [`opened_passthrough()`](Self::opened_passthrough) instead.
-    pub fn opened(self, fh: u64, flags: u32) {
-        let flags = FopenFlags::from_bits_retain(flags);
+    pub fn opened(self, fh: u64, flags: FopenFlags) {
         assert!(!flags.contains(FopenFlags::FOPEN_PASSTHROUGH));
         self.reply
             .send_ll(&ll::Response::new_open(ll::FileHandle(fh), flags, 0));
@@ -964,7 +963,7 @@ mod test {
             ],
         };
         let reply: ReplyOpen = Reply::new(ll::RequestId(0xdeadbeef), sender);
-        reply.opened(0x1122, 0x33);
+        reply.opened(0x1122, FopenFlags::from_bits_retain(0x33));
     }
 
     #[test]

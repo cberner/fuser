@@ -36,6 +36,7 @@ use clap::crate_version;
 use fuser::Errno;
 use fuser::FileHandle;
 use fuser::Filesystem;
+use fuser::FopenFlags;
 use fuser::INodeNo;
 use fuser::InitFlags;
 use fuser::KernelConfig;
@@ -58,7 +59,6 @@ use fuser::TimeOrNow;
 // use fuser::consts::FUSE_WRITE_KILL_PRIV;
 use fuser::TimeOrNow::Now;
 use fuser::WriteFlags;
-use fuser::consts::FOPEN_DIRECT_IO;
 use log::LevelFilter;
 use log::debug;
 use log::error;
@@ -1432,7 +1432,11 @@ impl Filesystem for SimpleFS {
                 ) {
                     attr.open_file_handles += 1;
                     self.write_inode(&attr);
-                    let open_flags = if self.direct_io { FOPEN_DIRECT_IO } else { 0 };
+                    let open_flags = if self.direct_io {
+                        FopenFlags::FOPEN_DIRECT_IO
+                    } else {
+                        FopenFlags::empty()
+                    };
                     reply.opened(self.allocate_next_file_handle(read, write), open_flags);
                 } else {
                     reply.error(Errno::EACCES);
@@ -1569,7 +1573,11 @@ impl Filesystem for SimpleFS {
                 ) {
                     attr.open_file_handles += 1;
                     self.write_inode(&attr);
-                    let open_flags = if self.direct_io { FOPEN_DIRECT_IO } else { 0 };
+                    let open_flags = if self.direct_io {
+                        FopenFlags::FOPEN_DIRECT_IO
+                    } else {
+                        FopenFlags::empty()
+                    };
                     reply.opened(self.allocate_next_file_handle(read, write), open_flags);
                 } else {
                     reply.error(Errno::EACCES);

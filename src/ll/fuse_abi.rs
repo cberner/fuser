@@ -124,7 +124,7 @@ pub(crate) struct fuse_file_lock {
 bitflags! {
     /// Flags returned in open response.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-    pub(crate) struct FopenFlags: u32 {
+    pub struct FopenFlags: u32 {
         /// bypass page cache for this open file
         const FOPEN_DIRECT_IO = 1 << 0;
         /// don't invalidate the data cache on open

@@ -23,6 +23,7 @@ use fuser::FileAttr;
 use fuser::FileHandle;
 use fuser::FileType;
 use fuser::Filesystem;
+use fuser::FopenFlags;
 use fuser::INodeNo;
 use fuser::MountOption;
 use fuser::OpenAccMode;
@@ -33,7 +34,6 @@ use fuser::ReplyDirectory;
 use fuser::ReplyEntry;
 use fuser::ReplyOpen;
 use fuser::Request;
-use fuser::consts;
 
 struct ClockFS<'a> {
     file_contents: Arc<Mutex<String>>,
@@ -149,7 +149,7 @@ impl Filesystem for ClockFS<'_> {
             reply.error(Errno::ENOENT);
         } else {
             // TODO: we are supposed to pass file handle here, not ino.
-            reply.opened(ino.0, consts::FOPEN_KEEP_CACHE);
+            reply.opened(ino.0, FopenFlags::FOPEN_KEEP_CACHE);
         }
     }
 
