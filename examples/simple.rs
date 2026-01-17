@@ -9,7 +9,7 @@ use fuser::TimeOrNow::Now;
 use fuser::{
     Filesystem, INodeNo, InitFlags, KernelConfig, MountOption, OpenAccMode, OpenFlags, ReplyAttr,
     ReplyCreate, ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen, ReplyStatfs,
-    ReplyWrite, ReplyXattr, Request, TimeOrNow,
+    ReplyWrite, ReplyXattr, Request, TimeOrNow, WriteFlags,
 };
 #[cfg(feature = "abi-7-26")]
 use log::info;
@@ -1442,7 +1442,7 @@ impl Filesystem for SimpleFS {
         fh: u64,
         offset: i64,
         data: &[u8],
-        _write_flags: u32,
+        _write_flags: WriteFlags,
         _flags: i32,
         _lock_owner: Option<u64>,
         reply: ReplyWrite,

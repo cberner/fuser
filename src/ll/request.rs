@@ -270,7 +270,7 @@ mod op {
     use super::{
         FileHandle, INodeNo, Lock, LockOwner, Operation, RequestId, abi::consts::*, abi::*,
     };
-    use crate::OpenFlags;
+    use crate::{OpenFlags, WriteFlags};
     use std::{
         convert::TryInto,
         ffi::OsStr,
@@ -717,10 +717,8 @@ mod op {
         /// Will contain `FUSE_WRITE_CACHE`, if this write is from the page cache. If set,
         /// the pid, uid, gid, and fh may not match the value that would have been sent if write caching
         /// is disabled
-        ///
-        /// TODO: `WriteFlags` type or remove this
-        pub(crate) fn write_flags(&self) -> u32 {
-            self.arg.write_flags
+        pub(crate) fn write_flags(&self) -> WriteFlags {
+            WriteFlags::from_bits_retain(self.arg.write_flags)
         }
         /// `lock_owner`: only supported with ABI >= 7.9
         pub(crate) fn lock_owner(&self) -> Option<LockOwner> {
