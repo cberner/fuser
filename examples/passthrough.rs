@@ -4,10 +4,9 @@
 
 use clap::{Arg, ArgAction, Command, crate_version};
 use fuser::{
-    BackingId, FileAttr, FileHandle, FileType, Filesystem, INodeNo, InitFlags, KernelConfig,
+    BackingId, Errno, FileAttr, FileHandle, FileType, Filesystem, INodeNo, InitFlags, KernelConfig,
     MountOption, OpenFlags, ReplyAttr, ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen, Request,
 };
-use libc::ENOENT;
 use std::collections::HashMap;
 use std::ffi::{OsStr, c_int};
 use std::fs::File;
@@ -153,7 +152,7 @@ impl Filesystem for PassthroughFs {
         if parent == INodeNo::ROOT && name.to_str() == Some("passthrough") {
             reply.entry(&TTL, &self.passthrough_file_attr, 0);
         } else {
-            reply.error(ENOENT);
+            reply.error(Errno::ENOENT);
         }
     }
 
@@ -167,13 +166,13 @@ impl Filesystem for PassthroughFs {
         match ino.0 {
             1 => reply.attr(&TTL, &self.root_attr),
             2 => reply.attr(&TTL, &self.passthrough_file_attr),
-            _ => reply.error(ENOENT),
+            _ => reply.error(Errno::ENOENT),
         }
     }
 
     fn open(&mut self, _req: &Request<'_>, ino: INodeNo, _flags: OpenFlags, reply: ReplyOpen) {
         if ino != INodeNo(2) {
-            reply.error(ENOENT);
+            reply.error(Errno::ENOENT);
             return;
         }
 
@@ -212,7 +211,7 @@ impl Filesystem for PassthroughFs {
         mut reply: ReplyDirectory,
     ) {
         if ino != INodeNo::ROOT {
-            reply.error(ENOENT);
+            reply.error(Errno::ENOENT);
             return;
         }
 

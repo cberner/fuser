@@ -210,6 +210,9 @@ impl Errno {
     pub const ENOTRECOVERABLE: Errno = errno!(libc::ENOTRECOVERABLE);
     /// Operation not supported
     pub const ENOTSUP: Errno = errno!(libc::ENOTSUP);
+    /// Wrong file type.
+    #[cfg(any(target_os = "freebsd", target_os = "macos"))]
+    pub const EFTYPE: Errno = errno!(libc::EFTYPE);
 
     /// No data available
     #[cfg(target_os = "linux")]
@@ -225,6 +228,7 @@ impl Errno {
     #[cfg(not(target_os = "linux"))]
     pub const NO_XATTR: Errno = Self::ENOATTR;
 
+    /// Make errno from `i32`, defaulting to `EIO` if it is zero.
     pub fn from_i32(err: i32) -> Errno {
         err.try_into().ok().map_or(Errno::EIO, Errno)
     }

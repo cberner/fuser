@@ -17,13 +17,11 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use libc::{ENOBUFS, ENOENT, ENOTDIR};
-
 use clap::Parser;
 
 use fuser::{
-    FileAttr, FileHandle, FileType, Filesystem, INodeNo, MountOption, ReplyAttr, ReplyDirectory,
-    ReplyEntry, Request,
+    Errno, FileAttr, FileHandle, FileType, Filesystem, INodeNo, MountOption, ReplyAttr,
+    ReplyDirectory, ReplyEntry, Request,
 };
 
 struct ClockFS<'a> {
@@ -70,7 +68,7 @@ impl ClockFS<'_> {
 impl Filesystem for ClockFS<'_> {
     fn lookup(&mut self, _req: &Request<'_>, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
         if parent != INodeNo::ROOT || name != AsRef::<OsStr>::as_ref(&self.get_filename()) {
-            reply.error(ENOENT);
+            reply.error(Errno::ENOENT);
             return;
         }
 
@@ -100,7 +98,7 @@ impl Filesystem for ClockFS<'_> {
     ) {
         match ClockFS::stat(ino) {
             Some(a) => reply.attr(&self.timeout, &a),
-            None => reply.error(ENOENT),
+            None => reply.error(Errno::ENOENT),
         }
     }
 
@@ -113,7 +111,7 @@ impl Filesystem for ClockFS<'_> {
         mut reply: ReplyDirectory,
     ) {
         if ino != INodeNo::ROOT {
-            reply.error(ENOTDIR);
+            reply.error(Errno::ENOTDIR);
             return;
         }
 
@@ -125,7 +123,7 @@ impl Filesystem for ClockFS<'_> {
                 self.get_filename(),
             )
         {
-            reply.error(ENOBUFS);
+            reply.error(Errno::ENOBUFS);
         } else {
             reply.ok();
         }

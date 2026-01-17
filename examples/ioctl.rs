@@ -4,10 +4,9 @@
 
 use clap::{Arg, ArgAction, Command, crate_version};
 use fuser::{
-    FileAttr, FileHandle, FileType, Filesystem, INodeNo, MountOption, ReplyAttr, ReplyData,
+    Errno, FileAttr, FileHandle, FileType, Filesystem, INodeNo, MountOption, ReplyAttr, ReplyData,
     ReplyDirectory, ReplyEntry, ReplyIoctl, Request,
 };
-use libc::{EINVAL, ENOENT};
 use log::debug;
 use std::ffi::OsStr;
 use std::time::{Duration, UNIX_EPOCH};
@@ -77,7 +76,7 @@ impl Filesystem for FiocFS {
         if parent == INodeNo::ROOT && name.to_str() == Some("fioc") {
             reply.entry(&TTL, &self.fioc_file_attr, 0);
         } else {
-            reply.error(ENOENT);
+            reply.error(Errno::ENOENT);
         }
     }
 
@@ -91,7 +90,7 @@ impl Filesystem for FiocFS {
         match ino.0 {
             1 => reply.attr(&TTL, &self.root_attr),
             2 => reply.attr(&TTL, &self.fioc_file_attr),
-            _ => reply.error(ENOENT),
+            _ => reply.error(Errno::ENOENT),
         }
     }
 
@@ -109,7 +108,7 @@ impl Filesystem for FiocFS {
         if ino == INodeNo(2) {
             reply.data(&self.content[offset as usize..]);
         } else {
-            reply.error(ENOENT);
+            reply.error(Errno::ENOENT);
         }
     }
 
@@ -122,7 +121,7 @@ impl Filesystem for FiocFS {
         mut reply: ReplyDirectory,
     ) {
         if ino != INodeNo::ROOT {
-            reply.error(ENOENT);
+            reply.error(Errno::ENOENT);
             return;
         }
 
@@ -153,7 +152,7 @@ impl Filesystem for FiocFS {
         reply: ReplyIoctl,
     ) {
         if ino != INodeNo(2) {
-            reply.error(EINVAL);
+            reply.error(Errno::EINVAL);
             return;
         }
 
@@ -169,7 +168,7 @@ impl Filesystem for FiocFS {
             }
             _ => {
                 debug!("unknown ioctl: {cmd}");
-                reply.error(EINVAL);
+                reply.error(Errno::EINVAL);
             }
         }
     }
