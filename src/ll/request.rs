@@ -5,14 +5,14 @@
 
 use super::fuse_abi::{InvalidOpcodeError, fuse_in_header, fuse_opcode};
 
+use super::argument::ArgumentIterator;
 use super::fuse_abi as abi;
 use nix::unistd::{Gid, Pid, Uid};
 #[cfg(feature = "serializable")]
 use serde::{Deserialize, Serialize};
+use std::fmt::Formatter;
 use std::{convert::TryFrom, fmt::Display, path::Path};
 use std::{error, fmt};
-
-use super::argument::ArgumentIterator;
 
 /// Error that may occur while reading and parsing a request from the kernel driver.
 #[derive(Debug)]
@@ -65,16 +65,24 @@ impl From<RequestId> for u64 {
 /// should decrement its own counter and if it reaches 0 then the inode number
 /// may be recycled and your filesystem implementation may clean up its
 /// internal data-structures relating to that inode.
-///
-/// We implement conversion from [`INodeNo`] to [`u64`] but not vice-versa because
-/// not all [`u64`]s are valid [`INodeNo`]s, but the reverse is true.  So to produce
-/// a [`INodeNo`] from a [`u64`] we must be explicit.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serializable", derive(Serialize, Deserialize))]
-pub(crate) struct INodeNo(pub(crate) u64);
+pub struct INodeNo(pub u64);
+
+impl INodeNo {
+    /// Filesystem root inode number.
+    pub const ROOT: INodeNo = INodeNo(1);
+}
+
 impl From<INodeNo> for u64 {
     fn from(fh: INodeNo) -> Self {
         fh.0
+    }
+}
+
+impl Display for INodeNo {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        Display::fmt(&self.0, f)
     }
 }
 

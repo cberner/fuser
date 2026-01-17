@@ -60,8 +60,6 @@ pub(crate) const FUSE_KERNEL_MINOR_VERSION: u32 = 36;
 #[cfg(feature = "abi-7-40")]
 pub(crate) const FUSE_KERNEL_MINOR_VERSION: u32 = 40;
 
-pub const FUSE_ROOT_ID: u64 = 1;
-
 #[repr(C)]
 #[derive(Debug, IntoBytes, Clone, Copy, KnownLayout, Immutable)]
 pub(crate) struct fuse_attr {

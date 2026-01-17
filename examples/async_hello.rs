@@ -3,7 +3,7 @@ use fuser::experimental::{
     AsyncFilesystem, DirEntListBuilder, GetAttrResponse, LookupResponse, RequestContext,
     TokioAdapter,
 };
-use fuser::{FileAttr, FileType, MountOption, experimental};
+use fuser::{FileAttr, FileType, INodeNo, MountOption, experimental};
 use libc::ENOENT;
 use std::ffi::OsStr;
 use std::time::{Duration, UNIX_EPOCH};
@@ -11,7 +11,7 @@ use std::time::{Duration, UNIX_EPOCH};
 const TTL: Duration = Duration::from_secs(1); // 1 second
 
 const HELLO_DIR_ATTR: FileAttr = FileAttr {
-    ino: 1,
+    ino: INodeNo::ROOT,
     size: 0,
     blocks: 0,
     atime: UNIX_EPOCH, // 1970-01-01 00:00:00
@@ -31,7 +31,7 @@ const HELLO_DIR_ATTR: FileAttr = FileAttr {
 const HELLO_TXT_CONTENT: &str = "Hello World!\n";
 
 const HELLO_TXT_ATTR: FileAttr = FileAttr {
-    ino: 2,
+    ino: INodeNo(2),
     size: 13,
     blocks: 1,
     atime: UNIX_EPOCH, // 1970-01-01 00:00:00
@@ -55,10 +55,10 @@ impl AsyncFilesystem for HelloFS {
     async fn lookup(
         &self,
         _context: &RequestContext,
-        parent: u64,
+        parent: INodeNo,
         name: &OsStr,
     ) -> experimental::Result<LookupResponse> {
-        if parent == 1 && name.to_str() == Some("hello.txt") {
+        if parent == INodeNo::ROOT && name.to_str() == Some("hello.txt") {
             Ok(LookupResponse::new(TTL, HELLO_TXT_ATTR, 0))
         } else {
             Err(ENOENT)
@@ -68,10 +68,10 @@ impl AsyncFilesystem for HelloFS {
     async fn getattr(
         &self,
         _context: &RequestContext,
-        ino: u64,
+        ino: INodeNo,
         _file_handle: Option<u64>,
     ) -> experimental::Result<GetAttrResponse> {
-        match ino {
+        match ino.0 {
             1 => Ok(GetAttrResponse::new(TTL, HELLO_DIR_ATTR)),
             2 => Ok(GetAttrResponse::new(TTL, HELLO_TXT_ATTR)),
             _ => Err(ENOENT),
@@ -81,7 +81,7 @@ impl AsyncFilesystem for HelloFS {
     async fn read(
         &self,
         _context: &RequestContext,
-        ino: u64,
+        ino: INodeNo,
         _file_handle: u64,
         offset: i64,
         _size: u32,
@@ -89,7 +89,7 @@ impl AsyncFilesystem for HelloFS {
         _lock: Option<u64>,
         out_data: &mut Vec<u8>,
     ) -> experimental::Result<()> {
-        if ino == 2 {
+        if ino.0 == 2 {
             out_data.extend_from_slice(&HELLO_TXT_CONTENT.as_bytes()[offset as usize..]);
             Ok(())
         } else {
@@ -100,12 +100,12 @@ impl AsyncFilesystem for HelloFS {
     async fn readdir(
         &self,
         _context: &RequestContext,
-        ino: u64,
+        ino: INodeNo,
         _file_handle: u64,
         offset: i64,
         mut builder: DirEntListBuilder<'_>,
     ) -> experimental::Result<()> {
-        if ino != 1 {
+        if ino != INodeNo::ROOT {
             return Err(ENOENT);
         }
 
@@ -117,7 +117,7 @@ impl AsyncFilesystem for HelloFS {
 
         for (i, entry) in entries.into_iter().enumerate().skip(offset as usize) {
             // i + 1 means the index of the next entry
-            if builder.add(entry.0, (i + 1) as i64, entry.1, entry.2) {
+            if builder.add(INodeNo(entry.0), (i + 1) as i64, entry.1, entry.2) {
                 break;
             }
         }

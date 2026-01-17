@@ -4,12 +4,9 @@ use std::io;
 use std::{convert::TryInto, ffi::OsStr};
 
 use crate::{
+    INodeNo,
     channel::ChannelSender,
     ll::{fuse_abi::fuse_notify_code as notify_code, notify::Notification},
-
-    // What we're sending here aren't really replies, but they
-    // move in the same direction (userspace->kernel), so we can
-    // reuse ReplySender for it.
     reply::ReplySender,
 };
 
@@ -70,7 +67,7 @@ impl Notifier {
     /// # Errors
     /// Returns an error if the notification data is too large.
     /// Returns an error if the kernel rejects the notification.
-    pub fn inval_entry(&self, parent: u64, name: &OsStr) -> io::Result<()> {
+    pub fn inval_entry(&self, parent: INodeNo, name: &OsStr) -> io::Result<()> {
         let notif = Notification::new_inval_entry(parent, name).map_err(Self::too_big_err)?;
         self.send_inval(notify_code::FUSE_NOTIFY_INVAL_ENTRY, &notif)
     }

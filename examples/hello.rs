@@ -1,7 +1,7 @@
 use clap::{Arg, ArgAction, Command, crate_version};
 use fuser::{
-    FileAttr, FileType, Filesystem, MountOption, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry,
-    Request,
+    FileAttr, FileType, Filesystem, INodeNo, MountOption, ReplyAttr, ReplyData, ReplyDirectory,
+    ReplyEntry, Request,
 };
 use libc::ENOENT;
 use std::ffi::OsStr;
@@ -10,7 +10,7 @@ use std::time::{Duration, UNIX_EPOCH};
 const TTL: Duration = Duration::from_secs(1); // 1 second
 
 const HELLO_DIR_ATTR: FileAttr = FileAttr {
-    ino: 1,
+    ino: INodeNo::ROOT,
     size: 0,
     blocks: 0,
     atime: UNIX_EPOCH, // 1970-01-01 00:00:00
@@ -30,7 +30,7 @@ const HELLO_DIR_ATTR: FileAttr = FileAttr {
 const HELLO_TXT_CONTENT: &str = "Hello World!\n";
 
 const HELLO_TXT_ATTR: FileAttr = FileAttr {
-    ino: 2,
+    ino: INodeNo(2),
     size: 13,
     blocks: 1,
     atime: UNIX_EPOCH, // 1970-01-01 00:00:00
@@ -50,16 +50,16 @@ const HELLO_TXT_ATTR: FileAttr = FileAttr {
 struct HelloFS;
 
 impl Filesystem for HelloFS {
-    fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
-        if parent == 1 && name.to_str() == Some("hello.txt") {
+    fn lookup(&mut self, _req: &Request<'_>, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
+        if u64::from(parent) == 1 && name.to_str() == Some("hello.txt") {
             reply.entry(&TTL, &HELLO_TXT_ATTR, 0);
         } else {
             reply.error(ENOENT);
         }
     }
 
-    fn getattr(&mut self, _req: &Request, ino: u64, _fh: Option<u64>, reply: ReplyAttr) {
-        match ino {
+    fn getattr(&mut self, _req: &Request<'_>, ino: INodeNo, _fh: Option<u64>, reply: ReplyAttr) {
+        match u64::from(ino) {
             1 => reply.attr(&TTL, &HELLO_DIR_ATTR),
             2 => reply.attr(&TTL, &HELLO_TXT_ATTR),
             _ => reply.error(ENOENT),
@@ -68,16 +68,16 @@ impl Filesystem for HelloFS {
 
     fn read(
         &mut self,
-        _req: &Request,
-        ino: u64,
+        _req: &Request<'_>,
+        ino: INodeNo,
         _fh: u64,
         offset: i64,
         _size: u32,
         _flags: i32,
-        _lock: Option<u64>,
+        _lock_owner: Option<u64>,
         reply: ReplyData,
     ) {
-        if ino == 2 {
+        if u64::from(ino) == 2 {
             reply.data(&HELLO_TXT_CONTENT.as_bytes()[offset as usize..]);
         } else {
             reply.error(ENOENT);
@@ -86,13 +86,13 @@ impl Filesystem for HelloFS {
 
     fn readdir(
         &mut self,
-        _req: &Request,
-        ino: u64,
+        _req: &Request<'_>,
+        ino: INodeNo,
         _fh: u64,
         offset: i64,
         mut reply: ReplyDirectory,
     ) {
-        if ino != 1 {
+        if u64::from(ino) != 1 {
             reply.error(ENOENT);
             return;
         }
@@ -105,7 +105,7 @@ impl Filesystem for HelloFS {
 
         for (i, entry) in entries.into_iter().enumerate().skip(offset as usize) {
             // i + 1 means the index of the next entry
-            if reply.add(entry.0, (i + 1) as i64, entry.1, entry.2) {
+            if reply.add(INodeNo(entry.0), (i + 1) as i64, entry.1, entry.2) {
                 break;
             }
         }

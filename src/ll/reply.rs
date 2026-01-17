@@ -289,7 +289,7 @@ pub(crate) fn fuse_attr_from_attr(attr: &crate::FileAttr) -> abi::fuse_attr {
     let (crtime_secs, crtime_nanos) = time_from_system_time(&attr.crtime);
 
     abi::fuse_attr {
-        ino: attr.ino,
+        ino: attr.ino.0,
         size: attr.size,
         blocks: attr.blocks,
         atime: atime_secs,
@@ -581,7 +581,7 @@ mod test {
         let time = UNIX_EPOCH + Duration::new(0x1234, 0x5678);
         let ttl = Duration::new(0x8765, 0x4321);
         let attr = crate::FileAttr {
-            ino: 0x11,
+            ino: INodeNo(0x11),
             size: 0x22,
             blocks: 0x33,
             atime: time,
@@ -638,7 +638,7 @@ mod test {
         let time = UNIX_EPOCH + Duration::new(0x1234, 0x5678);
         let ttl = Duration::new(0x8765, 0x4321);
         let attr = crate::FileAttr {
-            ino: 0x11,
+            ino: INodeNo(0x11),
             size: 0x22,
             blocks: 0x33,
             atime: time,
@@ -765,7 +765,7 @@ mod test {
         let time = UNIX_EPOCH + Duration::new(0x1234, 0x5678);
         let ttl = Duration::new(0x8765, 0x4321);
         let attr = crate::FileAttr {
-            ino: 0x11,
+            ino: INodeNo(0x11),
             size: 0x22,
             blocks: 0x33,
             atime: time,

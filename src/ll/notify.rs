@@ -3,10 +3,10 @@ use std::{convert::TryInto, io::IoSlice, num::TryFromIntError};
 #[allow(unused)]
 use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
 
+use super::fuse_abi as abi;
+use crate::INodeNo;
 use smallvec::{SmallVec, smallvec};
 use zerocopy::{Immutable, IntoBytes};
-
-use super::fuse_abi as abi;
 
 const INLINE_DATA_THRESHOLD: usize = size_of::<u64>() * 4;
 type NotificationBuf = SmallVec<[u8; INLINE_DATA_THRESHOLD]>;
@@ -58,9 +58,12 @@ impl<'a> Notification<'a> {
         Ok(f(&v))
     }
 
-    pub(crate) fn new_inval_entry(parent: u64, name: &'a OsStr) -> Result<Self, TryFromIntError> {
+    pub(crate) fn new_inval_entry(
+        parent: INodeNo,
+        name: &'a OsStr,
+    ) -> Result<Self, TryFromIntError> {
         let r = abi::fuse_notify_inval_entry_out {
-            parent,
+            parent: parent.0,
             namelen: name.len().try_into()?,
             padding: 0,
         };
@@ -131,7 +134,7 @@ mod test {
 
     #[test]
     fn inval_entry() {
-        let n = Notification::new_inval_entry(0x42, OsStr::new("abc"))
+        let n = Notification::new_inval_entry(INodeNo(0x42), OsStr::new("abc"))
             .unwrap()
             .with_iovec(
                 abi::fuse_notify_code::FUSE_NOTIFY_INVAL_ENTRY,
@@ -179,7 +182,7 @@ mod test {
 
     #[test]
     fn delete() {
-        let n = Notification::new_inval_entry(0x42, OsStr::new("abc"))
+        let n = Notification::new_inval_entry(INodeNo(0x42), OsStr::new("abc"))
             .unwrap()
             .with_iovec(abi::fuse_notify_code::FUSE_NOTIFY_DELETE, ioslice_to_vec)
             .unwrap();

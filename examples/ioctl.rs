@@ -4,8 +4,8 @@
 
 use clap::{Arg, ArgAction, Command, crate_version};
 use fuser::{
-    FileAttr, FileType, Filesystem, MountOption, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry,
-    Request,
+    FileAttr, FileType, Filesystem, INodeNo, MountOption, ReplyAttr, ReplyData, ReplyDirectory,
+    ReplyEntry, ReplyIoctl, Request,
 };
 use libc::{EINVAL, ENOENT};
 use log::debug;
@@ -29,7 +29,7 @@ impl FiocFS {
         let gid = nix::unistd::getgid().into();
 
         let root_attr = FileAttr {
-            ino: 1,
+            ino: INodeNo::ROOT,
             size: 0,
             blocks: 0,
             atime: UNIX_EPOCH, // 1970-01-01 00:00:00
@@ -47,7 +47,7 @@ impl FiocFS {
         };
 
         let fioc_file_attr = FileAttr {
-            ino: 2,
+            ino: INodeNo(2),
             size: 0,
             blocks: 1,
             atime: UNIX_EPOCH, // 1970-01-01 00:00:00
@@ -73,16 +73,16 @@ impl FiocFS {
 }
 
 impl Filesystem for FiocFS {
-    fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
-        if parent == 1 && name.to_str() == Some("fioc") {
+    fn lookup(&mut self, _req: &Request<'_>, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
+        if parent == INodeNo::ROOT && name.to_str() == Some("fioc") {
             reply.entry(&TTL, &self.fioc_file_attr, 0);
         } else {
             reply.error(ENOENT);
         }
     }
 
-    fn getattr(&mut self, _req: &Request, ino: u64, _fh: Option<u64>, reply: ReplyAttr) {
-        match ino {
+    fn getattr(&mut self, _req: &Request<'_>, ino: INodeNo, _fh: Option<u64>, reply: ReplyAttr) {
+        match ino.0 {
             1 => reply.attr(&TTL, &self.root_attr),
             2 => reply.attr(&TTL, &self.fioc_file_attr),
             _ => reply.error(ENOENT),
@@ -91,16 +91,16 @@ impl Filesystem for FiocFS {
 
     fn read(
         &mut self,
-        _req: &Request,
-        ino: u64,
+        _req: &Request<'_>,
+        ino: INodeNo,
         _fh: u64,
         offset: i64,
         _size: u32,
         _flags: i32,
-        _lock: Option<u64>,
+        _lock_owner: Option<u64>,
         reply: ReplyData,
     ) {
-        if ino == 2 {
+        if ino == INodeNo(2) {
             reply.data(&self.content[offset as usize..]);
         } else {
             reply.error(ENOENT);
@@ -109,13 +109,13 @@ impl Filesystem for FiocFS {
 
     fn readdir(
         &mut self,
-        _req: &Request,
-        ino: u64,
+        _req: &Request<'_>,
+        ino: INodeNo,
         _fh: u64,
         offset: i64,
         mut reply: ReplyDirectory,
     ) {
-        if ino != 1 {
+        if ino != INodeNo::ROOT {
             reply.error(ENOENT);
             return;
         }
@@ -128,7 +128,7 @@ impl Filesystem for FiocFS {
 
         for (i, entry) in entries.into_iter().enumerate().skip(offset as usize) {
             // i + 1 means the index of the next entry
-            if reply.add(entry.0, (i + 1) as i64, entry.1, entry.2) {
+            if reply.add(INodeNo(entry.0), (i + 1) as i64, entry.1, entry.2) {
                 break;
             }
         }
@@ -138,15 +138,15 @@ impl Filesystem for FiocFS {
     fn ioctl(
         &mut self,
         _req: &Request<'_>,
-        ino: u64,
+        ino: INodeNo,
         _fh: u64,
         _flags: u32,
         cmd: u32,
         in_data: &[u8],
         _out_size: u32,
-        reply: fuser::ReplyIoctl,
+        reply: ReplyIoctl,
     ) {
-        if ino != 2 {
+        if ino != INodeNo(2) {
             reply.error(EINVAL);
             return;
         }
