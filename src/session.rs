@@ -5,23 +5,37 @@
 //! filesystem is mounted, the session loop receives, dispatches and replies to kernel requests
 //! for filesystem operations under its mount point.
 
-use libc::{EAGAIN, EINTR, ENODEV, ENOENT};
-use log::{info, warn};
-use nix::unistd::{Uid, geteuid};
 use std::fs::File;
 use std::io;
-use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
-use std::thread::{self, JoinHandle};
+use std::os::fd::AsFd;
+use std::os::fd::BorrowedFd;
+use std::os::fd::OwnedFd;
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::thread::JoinHandle;
+use std::thread::{self};
+
+use libc::EAGAIN;
+use libc::EINTR;
+use libc::ENODEV;
+use libc::ENOENT;
+use log::info;
+use log::warn;
+use nix::unistd::Uid;
+use nix::unistd::geteuid;
 
 use crate::Filesystem;
 use crate::MountOption;
+use crate::channel::Channel;
+use crate::channel::ChannelSender;
 use crate::dev_fuse::DevFuse;
-use crate::ll::{Version, fuse_abi as abi};
+use crate::ll::Version;
+use crate::ll::fuse_abi as abi;
+use crate::mnt::Mount;
+use crate::notify::Notifier;
 use crate::request::Request;
-use crate::{channel::Channel, mnt::Mount};
-use crate::{channel::ChannelSender, notify::Notifier};
 
 /// The max size of write requests from the kernel. The absolute minimum is 4k,
 /// FUSE recommends at least 128k, max 16M. The FUSE default is 16M on macOS

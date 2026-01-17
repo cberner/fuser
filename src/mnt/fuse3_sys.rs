@@ -5,8 +5,16 @@
 #![warn(missing_debug_implementations)]
 #![allow(missing_docs)]
 #![allow(non_camel_case_types)]
+use libc::c_char;
+use libc::c_int;
+use libc::c_uint;
+use libc::c_void;
+use libc::dev_t;
+use libc::mode_t;
+use libc::off_t;
+use libc::size_t;
+
 use super::fuse2_sys::fuse_args;
-use libc::{c_char, c_int, c_uint, c_void, dev_t, mode_t, off_t, size_t};
 // Opaque types for FUSE-specific pointers
 type fuse_req_t = *mut c_void;
 type fuse_pollhandle = *mut c_void;

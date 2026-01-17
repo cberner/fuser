@@ -11,52 +11,70 @@
     unreachable_pub
 )]
 
-use libc::c_int;
-use log::warn;
-use mnt::mount_options::parse_options_from_args;
-#[cfg(feature = "serializable")]
-use serde::{Deserialize, Serialize};
+#[cfg(feature = "abi-7-28")]
+use std::cmp::max;
+use std::cmp::min;
+use std::convert::AsRef;
 use std::ffi::OsStr;
 use std::io;
+use std::io::ErrorKind;
+use std::os::unix::fs::FileTypeExt;
 use std::path::Path;
 #[cfg(feature = "abi-7-23")]
 use std::time::Duration;
 use std::time::SystemTime;
-use std::{convert::AsRef, io::ErrorKind};
+
+use libc::c_int;
+pub use ll::fuse_abi::fuse_forget_one;
+use log::warn;
+pub use mnt::mount_options::MountOption;
+use mnt::mount_options::parse_options_from_args;
+pub use notify::Notifier;
+pub use notify::PollHandle;
+#[cfg(feature = "abi-7-40")]
+pub use passthrough::BackingId;
+pub use reply::ReplyAttr;
+pub use reply::ReplyBmap;
+pub use reply::ReplyCreate;
+pub use reply::ReplyData;
+pub use reply::ReplyDirectory;
+pub use reply::ReplyDirectoryPlus;
+pub use reply::ReplyEmpty;
+pub use reply::ReplyEntry;
+pub use reply::ReplyIoctl;
+pub use reply::ReplyLock;
+pub use reply::ReplyLseek;
+pub use reply::ReplyOpen;
+pub use reply::ReplyPoll;
+pub use reply::ReplyStatfs;
+pub use reply::ReplyWrite;
+#[cfg(target_os = "macos")]
+pub use reply::ReplyXTimes;
+pub use reply::ReplyXattr;
+pub use request::Request;
+#[cfg(feature = "serializable")]
+use serde::Deserialize;
+#[cfg(feature = "serializable")]
+use serde::Serialize;
+pub use session::BackgroundSession;
+pub use session::Session;
+pub use session::SessionACL;
+pub use session::SessionUnmounter;
 
 pub use crate::ll::Errno;
 pub use crate::ll::RequestId;
+pub use crate::ll::TimeOrNow;
 pub use crate::ll::copy_file_range_flags::CopyFileRangeFlags;
 pub use crate::ll::fuse_abi::InitFlags;
+pub use crate::ll::fuse_abi::consts;
 use crate::ll::fuse_abi::consts::*;
 pub use crate::ll::request::FileHandle;
 pub use crate::ll::request::INodeNo;
 pub use crate::ll::write_flags::WriteFlags;
-pub use crate::ll::{TimeOrNow, fuse_abi::consts};
 use crate::mnt::mount_options::check_option_conflicts;
 pub use crate::open_flags::OpenAccMode;
 pub use crate::open_flags::OpenFlags;
 use crate::session::MAX_WRITE_SIZE;
-pub use ll::fuse_abi::fuse_forget_one;
-pub use mnt::mount_options::MountOption;
-pub use notify::{Notifier, PollHandle};
-#[cfg(feature = "abi-7-40")]
-pub use passthrough::BackingId;
-pub use reply::ReplyPoll;
-#[cfg(target_os = "macos")]
-pub use reply::ReplyXTimes;
-pub use reply::ReplyXattr;
-pub use reply::{ReplyAttr, ReplyData, ReplyEmpty, ReplyEntry, ReplyOpen};
-pub use reply::{
-    ReplyBmap, ReplyCreate, ReplyDirectory, ReplyDirectoryPlus, ReplyIoctl, ReplyLock, ReplyLseek,
-    ReplyStatfs, ReplyWrite,
-};
-pub use request::Request;
-pub use session::{BackgroundSession, Session, SessionACL, SessionUnmounter};
-#[cfg(feature = "abi-7-28")]
-use std::cmp::max;
-use std::cmp::min;
-use std::os::unix::fs::FileTypeExt;
 
 mod channel;
 mod dev_fuse;

@@ -11,13 +11,16 @@
 // Due to the above provenance, unlike the rest of fuser this file is
 // licensed under the terms of the GNU GPLv2.
 
-use nix::poll;
 use std::os::fd::AsFd;
+
+use nix::poll;
 
 const NUMFILES: usize = 16;
 
 fn make_nonblock(fd: impl AsFd) {
-    use nix::fcntl::{FcntlArg, OFlag, fcntl};
+    use nix::fcntl::FcntlArg;
+    use nix::fcntl::OFlag;
+    use nix::fcntl::fcntl;
     let arg = FcntlArg::F_SETFL(OFlag::O_NONBLOCK);
     fcntl(fd, arg).expect("failed to set fd nonblocking");
 }

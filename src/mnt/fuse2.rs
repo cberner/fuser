@@ -1,14 +1,16 @@
-use super::{MountOption, fuse2_sys::*, with_fuse_args};
-use log::warn;
-use std::{
-    ffi::CString,
-    fs::File,
-    io,
-    os::unix::prelude::{FromRawFd, OsStrExt},
-    path::Path,
-    sync::Arc,
-};
+use std::ffi::CString;
+use std::fs::File;
+use std::io;
+use std::os::unix::prelude::FromRawFd;
+use std::os::unix::prelude::OsStrExt;
+use std::path::Path;
+use std::sync::Arc;
 
+use log::warn;
+
+use super::MountOption;
+use super::fuse2_sys::*;
+use super::with_fuse_args;
 use crate::dev_fuse::DevFuse;
 
 /// Ensures that an os error is never 0/Success

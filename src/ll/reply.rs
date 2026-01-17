@@ -1,18 +1,25 @@
-use std::{
-    convert::TryInto,
-    io::IoSlice,
-    os::unix::prelude::OsStrExt,
-    path::Path,
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::convert::TryInto;
+use std::io::IoSlice;
+use std::os::unix::prelude::OsStrExt;
+use std::path::Path;
+use std::time::Duration;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
-use crate::FileType;
+use smallvec::SmallVec;
+use smallvec::smallvec;
+use zerocopy::Immutable;
+use zerocopy::IntoBytes;
 
+use super::Errno;
+use super::FileHandle;
+use super::Generation;
+use super::INodeNo;
+use super::Lock;
+use super::RequestId;
+use super::fuse_abi as abi;
 use super::fuse_abi::FopenFlags;
-use super::{Errno, FileHandle, Generation, INodeNo, fuse_abi as abi};
-use super::{Lock, RequestId};
-use smallvec::{SmallVec, smallvec};
-use zerocopy::{Immutable, IntoBytes};
+use crate::FileType;
 
 const INLINE_DATA_THRESHOLD: usize = size_of::<u64>() * 4;
 pub(crate) type ResponseBuf = SmallVec<[u8; INLINE_DATA_THRESHOLD]>;

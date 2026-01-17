@@ -1,12 +1,18 @@
-use std::{convert::TryInto, io::IoSlice, num::TryFromIntError};
-
+use std::convert::TryInto;
 #[allow(unused)]
-use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
+use std::ffi::OsStr;
+use std::io::IoSlice;
+use std::num::TryFromIntError;
+#[allow(unused)]
+use std::os::unix::ffi::OsStrExt;
+
+use smallvec::SmallVec;
+use smallvec::smallvec;
+use zerocopy::Immutable;
+use zerocopy::IntoBytes;
 
 use super::fuse_abi as abi;
 use crate::INodeNo;
-use smallvec::{SmallVec, smallvec};
-use zerocopy::{Immutable, IntoBytes};
 
 const INLINE_DATA_THRESHOLD: usize = size_of::<u64>() * 4;
 type NotificationBuf = SmallVec<[u8; INLINE_DATA_THRESHOLD]>;

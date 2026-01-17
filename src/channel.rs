@@ -1,8 +1,7 @@
-use std::{
-    io,
-    os::fd::{AsFd, BorrowedFd},
-    sync::Arc,
-};
+use std::io;
+use std::os::fd::AsFd;
+use std::os::fd::BorrowedFd;
+use std::sync::Arc;
 
 use crate::dev_fuse::DevFuse;
 #[cfg(feature = "abi-7-40")]

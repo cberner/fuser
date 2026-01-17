@@ -1,20 +1,24 @@
-use super::fuse3_sys::{
-    fuse_lowlevel_ops, fuse_session_destroy, fuse_session_fd, fuse_session_mount, fuse_session_new,
-    fuse_session_unmount,
-};
-use super::{MountOption, with_fuse_args};
-use log::warn;
+use std::ffi::CString;
+use std::ffi::c_void;
+use std::fs::File;
+use std::io;
 use std::os::fd::BorrowedFd;
-use std::{
-    ffi::{CString, c_void},
-    fs::File,
-    io,
-    os::unix::{ffi::OsStrExt, io::FromRawFd},
-    path::Path,
-    ptr,
-    sync::Arc,
-};
+use std::os::unix::ffi::OsStrExt;
+use std::os::unix::io::FromRawFd;
+use std::path::Path;
+use std::ptr;
+use std::sync::Arc;
 
+use log::warn;
+
+use super::MountOption;
+use super::fuse3_sys::fuse_lowlevel_ops;
+use super::fuse3_sys::fuse_session_destroy;
+use super::fuse3_sys::fuse_session_fd;
+use super::fuse3_sys::fuse_session_mount;
+use super::fuse3_sys::fuse_session_new;
+use super::fuse3_sys::fuse_session_unmount;
+use super::with_fuse_args;
 use crate::dev_fuse::DevFuse;
 
 /// Ensures that an os error is never 0/Success

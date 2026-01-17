@@ -6,18 +6,6 @@
 //! data without cloning the data. A reply *must always* be used (by calling either `ok()` or
 //! `error()` exactly once).
 
-use crate::ll::fuse_abi::FopenFlags;
-use crate::ll::{
-    self, Generation,
-    reply::{DirEntPlusList, DirEntryPlus},
-};
-use crate::ll::{
-    INodeNo,
-    reply::{DirEntList, DirEntOffset, DirEntry},
-};
-#[cfg(feature = "abi-7-40")]
-use crate::passthrough::BackingId;
-use log::{error, warn};
 use std::convert::AsRef;
 use std::ffi::OsStr;
 use std::fmt;
@@ -25,11 +13,26 @@ use std::io::IoSlice;
 #[cfg(feature = "abi-7-40")]
 use std::os::fd::BorrowedFd;
 use std::time::Duration;
-
 #[cfg(target_os = "macos")]
 use std::time::SystemTime;
 
-use crate::{Errno, FileAttr, FileType};
+use log::error;
+use log::warn;
+
+use crate::Errno;
+use crate::FileAttr;
+use crate::FileType;
+use crate::ll::Generation;
+use crate::ll::INodeNo;
+use crate::ll::fuse_abi::FopenFlags;
+use crate::ll::reply::DirEntList;
+use crate::ll::reply::DirEntOffset;
+use crate::ll::reply::DirEntPlusList;
+use crate::ll::reply::DirEntry;
+use crate::ll::reply::DirEntryPlus;
+use crate::ll::{self};
+#[cfg(feature = "abi-7-40")]
+use crate::passthrough::BackingId;
 
 /// Generic reply callback to send data
 pub(crate) trait ReplySender: Send + Sync + Unpin + 'static {
@@ -707,13 +710,19 @@ impl ReplyLseek {
 
 #[cfg(test)]
 mod test {
-    use super::*;
-    use crate::{FileAttr, FileType};
     use std::io::IoSlice;
-    use std::sync::mpsc::{SyncSender, sync_channel};
+    use std::sync::mpsc::SyncSender;
+    use std::sync::mpsc::sync_channel;
     use std::thread;
-    use std::time::{Duration, UNIX_EPOCH};
-    use zerocopy::{Immutable, IntoBytes};
+    use std::time::Duration;
+    use std::time::UNIX_EPOCH;
+
+    use zerocopy::Immutable;
+    use zerocopy::IntoBytes;
+
+    use super::*;
+    use crate::FileAttr;
+    use crate::FileType;
 
     #[derive(Debug, IntoBytes, Immutable)]
     #[repr(C)]

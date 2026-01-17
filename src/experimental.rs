@@ -1,11 +1,20 @@
 #![allow(missing_docs, missing_debug_implementations)]
 
-use crate::{
-    Errno, FileAttr, FileHandle, FileType, Filesystem, INodeNo, ReplyAttr, ReplyData,
-    ReplyDirectory, ReplyEntry, Request, RequestId,
-};
 use std::ffi::OsStr;
 use std::time::Duration;
+
+use crate::Errno;
+use crate::FileAttr;
+use crate::FileHandle;
+use crate::FileType;
+use crate::Filesystem;
+use crate::INodeNo;
+use crate::ReplyAttr;
+use crate::ReplyData;
+use crate::ReplyDirectory;
+use crate::ReplyEntry;
+use crate::Request;
+use crate::RequestId;
 
 pub type Result<T> = std::result::Result<T, Errno>;
 

@@ -3,16 +3,25 @@
 //! A request represents information about a filesystem operation the kernel driver wants us to
 //! perform.
 
-use super::fuse_abi::{fuse_in_header, fuse_opcode};
+use std::convert::TryFrom;
+use std::error;
+use std::fmt;
+use std::fmt::Display;
+use std::fmt::Formatter;
+use std::path::Path;
+
+use nix::unistd::Gid;
+use nix::unistd::Pid;
+use nix::unistd::Uid;
+#[cfg(feature = "serializable")]
+use serde::Deserialize;
+#[cfg(feature = "serializable")]
+use serde::Serialize;
 
 use super::argument::ArgumentIterator;
 use super::fuse_abi as abi;
-use nix::unistd::{Gid, Pid, Uid};
-#[cfg(feature = "serializable")]
-use serde::{Deserialize, Serialize};
-use std::fmt::Formatter;
-use std::{convert::TryFrom, fmt::Display, path::Path};
-use std::{error, fmt};
+use super::fuse_abi::fuse_in_header;
+use super::fuse_abi::fuse_opcode;
 
 /// Error that may occur while reading and parsing a request from the kernel driver.
 #[derive(Debug)]
@@ -263,27 +272,33 @@ macro_rules! impl_request {
 }
 
 mod op {
-    use crate::ll::Response;
+    use std::convert::TryInto;
+    use std::ffi::OsStr;
+    use std::fmt::Display;
+    use std::num::NonZeroU32;
+    use std::path::Path;
+    use std::time::Duration;
+    use std::time::SystemTime;
 
-    use super::{
-        super::{TimeOrNow, argument::ArgumentIterator},
-        FilenameInDir, Request,
-    };
-    use super::{
-        FileHandle, INodeNo, Lock, LockOwner, Operation, RequestId, abi::consts::*, abi::*,
-    };
+    use zerocopy::IntoBytes;
+
+    use super::super::TimeOrNow;
+    use super::super::argument::ArgumentIterator;
+    use super::FileHandle;
+    use super::FilenameInDir;
+    use super::INodeNo;
+    use super::Lock;
+    use super::LockOwner;
+    use super::Operation;
+    use super::Request;
+    use super::RequestId;
+    use super::abi::consts::*;
+    use super::abi::*;
     #[cfg(feature = "abi-7-28")]
     use crate::CopyFileRangeFlags;
-    use crate::{OpenFlags, WriteFlags};
-    use std::{
-        convert::TryInto,
-        ffi::OsStr,
-        fmt::Display,
-        num::NonZeroU32,
-        path::Path,
-        time::{Duration, SystemTime},
-    };
-    use zerocopy::IntoBytes;
+    use crate::OpenFlags;
+    use crate::WriteFlags;
+    use crate::ll::Response;
 
     /// Look up a directory entry by name and get its attributes.
     ///
@@ -2171,9 +2186,10 @@ impl<'a> TryFrom<&'a [u8]> for AnyRequest<'a> {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsStr;
+
     use super::super::test::AlignedData;
     use super::*;
-    use std::ffi::OsStr;
 
     #[cfg(target_endian = "big")]
     const INIT_REQUEST: AlignedData<[u8; 104]> = AlignedData([

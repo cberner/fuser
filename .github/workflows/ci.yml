@@ -81,9 +81,8 @@ jobs:
           sudo apt install -y libfuse-dev libfuse3-dev build-essential
 
       - name: Install Rust
-        if: steps.rust-cache.outputs.cache-hit != 'true'
         run: |
-          rustup component add rustfmt
+          rustup component add --toolchain nightly rustfmt
           rustup component add clippy
           rustc --version
           cargo --version

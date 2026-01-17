@@ -1,11 +1,24 @@
-use clap::{Arg, ArgAction, Command, crate_version};
-use fuser::experimental::{
-    AsyncFilesystem, DirEntListBuilder, GetAttrResponse, LookupResponse, RequestContext,
-    TokioAdapter,
-};
-use fuser::{Errno, FileAttr, FileHandle, FileType, INodeNo, MountOption, experimental};
 use std::ffi::OsStr;
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::Duration;
+use std::time::UNIX_EPOCH;
+
+use clap::Arg;
+use clap::ArgAction;
+use clap::Command;
+use clap::crate_version;
+use fuser::Errno;
+use fuser::FileAttr;
+use fuser::FileHandle;
+use fuser::FileType;
+use fuser::INodeNo;
+use fuser::MountOption;
+use fuser::experimental;
+use fuser::experimental::AsyncFilesystem;
+use fuser::experimental::DirEntListBuilder;
+use fuser::experimental::GetAttrResponse;
+use fuser::experimental::LookupResponse;
+use fuser::experimental::RequestContext;
+use fuser::experimental::TokioAdapter;
 
 const TTL: Duration = Duration::from_secs(1); // 1 second
 

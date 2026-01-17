@@ -2,16 +2,36 @@
 //
 //   cargo run --example passthrough --features abi-7-40 /tmp/foobar
 
-use clap::{Arg, ArgAction, Command, crate_version};
-use fuser::{
-    BackingId, Errno, FileAttr, FileHandle, FileType, Filesystem, INodeNo, InitFlags, KernelConfig,
-    MountOption, OpenFlags, ReplyAttr, ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen, Request,
-};
 use std::collections::HashMap;
-use std::ffi::{OsStr, c_int};
+use std::ffi::OsStr;
+use std::ffi::c_int;
 use std::fs::File;
-use std::rc::{Rc, Weak};
-use std::time::{Duration, UNIX_EPOCH};
+use std::rc::Rc;
+use std::rc::Weak;
+use std::time::Duration;
+use std::time::UNIX_EPOCH;
+
+use clap::Arg;
+use clap::ArgAction;
+use clap::Command;
+use clap::crate_version;
+use fuser::BackingId;
+use fuser::Errno;
+use fuser::FileAttr;
+use fuser::FileHandle;
+use fuser::FileType;
+use fuser::Filesystem;
+use fuser::INodeNo;
+use fuser::InitFlags;
+use fuser::KernelConfig;
+use fuser::MountOption;
+use fuser::OpenFlags;
+use fuser::ReplyAttr;
+use fuser::ReplyDirectory;
+use fuser::ReplyEmpty;
+use fuser::ReplyEntry;
+use fuser::ReplyOpen;
+use fuser::Request;
 
 const TTL: Duration = Duration::from_secs(1); // 1 second
 

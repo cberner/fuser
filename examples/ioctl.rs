@@ -2,14 +2,28 @@
 //
 //   cargo run --example ioctl --features abi-7-11 /tmp/foobar
 
-use clap::{Arg, ArgAction, Command, crate_version};
-use fuser::{
-    Errno, FileAttr, FileHandle, FileType, Filesystem, INodeNo, MountOption, ReplyAttr, ReplyData,
-    ReplyDirectory, ReplyEntry, ReplyIoctl, Request,
-};
-use log::debug;
 use std::ffi::OsStr;
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::Duration;
+use std::time::UNIX_EPOCH;
+
+use clap::Arg;
+use clap::ArgAction;
+use clap::Command;
+use clap::crate_version;
+use fuser::Errno;
+use fuser::FileAttr;
+use fuser::FileHandle;
+use fuser::FileType;
+use fuser::Filesystem;
+use fuser::INodeNo;
+use fuser::MountOption;
+use fuser::ReplyAttr;
+use fuser::ReplyData;
+use fuser::ReplyDirectory;
+use fuser::ReplyEntry;
+use fuser::ReplyIoctl;
+use fuser::Request;
+use log::debug;
 
 const TTL: Duration = Duration::from_secs(1); // 1 second
 

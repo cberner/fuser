@@ -6,12 +6,9 @@
 #![warn(missing_debug_implementations)]
 #![allow(missing_docs)]
 
-use super::is_mounted;
-use super::mount_options::{MountOption, option_to_string};
-use log::{debug, error};
-use nix::fcntl::{FcntlArg, FdFlag, OFlag, fcntl};
-use nix::sys::socket::{ControlMessageOwned, MsgFlags, SockaddrStorage, recvmsg};
-use std::ffi::{CStr, CString, OsStr};
+use std::ffi::CStr;
+use std::ffi::CString;
+use std::ffi::OsStr;
 use std::fs::File;
 #[cfg(any(
     target_os = "linux",
@@ -22,19 +19,39 @@ use std::fs::File;
     target_os = "netbsd",
 ))]
 use std::io;
-use std::io::{Error, ErrorKind, IoSliceMut, Read};
+use std::io::Error;
+use std::io::ErrorKind;
+use std::io::IoSliceMut;
+use std::io::Read;
 use std::mem;
 use std::os::fd::BorrowedFd;
 use std::os::unix::ffi::OsStrExt;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::os::unix::fs::PermissionsExt;
-use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
+use std::os::unix::io::AsRawFd;
+use std::os::unix::io::FromRawFd;
+use std::os::unix::io::RawFd;
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Command;
+use std::process::Stdio;
 use std::sync::Arc;
 
+use log::debug;
+use log::error;
+use nix::fcntl::FcntlArg;
+use nix::fcntl::FdFlag;
+use nix::fcntl::OFlag;
+use nix::fcntl::fcntl;
+use nix::sys::socket::ControlMessageOwned;
+use nix::sys::socket::MsgFlags;
+use nix::sys::socket::SockaddrStorage;
+use nix::sys::socket::recvmsg;
+
+use super::is_mounted;
+use super::mount_options::MountOption;
+use super::mount_options::option_to_string;
 use crate::dev_fuse::DevFuse;
 
 const FUSERMOUNT_BIN: &str = "fusermount";
