@@ -52,6 +52,7 @@ pub use session::{BackgroundSession, Session, SessionACL, SessionUnmounter};
 #[cfg(feature = "abi-7-28")]
 use std::cmp::max;
 use std::cmp::min;
+use std::os::unix::fs::FileTypeExt;
 
 mod channel;
 mod dev_fuse;
@@ -116,6 +117,29 @@ pub enum FileType {
     Symlink,
     /// Unix domain socket (`S_IFSOCK`)
     Socket,
+}
+
+impl FileType {
+    /// Convert std `FileType` to fuser `FileType`.
+    pub fn from_std(file_type: std::fs::FileType) -> Option<Self> {
+        if file_type.is_file() {
+            Some(FileType::RegularFile)
+        } else if file_type.is_dir() {
+            Some(FileType::Directory)
+        } else if file_type.is_symlink() {
+            Some(FileType::Symlink)
+        } else if file_type.is_fifo() {
+            Some(FileType::NamedPipe)
+        } else if file_type.is_socket() {
+            Some(FileType::Socket)
+        } else if file_type.is_char_device() {
+            Some(FileType::CharDevice)
+        } else if file_type.is_block_device() {
+            Some(FileType::BlockDevice)
+        } else {
+            None
+        }
+    }
 }
 
 /// File attributes
