@@ -3,8 +3,7 @@ use fuser::experimental::{
     AsyncFilesystem, DirEntListBuilder, GetAttrResponse, LookupResponse, RequestContext,
     TokioAdapter,
 };
-use fuser::{FileAttr, FileHandle, FileType, INodeNo, MountOption, experimental};
-use libc::ENOENT;
+use fuser::{Errno, FileAttr, FileHandle, FileType, INodeNo, MountOption, experimental};
 use std::ffi::OsStr;
 use std::time::{Duration, UNIX_EPOCH};
 
@@ -61,7 +60,7 @@ impl AsyncFilesystem for HelloFS {
         if parent == INodeNo::ROOT && name.to_str() == Some("hello.txt") {
             Ok(LookupResponse::new(TTL, HELLO_TXT_ATTR, 0))
         } else {
-            Err(ENOENT)
+            Err(Errno::ENOENT)
         }
     }
 
@@ -74,7 +73,7 @@ impl AsyncFilesystem for HelloFS {
         match ino.0 {
             1 => Ok(GetAttrResponse::new(TTL, HELLO_DIR_ATTR)),
             2 => Ok(GetAttrResponse::new(TTL, HELLO_TXT_ATTR)),
-            _ => Err(ENOENT),
+            _ => Err(Errno::ENOENT),
         }
     }
 
@@ -93,7 +92,7 @@ impl AsyncFilesystem for HelloFS {
             out_data.extend_from_slice(&HELLO_TXT_CONTENT.as_bytes()[offset as usize..]);
             Ok(())
         } else {
-            Err(ENOENT)
+            Err(Errno::ENOENT)
         }
     }
 
@@ -106,7 +105,7 @@ impl AsyncFilesystem for HelloFS {
         mut builder: DirEntListBuilder<'_>,
     ) -> experimental::Result<()> {
         if ino != INodeNo::ROOT {
-            return Err(ENOENT);
+            return Err(Errno::ENOENT);
         }
 
         let entries = vec![

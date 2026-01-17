@@ -1,13 +1,13 @@
 #![allow(missing_docs, missing_debug_implementations)]
 
 use crate::{
-    FileAttr, FileHandle, FileType, Filesystem, INodeNo, ReplyAttr, ReplyData, ReplyDirectory,
-    ReplyEntry, Request, RequestId,
+    Errno, FileAttr, FileHandle, FileType, Filesystem, INodeNo, ReplyAttr, ReplyData,
+    ReplyDirectory, ReplyEntry, Request, RequestId,
 };
 use std::ffi::OsStr;
 use std::time::Duration;
 
-pub type Result<T> = std::result::Result<T, libc::c_int>;
+pub type Result<T> = std::result::Result<T, Errno>;
 
 /// Standard request context for all filesystem operations
 pub struct RequestContext {

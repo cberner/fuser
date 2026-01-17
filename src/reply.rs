@@ -17,7 +17,6 @@ use crate::ll::{
 };
 #[cfg(feature = "abi-7-40")]
 use crate::passthrough::BackingId;
-use libc::c_int;
 use log::{error, warn};
 use std::convert::AsRef;
 use std::ffi::OsStr;
@@ -30,7 +29,7 @@ use std::time::Duration;
 #[cfg(target_os = "macos")]
 use std::time::SystemTime;
 
-use crate::{FileAttr, FileType};
+use crate::{Errno, FileAttr, FileType};
 
 /// Generic reply callback to send data
 pub(crate) trait ReplySender: Send + Sync + Unpin + 'static {
@@ -90,9 +89,8 @@ impl ReplyRaw {
     }
 
     /// Reply to a request with the given error code
-    pub(crate) fn error(self, err: c_int) {
-        assert_ne!(err, 0);
-        self.send_ll(&ll::Response::new_error(ll::Errno::from_i32(err)));
+    pub(crate) fn error(self, err: ll::Errno) {
+        self.send_ll(&ll::Response::new_error(err));
     }
 }
 
@@ -131,7 +129,7 @@ impl ReplyEmpty {
     }
 
     /// Reply to a request with the given error code
-    pub fn error(self, err: c_int) {
+    pub fn error(self, err: Errno) {
         self.reply.error(err);
     }
 }
@@ -159,7 +157,7 @@ impl ReplyData {
     }
 
     /// Reply to a request with the given error code
-    pub fn error(self, err: c_int) {
+    pub fn error(self, err: Errno) {
         self.reply.error(err);
     }
 }
@@ -193,7 +191,7 @@ impl ReplyEntry {
     }
 
     /// Reply to a request with the given error code
-    pub fn error(self, err: c_int) {
+    pub fn error(self, err: Errno) {
         self.reply.error(err);
     }
 }
@@ -222,7 +220,7 @@ impl ReplyAttr {
     }
 
     /// Reply to a request with the given error code
-    pub fn error(self, err: c_int) {
+    pub fn error(self, err: Errno) {
         self.reply.error(err);
     }
 }
@@ -254,7 +252,7 @@ impl ReplyXTimes {
     }
 
     /// Reply to a request with the given error code
-    pub fn error(self, err: c_int) {
+    pub fn error(self, err: Errno) {
         self.reply.error(err);
     }
 }
@@ -309,7 +307,7 @@ impl ReplyOpen {
     }
 
     /// Reply to a request with the given error code
-    pub fn error(self, err: c_int) {
+    pub fn error(self, err: Errno) {
         self.reply.error(err);
     }
 }
@@ -337,7 +335,7 @@ impl ReplyWrite {
     }
 
     /// Reply to a request with the given error code
-    pub fn error(self, err: c_int) {
+    pub fn error(self, err: Errno) {
         self.reply.error(err);
     }
 }
@@ -378,7 +376,7 @@ impl ReplyStatfs {
     }
 
     /// Reply to a request with the given error code
-    pub fn error(self, err: c_int) {
+    pub fn error(self, err: Errno) {
         self.reply.error(err);
     }
 }
@@ -417,7 +415,7 @@ impl ReplyCreate {
     }
 
     /// Reply to a request with the given error code
-    pub fn error(self, err: c_int) {
+    pub fn error(self, err: Errno) {
         self.reply.error(err);
     }
 }
@@ -449,7 +447,7 @@ impl ReplyLock {
     }
 
     /// Reply to a request with the given error code
-    pub fn error(self, err: c_int) {
+    pub fn error(self, err: Errno) {
         self.reply.error(err);
     }
 }
@@ -477,7 +475,7 @@ impl ReplyBmap {
     }
 
     /// Reply to a request with the given error code
-    pub fn error(self, err: c_int) {
+    pub fn error(self, err: Errno) {
         self.reply.error(err);
     }
 }
@@ -506,7 +504,7 @@ impl ReplyIoctl {
     }
 
     /// Reply to a request with the given error code
-    pub fn error(self, err: c_int) {
+    pub fn error(self, err: Errno) {
         self.reply.error(err);
     }
 }
@@ -534,7 +532,7 @@ impl ReplyPoll {
     }
 
     /// Reply to a request with the given error code
-    pub fn error(self, err: c_int) {
+    pub fn error(self, err: Errno) {
         self.reply.error(err);
     }
 }
@@ -583,7 +581,7 @@ impl ReplyDirectory {
     }
 
     /// Reply to a request with the given error code
-    pub fn error(self, err: c_int) {
+    pub fn error(self, err: Errno) {
         self.reply.error(err);
     }
 }
@@ -641,7 +639,7 @@ impl ReplyDirectoryPlus {
     }
 
     /// Reply to a request with the given error code
-    pub fn error(self, err: c_int) {
+    pub fn error(self, err: Errno) {
         self.reply.error(err);
     }
 }
@@ -674,7 +672,7 @@ impl ReplyXattr {
     }
 
     /// Reply to a request with the given error code.
-    pub fn error(self, err: c_int) {
+    pub fn error(self, err: Errno) {
         self.reply.error(err);
     }
 }
@@ -702,7 +700,7 @@ impl ReplyLseek {
     }
 
     /// Reply to a request with the given error code
-    pub fn error(self, err: c_int) {
+    pub fn error(self, err: Errno) {
         self.reply.error(err);
     }
 }
@@ -792,7 +790,7 @@ mod test {
             ],
         };
         let reply: ReplyRaw = Reply::new(ll::RequestId(0xdeadbeef), sender);
-        reply.error(66);
+        reply.error(Errno::from_i32(66));
     }
 
     #[test]

@@ -1,9 +1,8 @@
 use clap::{Arg, ArgAction, Command, crate_version};
 use fuser::{
-    FileAttr, FileHandle, FileType, Filesystem, INodeNo, MountOption, ReplyAttr, ReplyData,
+    Errno, FileAttr, FileHandle, FileType, Filesystem, INodeNo, MountOption, ReplyAttr, ReplyData,
     ReplyDirectory, ReplyEntry, Request,
 };
-use libc::ENOENT;
 use std::ffi::OsStr;
 use std::time::{Duration, UNIX_EPOCH};
 
@@ -54,7 +53,7 @@ impl Filesystem for HelloFS {
         if u64::from(parent) == 1 && name.to_str() == Some("hello.txt") {
             reply.entry(&TTL, &HELLO_TXT_ATTR, 0);
         } else {
-            reply.error(ENOENT);
+            reply.error(Errno::ENOENT);
         }
     }
 
@@ -68,7 +67,7 @@ impl Filesystem for HelloFS {
         match u64::from(ino) {
             1 => reply.attr(&TTL, &HELLO_DIR_ATTR),
             2 => reply.attr(&TTL, &HELLO_TXT_ATTR),
-            _ => reply.error(ENOENT),
+            _ => reply.error(Errno::ENOENT),
         }
     }
 
@@ -86,7 +85,7 @@ impl Filesystem for HelloFS {
         if u64::from(ino) == 2 {
             reply.data(&HELLO_TXT_CONTENT.as_bytes()[offset as usize..]);
         } else {
-            reply.error(ENOENT);
+            reply.error(Errno::ENOENT);
         }
     }
 
@@ -99,7 +98,7 @@ impl Filesystem for HelloFS {
         mut reply: ReplyDirectory,
     ) {
         if u64::from(ino) != 1 {
-            reply.error(ENOENT);
+            reply.error(Errno::ENOENT);
             return;
         }
 

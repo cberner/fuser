@@ -17,13 +17,11 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use libc::{EACCES, EINVAL, EISDIR, ENOBUFS, ENOENT, ENOTDIR};
-
 use clap::Parser;
 
 use fuser::{
-    FileAttr, FileHandle, FileType, Filesystem, INodeNo, MountOption, OpenAccMode, OpenFlags,
-    ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry, ReplyOpen, Request, consts,
+    Errno, FileAttr, FileHandle, FileType, Filesystem, INodeNo, MountOption, OpenAccMode,
+    OpenFlags, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry, ReplyOpen, Request, consts,
 };
 
 struct ClockFS<'a> {
@@ -69,7 +67,7 @@ impl ClockFS<'_> {
 impl Filesystem for ClockFS<'_> {
     fn lookup(&mut self, _req: &Request<'_>, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
         if parent != INodeNo::ROOT || name != AsRef::<OsStr>::as_ref(&Self::FILE_NAME) {
-            reply.error(ENOENT);
+            reply.error(Errno::ENOENT);
             return;
         }
 
@@ -99,7 +97,7 @@ impl Filesystem for ClockFS<'_> {
     ) {
         match self.stat(ino) {
             Some(a) => reply.attr(&Duration::MAX, &a),
-            None => reply.error(ENOENT),
+            None => reply.error(Errno::ENOENT),
         }
     }
 
@@ -112,7 +110,7 @@ impl Filesystem for ClockFS<'_> {
         mut reply: ReplyDirectory,
     ) {
         if ino != INodeNo::ROOT {
-            reply.error(ENOTDIR);
+            reply.error(Errno::ENOTDIR);
             return;
         }
 
@@ -124,7 +122,7 @@ impl Filesystem for ClockFS<'_> {
                 Self::FILE_NAME,
             )
         {
-            reply.error(ENOBUFS);
+            reply.error(Errno::ENOBUFS);
         } else {
             reply.ok();
         }
@@ -132,12 +130,12 @@ impl Filesystem for ClockFS<'_> {
 
     fn open(&mut self, _req: &Request<'_>, ino: INodeNo, flags: OpenFlags, reply: ReplyOpen) {
         if ino == INodeNo::ROOT {
-            reply.error(EISDIR);
+            reply.error(Errno::EISDIR);
         } else if flags.acc_mode() != OpenAccMode::O_RDONLY {
-            reply.error(EACCES);
+            reply.error(Errno::EACCES);
         } else if ino.0 != Self::FILE_INO {
             eprintln!("Got open for nonexistent inode {ino}");
-            reply.error(ENOENT);
+            reply.error(Errno::ENOENT);
         } else {
             // TODO: we are supposed to pass file handle here, not ino.
             reply.opened(ino.0, consts::FOPEN_KEEP_CACHE);
@@ -157,18 +155,18 @@ impl Filesystem for ClockFS<'_> {
     ) {
         assert!(ino == INodeNo(Self::FILE_INO));
         if offset < 0 {
-            reply.error(EINVAL);
+            reply.error(Errno::EINVAL);
             return;
         }
         let file = self.file_contents.lock().unwrap();
         let filedata = file.as_bytes();
         let dlen = filedata.len().try_into().unwrap();
         let Ok(start) = offset.min(dlen).try_into() else {
-            reply.error(EINVAL);
+            reply.error(Errno::EINVAL);
             return;
         };
         let Ok(end) = (offset + i64::from(size)).min(dlen).try_into() else {
-            reply.error(EINVAL);
+            reply.error(Errno::EINVAL);
             return;
         };
         eprintln!("read returning {} bytes at offset {}", end - start, offset);

@@ -19,11 +19,9 @@ use std::{
     time::{Duration, UNIX_EPOCH},
 };
 
-use libc::{EACCES, EBADF, EBUSY, EINVAL, ENOENT, ENOTDIR};
-
 use fuser::{
-    FileAttr, FileHandle, FileType, INodeNo, MountOption, OpenAccMode, OpenFlags, PollHandle,
-    ReplyAttr, ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen, Request,
+    Errno, FileAttr, FileHandle, FileType, INodeNo, MountOption, OpenAccMode, OpenFlags,
+    PollHandle, ReplyAttr, ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen, Request,
     consts::{FOPEN_DIRECT_IO, FOPEN_NONSEEKABLE, FUSE_POLL_SCHEDULE_NOTIFY},
 };
 
@@ -84,7 +82,7 @@ impl FSelFS {
 impl fuser::Filesystem for FSelFS {
     fn lookup(&mut self, _req: &Request<'_>, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
         if parent != INodeNo::ROOT || name.len() != 1 {
-            reply.error(ENOENT);
+            reply.error(Errno::ENOENT);
             return;
         }
 
@@ -94,7 +92,7 @@ impl fuser::Filesystem for FSelFS {
             b'0'..=b'9' => name[0] - b'0',
             b'A'..=b'F' => name[0] - b'A' + 10,
             _ => {
-                reply.error(ENOENT);
+                reply.error(Errno::ENOENT);
                 return;
             }
         };
@@ -134,7 +132,7 @@ impl fuser::Filesystem for FSelFS {
         if idx < NUMFILES {
             reply.attr(&Duration::ZERO, &self.get_data().filestat(idx));
         } else {
-            reply.error(ENOENT);
+            reply.error(Errno::ENOENT);
         }
     }
 
@@ -147,12 +145,12 @@ impl fuser::Filesystem for FSelFS {
         mut reply: ReplyDirectory,
     ) {
         if ino != INodeNo::ROOT {
-            reply.error(ENOTDIR);
+            reply.error(Errno::ENOTDIR);
             return;
         }
 
         let Ok(offset): Result<u8, _> = offset.try_into() else {
-            reply.error(EINVAL);
+            reply.error(Errno::EINVAL);
             return;
         };
 
@@ -179,12 +177,12 @@ impl fuser::Filesystem for FSelFS {
     fn open(&mut self, _req: &Request<'_>, ino: INodeNo, flags: OpenFlags, reply: ReplyOpen) {
         let idx = FSelData::ino_to_idx(ino);
         if idx >= NUMFILES {
-            reply.error(ENOENT);
+            reply.error(Errno::ENOENT);
             return;
         }
 
         if flags.acc_mode() != OpenAccMode::O_RDONLY {
-            reply.error(EACCES);
+            reply.error(Errno::EACCES);
             return;
         }
 
@@ -192,7 +190,7 @@ impl fuser::Filesystem for FSelFS {
             let mut d = self.get_data();
 
             if d.open_mask & (1 << idx) != 0 {
-                reply.error(EBUSY);
+                reply.error(Errno::EBUSY);
                 return;
             }
 
@@ -214,7 +212,7 @@ impl fuser::Filesystem for FSelFS {
     ) {
         let idx: u64 = _fh.into();
         if idx >= NUMFILES.into() {
-            reply.error(EBADF);
+            reply.error(Errno::EBADF);
             return;
         }
         self.get_data().open_mask &= !(1 << idx);
@@ -234,11 +232,11 @@ impl fuser::Filesystem for FSelFS {
     ) {
         let fh: u64 = fh.into();
         let Ok(idx): Result<u8, _> = fh.try_into() else {
-            reply.error(EINVAL);
+            reply.error(Errno::EINVAL);
             return;
         };
         if idx >= NUMFILES {
-            reply.error(EBADF);
+            reply.error(Errno::EBADF);
             return;
         }
         let cnt = &mut self.get_data().bytecnt[idx as usize];
@@ -267,11 +265,11 @@ impl fuser::Filesystem for FSelFS {
         static POLLED_ZERO: AtomicU64 = AtomicU64::new(0);
         let fh: u64 = fh.into();
         let Ok(idx): Result<u8, _> = fh.try_into() else {
-            reply.error(EINVAL);
+            reply.error(Errno::EINVAL);
             return;
         };
         if idx >= NUMFILES {
-            reply.error(EBADF);
+            reply.error(Errno::EBADF);
             return;
         }
 
