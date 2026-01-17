@@ -410,14 +410,7 @@ pub mod consts {
     // Read flags
     pub const FUSE_READ_LOCKOWNER: u32 = 1 << 1;
 
-    // IOCTL flags
-    pub const FUSE_IOCTL_COMPAT: u32 = 1 << 0; // 32bit compat ioctl on 64bit machine
-    pub const FUSE_IOCTL_UNRESTRICTED: u32 = 1 << 1; // not restricted to well-formed ioctls, retry allowed
-    pub const FUSE_IOCTL_RETRY: u32 = 1 << 2; // retry with new iovecs
-    pub const FUSE_IOCTL_32BIT: u32 = 1 << 3; // 32bit ioctl
-    pub const FUSE_IOCTL_DIR: u32 = 1 << 4; // is a directory
-    #[cfg(feature = "abi-7-30")]
-    pub const FUSE_IOCTL_COMPAT_X32: u32 = 1 << 5; // x32 compat ioctl on 64bit machine (64bit time_t)
+    // IOCTL constant
     pub const FUSE_IOCTL_MAX_IOV: u32 = 256; // maximum of in_iovecs + out_iovecs
 
     // Poll flags
