@@ -42,6 +42,7 @@ use fuser::KernelConfig;
 use fuser::MountOption;
 use fuser::OpenAccMode;
 use fuser::OpenFlags;
+use fuser::RenameFlags;
 use fuser::ReplyAttr;
 use fuser::ReplyCreate;
 use fuser::ReplyData;
@@ -1164,7 +1165,7 @@ impl Filesystem for SimpleFS {
         name: &OsStr,
         newparent: INodeNo,
         newname: &OsStr,
-        flags: u32,
+        flags: RenameFlags,
         reply: ReplyEmpty,
     ) {
         debug!(
@@ -1243,7 +1244,7 @@ impl Filesystem for SimpleFS {
         }
 
         #[cfg(target_os = "linux")]
-        if flags & libc::RENAME_EXCHANGE as u32 != 0 {
+        if flags.contains(RenameFlags::RENAME_EXCHANGE) {
             let mut new_inode_attrs = match self.lookup_name(newparent, newname) {
                 Ok(attrs) => attrs,
                 Err(error_code) => {

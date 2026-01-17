@@ -15,6 +15,7 @@ use log::warn;
 use crate::Filesystem;
 use crate::KernelConfig;
 use crate::PollHandle;
+use crate::RenameFlags;
 use crate::channel::ChannelSender;
 use crate::ll;
 use crate::ll::Errno;
@@ -237,7 +238,7 @@ impl<'a> Request<'a> {
                     x.src().name.as_ref(),
                     x.dest().dir,
                     x.dest().name.as_ref(),
-                    0,
+                    RenameFlags::empty(),
                     self.reply(),
                 );
             }
