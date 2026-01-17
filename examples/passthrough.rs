@@ -4,8 +4,8 @@
 
 use clap::{Arg, ArgAction, Command, crate_version};
 use fuser::{
-    BackingId, FileAttr, FileType, Filesystem, InitFlags, KernelConfig, MountOption, OpenFlags,
-    ReplyAttr, ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen, Request,
+    BackingId, FileAttr, FileType, Filesystem, INodeNo, InitFlags, KernelConfig, MountOption,
+    OpenFlags, ReplyAttr, ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen, Request,
 };
 use libc::ENOENT;
 use std::collections::HashMap;
@@ -34,7 +34,7 @@ const TTL: Duration = Duration::from_secs(1); // 1 second
 #[derive(Debug, Default)]
 struct BackingCache {
     by_handle: HashMap<u64, Rc<BackingId>>,
-    by_inode: HashMap<u64, Weak<BackingId>>,
+    by_inode: HashMap<INodeNo, Weak<BackingId>>,
     next_fh: u64,
 }
 
@@ -50,7 +50,7 @@ impl BackingCache {
     /// returned file handle should be `put()` when you're done with it.
     fn get_or(
         &mut self,
-        ino: u64,
+        ino: INodeNo,
         callback: impl Fn() -> std::io::Result<BackingId>,
     ) -> std::io::Result<(u64, Rc<BackingId>)> {
         let fh = self.next_fh();
@@ -93,7 +93,7 @@ impl PassthroughFs {
         let gid = nix::unistd::getgid().into();
 
         let root_attr = FileAttr {
-            ino: 1,
+            ino: INodeNo::ROOT,
             size: 0,
             blocks: 0,
             atime: UNIX_EPOCH, // 1970-01-01 00:00:00
@@ -111,7 +111,7 @@ impl PassthroughFs {
         };
 
         let passthrough_file_attr = FileAttr {
-            ino: 2,
+            ino: INodeNo(2),
             size: 123_456,
             blocks: 1,
             atime: UNIX_EPOCH, // 1970-01-01 00:00:00
@@ -149,24 +149,24 @@ impl Filesystem for PassthroughFs {
         Ok(())
     }
 
-    fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
-        if parent == 1 && name.to_str() == Some("passthrough") {
+    fn lookup(&mut self, _req: &Request<'_>, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
+        if parent == INodeNo::ROOT && name.to_str() == Some("passthrough") {
             reply.entry(&TTL, &self.passthrough_file_attr, 0);
         } else {
             reply.error(ENOENT);
         }
     }
 
-    fn getattr(&mut self, _req: &Request, ino: u64, _fh: Option<u64>, reply: ReplyAttr) {
-        match ino {
+    fn getattr(&mut self, _req: &Request<'_>, ino: INodeNo, _fh: Option<u64>, reply: ReplyAttr) {
+        match ino.0 {
             1 => reply.attr(&TTL, &self.root_attr),
             2 => reply.attr(&TTL, &self.passthrough_file_attr),
             _ => reply.error(ENOENT),
         }
     }
 
-    fn open(&mut self, _req: &Request, ino: u64, _flags: OpenFlags, reply: ReplyOpen) {
-        if ino != 2 {
+    fn open(&mut self, _req: &Request<'_>, ino: INodeNo, _flags: OpenFlags, reply: ReplyOpen) {
+        if ino != INodeNo(2) {
             reply.error(ENOENT);
             return;
         }
@@ -186,26 +186,26 @@ impl Filesystem for PassthroughFs {
     fn release(
         &mut self,
         _req: &Request<'_>,
-        _ino: u64,
-        fh: u64,
+        _ino: INodeNo,
+        _fh: u64,
         _flags: i32,
         _lock_owner: Option<u64>,
         _flush: bool,
         reply: ReplyEmpty,
     ) {
-        self.backing_cache.put(fh);
+        self.backing_cache.put(_fh);
         reply.ok();
     }
 
     fn readdir(
         &mut self,
-        _req: &Request,
-        ino: u64,
+        _req: &Request<'_>,
+        ino: INodeNo,
         _fh: u64,
         offset: i64,
         mut reply: ReplyDirectory,
     ) {
-        if ino != 1 {
+        if ino != INodeNo::ROOT {
             reply.error(ENOENT);
             return;
         }
@@ -218,7 +218,7 @@ impl Filesystem for PassthroughFs {
 
         for (i, entry) in entries.into_iter().enumerate().skip(offset as usize) {
             // i + 1 means the index of the next entry
-            if reply.add(entry.0, (i + 1) as i64, entry.1, entry.2) {
+            if reply.add(INodeNo(entry.0), (i + 1) as i64, entry.1, entry.2) {
                 break;
             }
         }

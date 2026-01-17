@@ -1,8 +1,8 @@
 #![allow(missing_docs, missing_debug_implementations)]
 
 use crate::{
-    FileAttr, FileType, Filesystem, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry, Request,
-    RequestId,
+    FileAttr, FileType, Filesystem, INodeNo, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry,
+    Request, RequestId,
 };
 use std::ffi::OsStr;
 use std::time::Duration;
@@ -63,7 +63,13 @@ impl DirEntListBuilder<'_> {
     /// A transparent offset value can be provided for each entry. The kernel uses these
     /// value to request the next entries in further readdir calls
     #[must_use]
-    pub fn add<T: AsRef<OsStr>>(&mut self, ino: u64, offset: i64, kind: FileType, name: T) -> bool {
+    pub fn add<T: AsRef<OsStr>>(
+        &mut self,
+        ino: INodeNo,
+        offset: i64,
+        kind: FileType,
+        name: T,
+    ) -> bool {
         self.entries.add(ino, offset, kind, name)
     }
 }
@@ -122,7 +128,7 @@ impl<T: AsyncFilesystem> TokioAdapter<T> {
 }
 
 impl<T: AsyncFilesystem> Filesystem for TokioAdapter<T> {
-    fn lookup(&mut self, req: &Request<'_>, parent: u64, name: &OsStr, reply: ReplyEntry) {
+    fn lookup(&mut self, req: &Request<'_>, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
         match self
             .runtime
             .block_on(self.inner.lookup(&req.into(), parent, name))
@@ -136,7 +142,7 @@ impl<T: AsyncFilesystem> Filesystem for TokioAdapter<T> {
         }
     }
 
-    fn getattr(&mut self, req: &Request<'_>, ino: u64, fh: Option<u64>, reply: ReplyAttr) {
+    fn getattr(&mut self, req: &Request<'_>, ino: INodeNo, fh: Option<u64>, reply: ReplyAttr) {
         match self
             .runtime
             .block_on(self.inner.getattr(&req.into(), ino, fh))
@@ -149,7 +155,7 @@ impl<T: AsyncFilesystem> Filesystem for TokioAdapter<T> {
     fn read(
         &mut self,
         req: &Request<'_>,
-        ino: u64,
+        ino: INodeNo,
         fh: u64,
         offset: i64,
         size: u32,
@@ -176,7 +182,7 @@ impl<T: AsyncFilesystem> Filesystem for TokioAdapter<T> {
     fn readdir(
         &mut self,
         req: &Request<'_>,
-        ino: u64,
+        ino: INodeNo,
         fh: u64,
         offset: i64,
         mut reply: ReplyDirectory,
@@ -200,21 +206,21 @@ pub trait AsyncFilesystem {
     async fn lookup(
         &self,
         context: &RequestContext,
-        parent: u64,
+        parent: INodeNo,
         name: &OsStr,
     ) -> Result<LookupResponse>;
 
     async fn getattr(
         &self,
         context: &RequestContext,
-        ino: u64,
+        ino: INodeNo,
         file_handle: Option<u64>,
     ) -> Result<GetAttrResponse>;
 
     async fn read(
         &self,
         context: &RequestContext,
-        ino: u64,
+        ino: INodeNo,
         file_handle: u64,
         offset: i64,
         size: u32,
@@ -228,7 +234,7 @@ pub trait AsyncFilesystem {
     async fn readdir(
         &self,
         context: &RequestContext,
-        ino: u64,
+        ino: INodeNo,
         file_handle: u64,
         offset: i64,
         builder: DirEntListBuilder<'_>,

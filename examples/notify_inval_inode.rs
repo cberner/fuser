@@ -22,7 +22,7 @@ use libc::{EACCES, EINVAL, EISDIR, ENOBUFS, ENOENT, ENOTDIR};
 use clap::Parser;
 
 use fuser::{
-    FUSE_ROOT_ID, FileAttr, FileType, Filesystem, MountOption, OpenAccMode, OpenFlags, ReplyAttr,
+    FileAttr, FileType, Filesystem, INodeNo, MountOption, OpenAccMode, OpenFlags, ReplyAttr,
     ReplyData, ReplyDirectory, ReplyEntry, ReplyOpen, Request, consts,
 };
 
@@ -35,9 +35,9 @@ impl ClockFS<'_> {
     const FILE_INO: u64 = 2;
     const FILE_NAME: &'static str = "current_time";
 
-    fn stat(&self, ino: u64) -> Option<FileAttr> {
-        let (kind, perm, size) = match ino {
-            FUSE_ROOT_ID => (FileType::Directory, 0o755, 0),
+    fn stat(&self, ino: INodeNo) -> Option<FileAttr> {
+        let (kind, perm, size) = match ino.0 {
+            1 => (FileType::Directory, 0o755, 0),
             Self::FILE_INO => (
                 FileType::RegularFile,
                 0o444,
@@ -67,26 +67,30 @@ impl ClockFS<'_> {
 }
 
 impl Filesystem for ClockFS<'_> {
-    fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
-        if parent != FUSE_ROOT_ID || name != AsRef::<OsStr>::as_ref(&Self::FILE_NAME) {
+    fn lookup(&mut self, _req: &Request<'_>, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
+        if parent != INodeNo::ROOT || name != AsRef::<OsStr>::as_ref(&Self::FILE_NAME) {
             reply.error(ENOENT);
             return;
         }
 
         self.lookup_cnt.fetch_add(1, SeqCst);
-        reply.entry(&Duration::MAX, &self.stat(ClockFS::FILE_INO).unwrap(), 0);
+        reply.entry(
+            &Duration::MAX,
+            &self.stat(INodeNo(ClockFS::FILE_INO)).unwrap(),
+            0,
+        );
     }
 
-    fn forget(&mut self, _req: &Request, ino: u64, nlookup: u64) {
-        if ino == ClockFS::FILE_INO {
-            let prev = self.lookup_cnt.fetch_sub(nlookup, SeqCst);
-            assert!(prev >= nlookup);
+    fn forget(&mut self, _req: &Request<'_>, ino: INodeNo, _nlookup: u64) {
+        if ino == INodeNo(ClockFS::FILE_INO) {
+            let prev = self.lookup_cnt.fetch_sub(_nlookup, SeqCst);
+            assert!(prev >= _nlookup);
         } else {
-            assert!(ino == FUSE_ROOT_ID);
+            assert!(ino == INodeNo::ROOT);
         }
     }
 
-    fn getattr(&mut self, _req: &Request, ino: u64, _fh: Option<u64>, reply: ReplyAttr) {
+    fn getattr(&mut self, _req: &Request<'_>, ino: INodeNo, _fh: Option<u64>, reply: ReplyAttr) {
         match self.stat(ino) {
             Some(a) => reply.attr(&Duration::MAX, &a),
             None => reply.error(ENOENT),
@@ -95,20 +99,20 @@ impl Filesystem for ClockFS<'_> {
 
     fn readdir(
         &mut self,
-        _req: &Request,
-        ino: u64,
+        _req: &Request<'_>,
+        ino: INodeNo,
         _fh: u64,
         offset: i64,
         mut reply: ReplyDirectory,
     ) {
-        if ino != FUSE_ROOT_ID {
+        if ino != INodeNo::ROOT {
             reply.error(ENOTDIR);
             return;
         }
 
         if offset == 0
             && reply.add(
-                ClockFS::FILE_INO,
+                INodeNo(ClockFS::FILE_INO),
                 offset + 1,
                 FileType::RegularFile,
                 Self::FILE_NAME,
@@ -120,23 +124,24 @@ impl Filesystem for ClockFS<'_> {
         }
     }
 
-    fn open(&mut self, _req: &Request, ino: u64, flags: OpenFlags, reply: ReplyOpen) {
-        if ino == FUSE_ROOT_ID {
+    fn open(&mut self, _req: &Request<'_>, ino: INodeNo, flags: OpenFlags, reply: ReplyOpen) {
+        if ino == INodeNo::ROOT {
             reply.error(EISDIR);
         } else if flags.acc_mode() != OpenAccMode::O_RDONLY {
             reply.error(EACCES);
-        } else if ino != Self::FILE_INO {
+        } else if ino.0 != Self::FILE_INO {
             eprintln!("Got open for nonexistent inode {ino}");
             reply.error(ENOENT);
         } else {
-            reply.opened(ino, consts::FOPEN_KEEP_CACHE);
+            // TODO: we are supposed to pass file handle here, not ino.
+            reply.opened(ino.0, consts::FOPEN_KEEP_CACHE);
         }
     }
 
     fn read(
         &mut self,
-        _req: &Request,
-        ino: u64,
+        _req: &Request<'_>,
+        ino: INodeNo,
         _fh: u64,
         offset: i64,
         size: u32,
@@ -144,7 +149,7 @@ impl Filesystem for ClockFS<'_> {
         _lock_owner: Option<u64>,
         reply: ReplyData,
     ) {
-        assert!(ino == Self::FILE_INO);
+        assert!(ino == INodeNo(Self::FILE_INO));
         if offset < 0 {
             reply.error(EINVAL);
             return;

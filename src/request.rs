@@ -147,21 +147,17 @@ impl<'a> Request<'a> {
             }
 
             ll::Operation::Lookup(x) => {
-                se.filesystem.lookup(
-                    self,
-                    self.request.nodeid().into(),
-                    x.name().as_ref(),
-                    self.reply(),
-                );
+                se.filesystem
+                    .lookup(self, self.request.nodeid(), x.name().as_ref(), self.reply());
             }
             ll::Operation::Forget(x) => {
                 se.filesystem
-                    .forget(self, self.request.nodeid().into(), x.nlookup()); // no reply
+                    .forget(self, self.request.nodeid(), x.nlookup()); // no reply
             }
             ll::Operation::GetAttr(_attr) => {
                 se.filesystem.getattr(
                     self,
-                    self.request.nodeid().into(),
+                    self.request.nodeid(),
                     _attr.file_handle().map(std::convert::Into::into),
                     self.reply(),
                 );
@@ -169,7 +165,7 @@ impl<'a> Request<'a> {
             ll::Operation::SetAttr(x) => {
                 se.filesystem.setattr(
                     self,
-                    self.request.nodeid().into(),
+                    self.request.nodeid(),
                     x.mode(),
                     x.uid(),
                     x.gid(),
@@ -187,12 +183,12 @@ impl<'a> Request<'a> {
             }
             ll::Operation::ReadLink(_) => {
                 se.filesystem
-                    .readlink(self, self.request.nodeid().into(), self.reply());
+                    .readlink(self, self.request.nodeid(), self.reply());
             }
             ll::Operation::MkNod(x) => {
                 se.filesystem.mknod(
                     self,
-                    self.request.nodeid().into(),
+                    self.request.nodeid(),
                     x.name().as_ref(),
                     x.mode(),
                     x.umask(),
@@ -203,7 +199,7 @@ impl<'a> Request<'a> {
             ll::Operation::MkDir(x) => {
                 se.filesystem.mkdir(
                     self,
-                    self.request.nodeid().into(),
+                    self.request.nodeid(),
                     x.name().as_ref(),
                     x.mode(),
                     x.umask(),
@@ -211,25 +207,17 @@ impl<'a> Request<'a> {
                 );
             }
             ll::Operation::Unlink(x) => {
-                se.filesystem.unlink(
-                    self,
-                    self.request.nodeid().into(),
-                    x.name().as_ref(),
-                    self.reply(),
-                );
+                se.filesystem
+                    .unlink(self, self.request.nodeid(), x.name().as_ref(), self.reply());
             }
             ll::Operation::RmDir(x) => {
-                se.filesystem.rmdir(
-                    self,
-                    self.request.nodeid().into(),
-                    x.name().as_ref(),
-                    self.reply(),
-                );
+                se.filesystem
+                    .rmdir(self, self.request.nodeid(), x.name().as_ref(), self.reply());
             }
             ll::Operation::SymLink(x) => {
                 se.filesystem.symlink(
                     self,
-                    self.request.nodeid().into(),
+                    self.request.nodeid(),
                     x.link_name().as_ref(),
                     Path::new(x.target()),
                     self.reply(),
@@ -238,9 +226,9 @@ impl<'a> Request<'a> {
             ll::Operation::Rename(x) => {
                 se.filesystem.rename(
                     self,
-                    self.request.nodeid().into(),
+                    self.request.nodeid(),
                     x.src().name.as_ref(),
-                    x.dest().dir.into(),
+                    x.dest().dir,
                     x.dest().name.as_ref(),
                     0,
                     self.reply(),
@@ -249,20 +237,20 @@ impl<'a> Request<'a> {
             ll::Operation::Link(x) => {
                 se.filesystem.link(
                     self,
-                    x.inode_no().into(),
-                    self.request.nodeid().into(),
+                    x.inode_no(),
+                    self.request.nodeid(),
                     x.dest().name.as_ref(),
                     self.reply(),
                 );
             }
             ll::Operation::Open(x) => {
                 se.filesystem
-                    .open(self, self.request.nodeid().into(), x.flags(), self.reply());
+                    .open(self, self.request.nodeid(), x.flags(), self.reply());
             }
             ll::Operation::Read(x) => {
                 se.filesystem.read(
                     self,
-                    self.request.nodeid().into(),
+                    self.request.nodeid(),
                     x.file_handle().into(),
                     x.offset(),
                     x.size(),
@@ -274,7 +262,7 @@ impl<'a> Request<'a> {
             ll::Operation::Write(x) => {
                 se.filesystem.write(
                     self,
-                    self.request.nodeid().into(),
+                    self.request.nodeid(),
                     x.file_handle().into(),
                     x.offset(),
                     x.data(),
@@ -287,7 +275,7 @@ impl<'a> Request<'a> {
             ll::Operation::Flush(x) => {
                 se.filesystem.flush(
                     self,
-                    self.request.nodeid().into(),
+                    self.request.nodeid(),
                     x.file_handle().into(),
                     x.lock_owner().into(),
                     self.reply(),
@@ -296,7 +284,7 @@ impl<'a> Request<'a> {
             ll::Operation::Release(x) => {
                 se.filesystem.release(
                     self,
-                    self.request.nodeid().into(),
+                    self.request.nodeid(),
                     x.file_handle().into(),
                     x.flags(),
                     x.lock_owner().map(std::convert::Into::into),
@@ -307,7 +295,7 @@ impl<'a> Request<'a> {
             ll::Operation::FSync(x) => {
                 se.filesystem.fsync(
                     self,
-                    self.request.nodeid().into(),
+                    self.request.nodeid(),
                     x.file_handle().into(),
                     x.fdatasync(),
                     self.reply(),
@@ -315,12 +303,12 @@ impl<'a> Request<'a> {
             }
             ll::Operation::OpenDir(x) => {
                 se.filesystem
-                    .opendir(self, self.request.nodeid().into(), x.flags(), self.reply());
+                    .opendir(self, self.request.nodeid(), x.flags(), self.reply());
             }
             ll::Operation::ReadDir(x) => {
                 se.filesystem.readdir(
                     self,
-                    self.request.nodeid().into(),
+                    self.request.nodeid(),
                     x.file_handle().into(),
                     x.offset(),
                     ReplyDirectory::new(self.request.unique(), self.ch.clone(), x.size() as usize),
@@ -329,7 +317,7 @@ impl<'a> Request<'a> {
             ll::Operation::ReleaseDir(x) => {
                 se.filesystem.releasedir(
                     self,
-                    self.request.nodeid().into(),
+                    self.request.nodeid(),
                     x.file_handle().into(),
                     x.flags(),
                     self.reply(),
@@ -338,7 +326,7 @@ impl<'a> Request<'a> {
             ll::Operation::FSyncDir(x) => {
                 se.filesystem.fsyncdir(
                     self,
-                    self.request.nodeid().into(),
+                    self.request.nodeid(),
                     x.file_handle().into(),
                     x.fdatasync(),
                     self.reply(),
@@ -346,12 +334,12 @@ impl<'a> Request<'a> {
             }
             ll::Operation::StatFs(_) => {
                 se.filesystem
-                    .statfs(self, self.request.nodeid().into(), self.reply());
+                    .statfs(self, self.request.nodeid(), self.reply());
             }
             ll::Operation::SetXAttr(x) => {
                 se.filesystem.setxattr(
                     self,
-                    self.request.nodeid().into(),
+                    self.request.nodeid(),
                     x.name(),
                     x.value(),
                     x.flags(),
@@ -362,7 +350,7 @@ impl<'a> Request<'a> {
             ll::Operation::GetXAttr(x) => {
                 se.filesystem.getxattr(
                     self,
-                    self.request.nodeid().into(),
+                    self.request.nodeid(),
                     x.name(),
                     x.size_u32(),
                     self.reply(),
@@ -370,24 +358,20 @@ impl<'a> Request<'a> {
             }
             ll::Operation::ListXAttr(x) => {
                 se.filesystem
-                    .listxattr(self, self.request.nodeid().into(), x.size(), self.reply());
+                    .listxattr(self, self.request.nodeid(), x.size(), self.reply());
             }
             ll::Operation::RemoveXAttr(x) => {
-                se.filesystem.removexattr(
-                    self,
-                    self.request.nodeid().into(),
-                    x.name(),
-                    self.reply(),
-                );
+                se.filesystem
+                    .removexattr(self, self.request.nodeid(), x.name(), self.reply());
             }
             ll::Operation::Access(x) => {
                 se.filesystem
-                    .access(self, self.request.nodeid().into(), x.mask(), self.reply());
+                    .access(self, self.request.nodeid(), x.mask(), self.reply());
             }
             ll::Operation::Create(x) => {
                 se.filesystem.create(
                     self,
-                    self.request.nodeid().into(),
+                    self.request.nodeid(),
                     x.name().as_ref(),
                     x.mode(),
                     x.umask(),
@@ -398,7 +382,7 @@ impl<'a> Request<'a> {
             ll::Operation::GetLk(x) => {
                 se.filesystem.getlk(
                     self,
-                    self.request.nodeid().into(),
+                    self.request.nodeid(),
                     x.file_handle().into(),
                     x.lock_owner().into(),
                     x.lock().range.0,
@@ -411,7 +395,7 @@ impl<'a> Request<'a> {
             ll::Operation::SetLk(x) => {
                 se.filesystem.setlk(
                     self,
-                    self.request.nodeid().into(),
+                    self.request.nodeid(),
                     x.file_handle().into(),
                     x.lock_owner().into(),
                     x.lock().range.0,
@@ -425,7 +409,7 @@ impl<'a> Request<'a> {
             ll::Operation::SetLkW(x) => {
                 se.filesystem.setlk(
                     self,
-                    self.request.nodeid().into(),
+                    self.request.nodeid(),
                     x.file_handle().into(),
                     x.lock_owner().into(),
                     x.lock().range.0,
@@ -439,7 +423,7 @@ impl<'a> Request<'a> {
             ll::Operation::BMap(x) => {
                 se.filesystem.bmap(
                     self,
-                    self.request.nodeid().into(),
+                    self.request.nodeid(),
                     x.block_size(),
                     x.block(),
                     self.reply(),
@@ -452,7 +436,7 @@ impl<'a> Request<'a> {
                 }
                 se.filesystem.ioctl(
                     self,
-                    self.request.nodeid().into(),
+                    self.request.nodeid(),
                     x.file_handle().into(),
                     x.flags(),
                     x.command(),
@@ -466,7 +450,7 @@ impl<'a> Request<'a> {
 
                 se.filesystem.poll(
                     self,
-                    self.request.nodeid().into(),
+                    self.request.nodeid(),
                     x.file_handle().into(),
                     ph,
                     x.events(),
@@ -484,7 +468,7 @@ impl<'a> Request<'a> {
             ll::Operation::FAllocate(x) => {
                 se.filesystem.fallocate(
                     self,
-                    self.request.nodeid().into(),
+                    self.request.nodeid(),
                     x.file_handle().into(),
                     x.offset(),
                     x.len(),
@@ -496,7 +480,7 @@ impl<'a> Request<'a> {
             ll::Operation::ReadDirPlus(x) => {
                 se.filesystem.readdirplus(
                     self,
-                    self.request.nodeid().into(),
+                    self.request.nodeid(),
                     x.file_handle().into(),
                     x.offset(),
                     ReplyDirectoryPlus::new(
@@ -510,9 +494,9 @@ impl<'a> Request<'a> {
             ll::Operation::Rename2(x) => {
                 se.filesystem.rename(
                     self,
-                    x.from().dir.into(),
+                    x.from().dir,
                     x.from().name.as_ref(),
-                    x.to().dir.into(),
+                    x.to().dir,
                     x.to().name.as_ref(),
                     x.flags(),
                     self.reply(),
@@ -522,7 +506,7 @@ impl<'a> Request<'a> {
             ll::Operation::Lseek(x) => {
                 se.filesystem.lseek(
                     self,
-                    self.request.nodeid().into(),
+                    self.request.nodeid(),
                     x.file_handle().into(),
                     x.offset(),
                     x.whence(),
@@ -534,10 +518,10 @@ impl<'a> Request<'a> {
                 let (i, o) = (x.src(), x.dest());
                 se.filesystem.copy_file_range(
                     self,
-                    i.inode.into(),
+                    i.inode,
                     i.file_handle.into(),
                     i.offset,
-                    o.inode.into(),
+                    o.inode,
                     o.file_handle.into(),
                     o.offset,
                     x.len(),
@@ -551,16 +535,15 @@ impl<'a> Request<'a> {
             }
             #[cfg(target_os = "macos")]
             ll::Operation::GetXTimes(x) => {
-                se.filesystem
-                    .getxtimes(self, x.nodeid().into(), self.reply());
+                se.filesystem.getxtimes(self, x.nodeid(), self.reply());
             }
             #[cfg(target_os = "macos")]
             ll::Operation::Exchange(x) => {
                 se.filesystem.exchange(
                     self,
-                    x.from().dir.into(),
+                    x.from().dir,
                     x.from().name.as_ref(),
-                    x.to().dir.into(),
+                    x.to().dir,
                     x.to().name.as_ref(),
                     x.options(),
                     self.reply(),

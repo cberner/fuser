@@ -22,7 +22,8 @@ use std::{
 use libc::{EACCES, EBADF, EBUSY, EINVAL, ENOENT, ENOTDIR};
 
 use fuser::{
-    FUSE_ROOT_ID, FileAttr, FileType, MountOption, OpenAccMode, OpenFlags, PollHandle, Request,
+    FileAttr, FileType, INodeNo, MountOption, OpenAccMode, OpenFlags, PollHandle, ReplyAttr,
+    ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen, Request,
     consts::{FOPEN_DIRECT_IO, FOPEN_NONSEEKABLE, FUSE_POLL_SCHEDULE_NOTIFY},
 };
 
@@ -41,13 +42,13 @@ struct FSelFS {
 }
 
 impl FSelData {
-    fn idx_to_ino(idx: u8) -> u64 {
+    fn idx_to_ino(idx: u8) -> INodeNo {
         let idx: u64 = idx.into();
-        FUSE_ROOT_ID + idx + 1
+        INodeNo(INodeNo::ROOT.0 + idx + 1)
     }
 
-    fn ino_to_idx(ino: u64) -> u8 {
-        (ino - (FUSE_ROOT_ID + 1))
+    fn ino_to_idx(ino: INodeNo) -> u8 {
+        (ino.0 - (INodeNo::ROOT.0 + 1))
             .try_into()
             .expect("out-of-range inode number")
     }
@@ -81,8 +82,8 @@ impl FSelFS {
 }
 
 impl fuser::Filesystem for FSelFS {
-    fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: fuser::ReplyEntry) {
-        if parent != FUSE_ROOT_ID || name.len() != 1 {
+    fn lookup(&mut self, _req: &Request<'_>, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
+        if parent != INodeNo::ROOT || name.len() != 1 {
             reply.error(ENOENT);
             return;
         }
@@ -101,10 +102,10 @@ impl fuser::Filesystem for FSelFS {
         reply.entry(&Duration::ZERO, &self.get_data().filestat(idx), 0);
     }
 
-    fn getattr(&mut self, _req: &Request, ino: u64, _fh: Option<u64>, reply: fuser::ReplyAttr) {
-        if ino == FUSE_ROOT_ID {
+    fn getattr(&mut self, _req: &Request<'_>, ino: INodeNo, _fh: Option<u64>, reply: ReplyAttr) {
+        if ino == INodeNo::ROOT {
             let a = FileAttr {
-                ino: FUSE_ROOT_ID,
+                ino: INodeNo::ROOT,
                 size: 0,
                 blocks: 0,
                 atime: UNIX_EPOCH,
@@ -133,13 +134,13 @@ impl fuser::Filesystem for FSelFS {
 
     fn readdir(
         &mut self,
-        _req: &Request,
-        ino: u64,
+        _req: &Request<'_>,
+        ino: INodeNo,
         _fh: u64,
         offset: i64,
-        mut reply: fuser::ReplyDirectory,
+        mut reply: ReplyDirectory,
     ) {
-        if ino != FUSE_ROOT_ID {
+        if ino != INodeNo::ROOT {
             reply.error(ENOTDIR);
             return;
         }
@@ -169,7 +170,7 @@ impl fuser::Filesystem for FSelFS {
         reply.ok();
     }
 
-    fn open(&mut self, _req: &Request, ino: u64, flags: OpenFlags, reply: fuser::ReplyOpen) {
+    fn open(&mut self, _req: &Request<'_>, ino: INodeNo, flags: OpenFlags, reply: ReplyOpen) {
         let idx = FSelData::ino_to_idx(ino);
         if idx >= NUMFILES {
             reply.error(ENOENT);
@@ -197,15 +198,15 @@ impl fuser::Filesystem for FSelFS {
 
     fn release(
         &mut self,
-        _req: &Request,
-        _ino: u64,
-        fh: u64,
+        _req: &Request<'_>,
+        _ino: INodeNo,
+        _fh: u64,
         _flags: i32,
         _lock_owner: Option<u64>,
         _flush: bool,
-        reply: fuser::ReplyEmpty,
+        reply: ReplyEmpty,
     ) {
-        let idx = fh;
+        let idx = _fh;
         if idx >= NUMFILES.into() {
             reply.error(EBADF);
             return;
@@ -216,14 +217,14 @@ impl fuser::Filesystem for FSelFS {
 
     fn read(
         &mut self,
-        _req: &Request,
-        _ino: u64,
+        _req: &Request<'_>,
+        _ino: INodeNo,
         fh: u64,
         _offset: i64,
         size: u32,
         _flags: i32,
         _lock_owner: Option<u64>,
-        reply: fuser::ReplyData,
+        reply: ReplyData,
     ) {
         let Ok(idx): Result<u8, _> = fh.try_into() else {
             reply.error(EINVAL);
@@ -249,7 +250,7 @@ impl fuser::Filesystem for FSelFS {
     fn poll(
         &mut self,
         _req: &Request,
-        _ino: u64,
+        _ino: INodeNo,
         fh: u64,
         ph: PollHandle,
         _events: u32,

@@ -184,7 +184,7 @@ impl ReplyEntry {
     /// Reply to a request with the given entry
     pub fn entry(self, ttl: &Duration, attr: &FileAttr, generation: u64) {
         self.reply.send_ll(&ll::Response::new_entry(
-            ll::INodeNo(attr.ino),
+            attr.ino,
             ll::Generation(generation),
             &attr.into(),
             *ttl,
@@ -565,14 +565,16 @@ impl ReplyDirectory {
     /// A transparent offset value can be provided for each entry. The kernel uses these
     /// value to request the next entries in further readdir calls
     #[must_use]
-    pub fn add<T: AsRef<OsStr>>(&mut self, ino: u64, offset: i64, kind: FileType, name: T) -> bool {
+    pub fn add<T: AsRef<OsStr>>(
+        &mut self,
+        ino: INodeNo,
+        offset: i64,
+        kind: FileType,
+        name: T,
+    ) -> bool {
         let name = name.as_ref();
-        self.data.push(&DirEntry::new(
-            INodeNo(ino),
-            DirEntOffset(offset),
-            kind,
-            name,
-        ))
+        self.data
+            .push(&DirEntry::new(ino, DirEntOffset(offset), kind, name))
     }
 
     /// Reply to a request with the filled directory buffer
@@ -856,7 +858,7 @@ mod test {
         let time = UNIX_EPOCH + Duration::new(0x1234, 0x5678);
         let ttl = Duration::new(0x8765, 0x4321);
         let attr = FileAttr {
-            ino: 0x11,
+            ino: INodeNo(0x11),
             size: 0x22,
             blocks: 0x33,
             atime: time,
@@ -911,7 +913,7 @@ mod test {
         let time = UNIX_EPOCH + Duration::new(0x1234, 0x5678);
         let ttl = Duration::new(0x8765, 0x4321);
         let attr = FileAttr {
-            ino: 0x11,
+            ino: INodeNo(0x11),
             size: 0x22,
             blocks: 0x33,
             atime: time,
@@ -1032,7 +1034,7 @@ mod test {
         let time = UNIX_EPOCH + Duration::new(0x1234, 0x5678);
         let ttl = Duration::new(0x8765, 0x4321);
         let attr = FileAttr {
-            ino: 0x11,
+            ino: INodeNo(0x11),
             size: 0x22,
             blocks: 0x33,
             atime: time,
@@ -1089,8 +1091,8 @@ mod test {
             ],
         };
         let mut reply = ReplyDirectory::new(ll::RequestId(0xdeadbeef), sender, 4096);
-        assert!(!reply.add(0xaabb, 1, FileType::Directory, "hello"));
-        assert!(!reply.add(0xccdd, 2, FileType::RegularFile, "world.rs"));
+        assert!(!reply.add(INodeNo(0xaabb), 1, FileType::Directory, "hello"));
+        assert!(!reply.add(INodeNo(0xccdd), 2, FileType::RegularFile, "world.rs"));
         reply.ok();
     }
 
