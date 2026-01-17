@@ -16,6 +16,7 @@ use fuser::FileHandle;
 use fuser::FileType;
 use fuser::Filesystem;
 use fuser::INodeNo;
+use fuser::IoctlFlags;
 use fuser::MountOption;
 use fuser::ReplyAttr;
 use fuser::ReplyData;
@@ -159,7 +160,7 @@ impl Filesystem for FiocFS {
         _req: &Request<'_>,
         ino: INodeNo,
         _fh: FileHandle,
-        _flags: u32,
+        _flags: IoctlFlags,
         cmd: u32,
         in_data: &[u8],
         _out_size: u32,

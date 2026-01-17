@@ -296,6 +296,7 @@ mod op {
     use super::abi::*;
     #[cfg(feature = "abi-7-28")]
     use crate::CopyFileRangeFlags;
+    use crate::IoctlFlags;
     use crate::OpenFlags;
     use crate::WriteFlags;
     use crate::ll::Response;
@@ -1320,15 +1321,14 @@ mod op {
             &self.data[..self.arg.in_size as usize]
         }
         pub(crate) fn unrestricted(&self) -> bool {
-            self.arg.flags & consts::FUSE_IOCTL_UNRESTRICTED != 0
+            self.flags().contains(IoctlFlags::FUSE_IOCTL_UNRESTRICTED)
         }
         /// The value set by the [`Open`] method. See [`FileHandle`].
         pub(crate) fn file_handle(&self) -> FileHandle {
             FileHandle(self.arg.fh)
         }
-        /// TODO: What are valid values here?
-        pub(crate) fn flags(&self) -> u32 {
-            self.arg.flags
+        pub(crate) fn flags(&self) -> IoctlFlags {
+            IoctlFlags::from_bits_retain(self.arg.flags)
         }
         /// TODO: What does this mean?
         pub(crate) fn command(&self) -> u32 {

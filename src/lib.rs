@@ -68,6 +68,7 @@ pub use crate::ll::copy_file_range_flags::CopyFileRangeFlags;
 pub use crate::ll::fuse_abi::InitFlags;
 pub use crate::ll::fuse_abi::consts;
 use crate::ll::fuse_abi::consts::*;
+pub use crate::ll::ioctl_flags::IoctlFlags;
 pub use crate::ll::request::FileHandle;
 pub use crate::ll::request::INodeNo;
 pub use crate::ll::write_flags::WriteFlags;
@@ -928,7 +929,7 @@ pub trait Filesystem {
         _req: &Request<'_>,
         ino: INodeNo,
         fh: FileHandle,
-        flags: u32,
+        flags: IoctlFlags,
         cmd: u32,
         in_data: &[u8],
         out_size: u32,
