@@ -25,6 +25,7 @@ use std::time::SystemTime;
 use std::{convert::AsRef, io::ErrorKind};
 
 pub use crate::ll::RequestId;
+pub use crate::ll::copy_file_range_flags::CopyFileRangeFlags;
 pub use crate::ll::fuse_abi::InitFlags;
 use crate::ll::fuse_abi::consts::*;
 pub use crate::ll::request::INodeNo;
@@ -979,13 +980,13 @@ pub trait Filesystem {
         fh_out: u64,
         offset_out: i64,
         len: u64,
-        flags: u32,
+        flags: CopyFileRangeFlags,
         reply: ReplyWrite,
     ) {
         warn!(
             "[Not Implemented] copy_file_range(ino_in: {ino_in:#x?}, fh_in: {fh_in}, \
             offset_in: {offset_in}, ino_out: {ino_out:#x?}, fh_out: {fh_out}, \
-            offset_out: {offset_out}, len: {len}, flags: {flags})"
+            offset_out: {offset_out}, len: {len}, flags: {flags:?})"
         );
         reply.error(ENOSYS);
     }

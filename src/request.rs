@@ -8,8 +8,6 @@
 use crate::ll::{Errno, Response, fuse_abi as abi};
 use log::{debug, error, warn};
 use std::convert::TryFrom;
-#[cfg(feature = "abi-7-28")]
-use std::convert::TryInto;
 use std::path::Path;
 
 use crate::Filesystem;
@@ -525,7 +523,7 @@ impl<'a> Request<'a> {
                     o.file_handle.into(),
                     o.offset,
                     x.len(),
-                    x.flags().try_into().unwrap(),
+                    x.flags(),
                     self.reply(),
                 );
             }

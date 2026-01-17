@@ -1,6 +1,7 @@
 //! Low-level kernel communication.
 
 mod argument;
+pub(crate) mod copy_file_range_flags;
 pub(crate) mod fuse_abi;
 pub(crate) mod notify;
 pub(crate) mod reply;
