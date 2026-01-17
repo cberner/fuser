@@ -28,6 +28,7 @@ pub use crate::ll::RequestId;
 pub use crate::ll::fuse_abi::InitFlags;
 use crate::ll::fuse_abi::consts::*;
 pub use crate::ll::request::INodeNo;
+pub use crate::ll::write_flags::WriteFlags;
 pub use crate::ll::{TimeOrNow, fuse_abi::consts};
 use crate::mnt::mount_options::check_option_conflicts;
 pub use crate::open_flags::OpenAccMode;
@@ -594,7 +595,7 @@ pub trait Filesystem {
         fh: u64,
         offset: i64,
         data: &[u8],
-        write_flags: u32,
+        write_flags: WriteFlags,
         flags: i32,
         lock_owner: Option<u64>,
         reply: ReplyWrite,

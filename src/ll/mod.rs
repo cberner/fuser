@@ -5,6 +5,7 @@ pub(crate) mod fuse_abi;
 pub(crate) mod notify;
 pub(crate) mod reply;
 pub(crate) mod request;
+pub(crate) mod write_flags;
 
 use std::{convert::TryInto, num::NonZeroI32, time::SystemTime};
 
