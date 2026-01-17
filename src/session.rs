@@ -261,16 +261,21 @@ impl BackgroundSession {
         })
     }
     /// Unmount the filesystem and join the background thread.
-    /// # Panics
-    /// Panics if the background thread can't be recovered (e.g., because it panicked).
-    pub fn join(self) {
+    pub fn umount_and_join(self) -> io::Result<()> {
         let Self {
             guard,
             sender: _,
             _mount,
         } = self;
         drop(_mount);
-        guard.join().unwrap().unwrap();
+        guard
+            .join()
+            .map_err(|_panic: Box<dyn std::any::Any + Send>| {
+                io::Error::new(
+                    io::ErrorKind::Other,
+                    "filesystem background thread panicked",
+                )
+            })?
     }
 
     /// Returns an object that can be used to send notifications to the kernel
