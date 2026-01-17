@@ -916,7 +916,7 @@ pub(crate) struct fuse_ioctl_in {
     pub(crate) fh: u64,
     pub(crate) flags: u32,
     pub(crate) cmd: u32,
-    pub(crate) arg: u64, // TODO: this is currently unused, but is defined as a void* in libfuse
+    pub(crate) arg: u64,
     pub(crate) in_size: u32,
     pub(crate) out_size: u32,
 }
