@@ -40,6 +40,7 @@ fn with_fuse_args<T, F: FnOnce(&fuse_args) -> T>(options: &[MountOption], f: F) 
             CString::new(option_to_string(x)).unwrap(),
         ]);
     }
+    warn!("Building fuse_args with {:?} options", &args);
     let argptrs: Vec<_> = args.iter().map(|s| s.as_ptr()).collect();
     f(&fuse_args {
         argc: argptrs.len() as i32,
@@ -49,7 +50,7 @@ fn with_fuse_args<T, F: FnOnce(&fuse_args) -> T>(options: &[MountOption], f: F) 
 }
 
 use std::ffi::CStr;
-
+use log::warn;
 #[cfg(fuser_mount_impl = "pure-rust")]
 pub(crate) use fuse_pure::Mount;
 #[cfg(fuser_mount_impl = "libfuse2")]
