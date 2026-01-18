@@ -28,6 +28,11 @@ jobs:
           brew update > /dev/null && brew install autoconf automake
           brew install --cask macfuse
 
+      - name: Configure macfuse
+        run: |
+          sudo /Library/Filesystems/macfuse.fs/Contents/Resources/macfuse.app/Contents/MacOS/macfuse install --force
+          systemextensionsctl list
+
       - name: Install Rust
         run: |
           rustup component add --toolchain nightly rustfmt
