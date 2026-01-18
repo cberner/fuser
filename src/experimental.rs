@@ -59,8 +59,8 @@ impl RequestContext {
     }
 }
 
-impl From<&Request<'_>> for RequestContext {
-    fn from(req: &Request<'_>) -> Self {
+impl From<&Request> for RequestContext {
+    fn from(req: &Request) -> Self {
         Self::new(req.uid(), req.gid(), req.pid(), req.unique())
     }
 }
@@ -139,7 +139,7 @@ impl<T: AsyncFilesystem> TokioAdapter<T> {
 }
 
 impl<T: AsyncFilesystem> Filesystem for TokioAdapter<T> {
-    fn lookup(&mut self, req: &Request<'_>, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
+    fn lookup(&mut self, req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
         match self
             .runtime
             .block_on(self.inner.lookup(&req.into(), parent, name))
@@ -153,13 +153,7 @@ impl<T: AsyncFilesystem> Filesystem for TokioAdapter<T> {
         }
     }
 
-    fn getattr(
-        &mut self,
-        req: &Request<'_>,
-        ino: INodeNo,
-        fh: Option<FileHandle>,
-        reply: ReplyAttr,
-    ) {
+    fn getattr(&mut self, req: &Request, ino: INodeNo, fh: Option<FileHandle>, reply: ReplyAttr) {
         match self
             .runtime
             .block_on(self.inner.getattr(&req.into(), ino, fh))
@@ -171,7 +165,7 @@ impl<T: AsyncFilesystem> Filesystem for TokioAdapter<T> {
 
     fn read(
         &mut self,
-        _req: &Request<'_>,
+        req: &Request,
         ino: INodeNo,
         fh: FileHandle,
         offset: i64,
@@ -182,7 +176,7 @@ impl<T: AsyncFilesystem> Filesystem for TokioAdapter<T> {
     ) {
         let mut buf = vec![];
         match self.runtime.block_on(self.inner.read(
-            &_req.into(),
+            &req.into(),
             ino,
             fh,
             offset,
@@ -198,7 +192,7 @@ impl<T: AsyncFilesystem> Filesystem for TokioAdapter<T> {
 
     fn readdir(
         &mut self,
-        req: &Request<'_>,
+        req: &Request,
         ino: INodeNo,
         fh: FileHandle,
         offset: i64,
