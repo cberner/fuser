@@ -11,7 +11,6 @@
     unreachable_pub
 )]
 
-#[cfg(feature = "abi-7-28")]
 use std::cmp::max;
 use std::cmp::min;
 use std::convert::AsRef;
@@ -20,7 +19,6 @@ use std::io;
 use std::io::ErrorKind;
 use std::os::unix::fs::FileTypeExt;
 use std::path::Path;
-#[cfg(feature = "abi-7-23")]
 use std::time::Duration;
 use std::time::SystemTime;
 
@@ -211,9 +209,7 @@ pub struct KernelConfig {
     max_background: u16,
     congestion_threshold: Option<u16>,
     max_write: u32,
-    #[cfg(feature = "abi-7-23")]
     time_gran: Duration,
-    #[cfg(feature = "abi-7-40")]
     max_stack_depth: u32,
 }
 
@@ -229,9 +225,7 @@ impl KernelConfig {
             // use a max write size that fits into the session's buffer
             max_write: MAX_WRITE_SIZE as u32,
             // 1ns means nano-second granularity.
-            #[cfg(feature = "abi-7-23")]
             time_gran: Duration::new(0, 1),
-            #[cfg(feature = "abi-7-40")]
             max_stack_depth: 0,
         }
     }
@@ -376,7 +370,6 @@ impl KernelConfig {
         }
     }
 
-    #[cfg(feature = "abi-7-28")]
     fn max_pages(&self) -> u16 {
         ((max(self.max_write, self.max_readahead) - 1) / page_size::get() as u32) as u16 + 1
     }
