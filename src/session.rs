@@ -112,6 +112,7 @@ impl<FS: Filesystem> Session<FS> {
         } else {
             Mount::new(mountpoint, options)?
         };
+        warn!("Mounted successfully?");
 
         let ch = Channel::new(file);
         let allowed = if options.contains(&MountOption::AllowRoot) {
