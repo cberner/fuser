@@ -377,12 +377,7 @@ impl EntListBuf {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord)]
-pub(crate) struct DirEntOffset(pub(crate) i64);
-impl From<DirEntOffset> for i64 {
-    fn from(x: DirEntOffset) -> Self {
-        x.0
-    }
-}
+pub(crate) struct DirEntOffset(pub(crate) u64);
 
 #[derive(Debug)]
 pub(crate) struct DirEntry<T: AsRef<Path>> {
@@ -499,7 +494,7 @@ impl DirEntPlusList {
             },
             dirent: abi::fuse_dirent {
                 ino: x.attr.attr.ino,
-                off: x.offset.into(),
+                off: x.offset.0,
                 namelen: name.len().try_into().expect("Name too long"),
                 typ: x.attr.attr.mode >> 12,
             },
