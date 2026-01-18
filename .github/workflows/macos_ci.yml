@@ -1,0 +1,57 @@
+name: MacOS CI
+
+on:
+  pull_request:
+jobs:
+  ci-macfuse:
+    runs-on: macos-26
+    env:
+      PKG_CONFIG_PATH: /usr/local/lib/pkgconfig:$PKG_CONFIG_PATH
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache
+        id: rust-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            ~/.rustup/toolchains/
+            target/
+          key: ${{ runner.os }}-cargo-compile-v1-${{ hashFiles('**/Cargo.toml', '.github/workflows/*.yml') }}
+
+      - name: Install packages
+        run: |
+          brew update > /dev/null && brew install macfuse autoconf automake
+
+      - name: Install Rust
+        run: |
+          rustup component add --toolchain nightly rustfmt
+          rustup component add clippy
+          rustc --version
+          cargo --version
+
+      - name: Install cargo-deny
+        if: steps.rust-cache.outputs.cache-hit != 'true'
+        run: cargo install --force --version 0.16.2 cargo-deny --locked
+
+      - name: Run mount_tests and PJDFS
+        run: make test_macos
+
+      - name: Build all targets
+        run: cargo build --all --all-targets
+
+      - name: Build all targets, all features
+        run: cargo build --all --all-targets --all-features
+
+      - name: Run all tests
+        run: cargo test --all
+
+      - name: Run all tests, all features
+        run: cargo test --all --all-features
+
+      - name: Run cargo doc for all features
+        run: cargo doc --all --no-deps --all-features
