@@ -3,21 +3,10 @@
 //! This is a small set of bindings that are required to mount/unmount FUSE filesystems and
 //! open/close a fd to the FUSE kernel driver.
 
-#![warn(missing_debug_implementations)]
-#![allow(missing_docs)]
-
 use std::ffi::CStr;
 use std::ffi::CString;
 use std::ffi::OsStr;
 use std::fs::File;
-#[cfg(any(
-    target_os = "linux",
-    target_os = "macos",
-    target_os = "freebsd",
-    target_os = "dragonfly",
-    target_os = "openbsd",
-    target_os = "netbsd",
-))]
 use std::io;
 use std::io::Error;
 use std::io::ErrorKind;
@@ -27,8 +16,6 @@ use std::mem;
 use std::os::fd::AsFd;
 use std::os::fd::BorrowedFd;
 use std::os::unix::ffi::OsStrExt;
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-use std::os::unix::fs::PermissionsExt;
 use std::os::unix::io::AsRawFd;
 use std::os::unix::io::FromRawFd;
 use std::os::unix::io::RawFd;
@@ -122,22 +109,17 @@ fn fuse_mount_pure(
     // The direct mount path is currently implemented only for Linux and macOS.
     // Other supported Unix targets (such as the BSDs) rely on the setuid
     // mount helper, which mirrors libfuse's approach.
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-    {
-        return fuse_mount_fusermount(mountpoint, options);
-    }
-
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
-    {
+    if cfg!(target_os = "linux") || cfg!(target_os = "macos") {
         let res = fuse_mount_sys(mountpoint, options)?;
         match res {
-            Some(file) => Ok((file, None)),
-            _ => {
+            Some(file) => return Ok((file, None)),
+            None => {
                 // Retry
-                fuse_mount_fusermount(mountpoint, options)
             }
         }
     }
+
+    fuse_mount_fusermount(mountpoint, options)
 }
 
 fn fuse_unmount_pure(mountpoint: &CStr) {
@@ -382,6 +364,8 @@ fn fuse_mount_mount_fusefs(
 // If returned option is none. Then fusermount binary should be tried
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn fuse_mount_sys(mountpoint: &OsStr, options: &[MountOption]) -> Result<Option<DevFuse>, Error> {
+    use std::os::unix::fs::PermissionsExt;
+
     let mountpoint_mode = File::open(mountpoint)?.metadata()?.permissions().mode();
 
     // Auto unmount requests must be sent to fusermount binary
@@ -491,7 +475,6 @@ fn fuse_mount_sys(mountpoint: &OsStr, options: &[MountOption]) -> Result<Option<
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-#[allow(dead_code)]
 fn fuse_mount_sys(_mountpoint: &OsStr, _options: &[MountOption]) -> Result<Option<DevFuse>, Error> {
     Ok(None)
 }
