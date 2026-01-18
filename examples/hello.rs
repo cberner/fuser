@@ -158,6 +158,9 @@ fn main() {
     env_logger::init();
     let mountpoint = matches.get_one::<String>("MOUNT_POINT").unwrap();
     let mut options = vec![MountOption::RO, MountOption::FSName("hello".to_string())];
+    if cfg!(target_os = "macos") {
+        options.push(MountOption::CUSTOM("backend=fskit".to_string()));
+    }
     if matches.get_flag("auto_unmount") {
         options.push(MountOption::AutoUnmount);
     }
