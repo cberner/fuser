@@ -78,7 +78,7 @@ impl DirEntListBuilder<'_> {
     pub fn add<T: AsRef<OsStr>>(
         &mut self,
         ino: INodeNo,
-        offset: i64,
+        offset: u64,
         kind: FileType,
         name: T,
     ) -> bool {
@@ -175,7 +175,7 @@ impl<T: AsyncFilesystem> Filesystem for TokioAdapter<T> {
         _req: &Request<'_>,
         ino: INodeNo,
         fh: FileHandle,
-        offset: i64,
+        offset: u64,
         size: u32,
         flags: ReadFlags,
         lock_owner: Option<LockOwner>,
@@ -199,10 +199,10 @@ impl<T: AsyncFilesystem> Filesystem for TokioAdapter<T> {
 
     fn readdir(
         &mut self,
-        req: &Request<'_>,
+        _req: &Request<'_>,
         ino: INodeNo,
         fh: FileHandle,
-        offset: i64,
+        offset: u64,
         mut reply: ReplyDirectory,
     ) {
         let builder = DirEntListBuilder {
@@ -210,7 +210,7 @@ impl<T: AsyncFilesystem> Filesystem for TokioAdapter<T> {
         };
         match self
             .runtime
-            .block_on(self.inner.readdir(&req.into(), ino, fh, offset, builder))
+            .block_on(self.inner.readdir(&_req.into(), ino, fh, offset, builder))
         {
             Ok(()) => reply.ok(),
             Err(e) => reply.error(e),
@@ -240,7 +240,7 @@ pub trait AsyncFilesystem {
         context: &RequestContext,
         ino: INodeNo,
         file_handle: FileHandle,
-        offset: i64,
+        offset: u64,
         size: u32,
         flags: ReadFlags,
         lock: Option<LockOwner>,
@@ -254,7 +254,7 @@ pub trait AsyncFilesystem {
         context: &RequestContext,
         ino: INodeNo,
         file_handle: FileHandle,
-        offset: i64,
+        offset: u64,
         builder: DirEntListBuilder<'_>,
     ) -> Result<()>;
 }

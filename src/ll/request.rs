@@ -278,6 +278,7 @@ mod op {
     use std::time::Duration;
     use std::time::SystemTime;
 
+    use log::warn;
     use zerocopy::FromZeros;
     use zerocopy::IntoBytes;
 
@@ -294,6 +295,7 @@ mod op {
     use super::abi::consts::*;
     use super::abi::*;
     use crate::CopyFileRangeFlags;
+    use crate::Errno;
     use crate::IoctlFlags;
     use crate::OpenFlags;
     use crate::PollFlags;
@@ -707,8 +709,17 @@ mod op {
         pub(crate) fn file_handle(&self) -> FileHandle {
             FileHandle(self.arg.fh)
         }
-        pub(crate) fn offset(&self) -> i64 {
-            self.arg.offset
+        pub(crate) fn offset(&self) -> Result<u64, Errno> {
+            // `offset` is unsigned, and libfuse silently casts it to signed `off_t`.
+            // The value is supposed to be in range `0..=i64::MAX`, so validate.
+            if self.arg.offset > i64::MAX as u64 {
+                warn!(
+                    "fuse_read_in.arg.offset {} is out of range",
+                    self.arg.offset
+                );
+                return Err(Errno::EINVAL);
+            }
+            Ok(self.arg.offset)
         }
         pub(crate) fn size(&self) -> u32 {
             self.arg.size
@@ -1075,7 +1086,7 @@ mod op {
         pub(crate) fn file_handle(&self) -> FileHandle {
             FileHandle(self.arg.fh)
         }
-        pub(crate) fn offset(&self) -> i64 {
+        pub(crate) fn offset(&self) -> u64 {
             self.arg.offset
         }
         pub(crate) fn size(&self) -> u32 {
@@ -1452,7 +1463,7 @@ mod op {
         pub(crate) fn file_handle(&self) -> FileHandle {
             FileHandle(self.arg.fh)
         }
-        pub(crate) fn offset(&self) -> i64 {
+        pub(crate) fn offset(&self) -> u64 {
             self.arg.offset
         }
         pub(crate) fn size(&self) -> u32 {
@@ -1966,7 +1977,7 @@ impl fmt::Display for Operation<'_> {
             Operation::Open(x) => write!(f, "OPEN flags {:#x}", x.flags()),
             Operation::Read(x) => write!(
                 f,
-                "READ fh {:?}, offset {}, size {}",
+                "READ fh {:?}, offset {:?}, size {}",
                 x.file_handle(),
                 x.offset(),
                 x.size()

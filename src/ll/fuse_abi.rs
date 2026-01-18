@@ -681,9 +681,7 @@ pub(crate) struct fuse_flush_in {
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
 pub(crate) struct fuse_read_in {
     pub(crate) fh: u64,
-    // NOTE: this field is defined as u64 in fuse_kernel.h in libfuse. However, it is then cast
-    // to an i64 when invoking the filesystem's read method
-    pub(crate) offset: i64,
+    pub(crate) offset: u64,
     pub(crate) size: u32,
     pub(crate) read_flags: u32,
     pub(crate) lock_owner: u64,
@@ -955,8 +953,7 @@ pub(crate) struct fuse_out_header {
 #[derive(Debug, IntoBytes, KnownLayout, Immutable)]
 pub(crate) struct fuse_dirent {
     pub(crate) ino: u64,
-    // NOTE: this field is defined as u64 in fuse_kernel.h in libfuse. However, it is treated as signed
-    pub(crate) off: i64,
+    pub(crate) off: u64,
     pub(crate) namelen: u32,
     pub(crate) typ: u32,
     // followed by name of namelen bytes

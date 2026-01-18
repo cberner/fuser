@@ -119,7 +119,7 @@ impl Filesystem for ClockFS<'_> {
         _req: &Request<'_>,
         ino: INodeNo,
         _fh: FileHandle,
-        offset: i64,
+        offset: u64,
         mut reply: ReplyDirectory,
     ) {
         if ino != INodeNo::ROOT {
@@ -160,17 +160,13 @@ impl Filesystem for ClockFS<'_> {
         _req: &Request<'_>,
         ino: INodeNo,
         _fh: FileHandle,
-        offset: i64,
+        offset: u64,
         size: u32,
         _flags: ReadFlags,
         _lock_owner: Option<LockOwner>,
         reply: ReplyData,
     ) {
         assert!(ino == INodeNo(Self::FILE_INO));
-        if offset < 0 {
-            reply.error(Errno::EINVAL);
-            return;
-        }
         let file = self.file_contents.lock().unwrap();
         let filedata = file.as_bytes();
         let dlen = filedata.len().try_into().unwrap();
@@ -178,7 +174,7 @@ impl Filesystem for ClockFS<'_> {
             reply.error(Errno::EINVAL);
             return;
         };
-        let Ok(end) = (offset + i64::from(size)).min(dlen).try_into() else {
+        let Ok(end) = (offset + u64::from(size)).min(dlen).try_into() else {
             reply.error(Errno::EINVAL);
             return;
         };

@@ -1455,14 +1455,13 @@ impl Filesystem for SimpleFS {
         _req: &Request<'_>,
         ino: INodeNo,
         fh: FileHandle,
-        offset: i64,
+        offset: u64,
         size: u32,
         _flags: ReadFlags,
         _lock_owner: Option<LockOwner>,
         reply: ReplyData,
     ) {
         debug!("read() called on {ino:?} offset={offset:?} size={size:?}");
-        assert!(offset >= 0);
         if !Self::check_file_handle_read(fh.into()) {
             reply.error(Errno::EACCES);
             return;
@@ -1596,11 +1595,10 @@ impl Filesystem for SimpleFS {
         _req: &Request<'_>,
         ino: INodeNo,
         _fh: FileHandle,
-        offset: i64,
+        offset: u64,
         mut reply: ReplyDirectory,
     ) {
         debug!("readdir() called with {ino:?}");
-        assert!(offset >= 0);
         let entries = match self.get_directory_content(ino) {
             Ok(entries) => entries,
             Err(error_code) => {
@@ -1614,7 +1612,7 @@ impl Filesystem for SimpleFS {
 
             let buffer_full: bool = reply.add(
                 INodeNo(*inode),
-                offset + index as i64 + 1,
+                offset + index as u64 + 1,
                 (*file_type).into(),
                 OsStr::from_bytes(name),
             );

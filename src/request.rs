@@ -259,7 +259,7 @@ impl<'a> Request<'a> {
                     self,
                     self.request.nodeid(),
                     x.file_handle(),
-                    x.offset(),
+                    x.offset()?,
                     x.size(),
                     x.flags(),
                     x.lock_owner(),

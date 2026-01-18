@@ -159,7 +159,7 @@ impl fuser::Filesystem for FSelFS {
         _req: &Request<'_>,
         ino: INodeNo,
         _fh: FileHandle,
-        offset: i64,
+        offset: u64,
         mut reply: ReplyDirectory,
     ) {
         if ino != INodeNo::ROOT {
@@ -245,7 +245,7 @@ impl fuser::Filesystem for FSelFS {
         _req: &Request<'_>,
         _ino: INodeNo,
         fh: FileHandle,
-        _offset: i64,
+        _offset: u64,
         size: u32,
         _flags: ReadFlags,
         _lock_owner: Option<LockOwner>,

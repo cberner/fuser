@@ -116,7 +116,7 @@ impl Filesystem for FiocFS {
         _req: &Request<'_>,
         ino: INodeNo,
         _fh: FileHandle,
-        offset: i64,
+        offset: u64,
         _size: u32,
         _flags: ReadFlags,
         _lock_owner: Option<LockOwner>,
@@ -134,7 +134,7 @@ impl Filesystem for FiocFS {
         _req: &Request<'_>,
         ino: INodeNo,
         _fh: FileHandle,
-        offset: i64,
+        offset: u64,
         mut reply: ReplyDirectory,
     ) {
         if ino != INodeNo::ROOT {
@@ -150,7 +150,7 @@ impl Filesystem for FiocFS {
 
         for (i, entry) in entries.into_iter().enumerate().skip(offset as usize) {
             // i + 1 means the index of the next entry
-            if reply.add(INodeNo(entry.0), (i + 1) as i64, entry.1, entry.2) {
+            if reply.add(INodeNo(entry.0), (i + 1) as u64, entry.1, entry.2) {
                 break;
             }
         }
