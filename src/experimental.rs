@@ -10,6 +10,7 @@ use crate::FileType;
 use crate::Filesystem;
 use crate::Generation;
 use crate::INodeNo;
+use crate::ReadFlags;
 use crate::ReplyAttr;
 use crate::ReplyData;
 use crate::ReplyDirectory;
@@ -170,18 +171,18 @@ impl<T: AsyncFilesystem> Filesystem for TokioAdapter<T> {
 
     fn read(
         &mut self,
-        req: &Request<'_>,
+        _req: &Request<'_>,
         ino: INodeNo,
         fh: FileHandle,
         offset: i64,
         size: u32,
-        flags: i32,
+        flags: ReadFlags,
         lock_owner: Option<u64>,
         reply: ReplyData,
     ) {
         let mut buf = vec![];
         match self.runtime.block_on(self.inner.read(
-            &req.into(),
+            &_req.into(),
             ino,
             fh,
             offset,
@@ -240,7 +241,7 @@ pub trait AsyncFilesystem {
         file_handle: FileHandle,
         offset: i64,
         size: u32,
-        flags: i32,
+        flags: ReadFlags,
         lock: Option<u64>,
         out_data: &mut Vec<u8>,
     ) -> Result<()>;

@@ -407,9 +407,6 @@ pub mod consts {
     #[cfg(feature = "abi-7-31")]
     pub const FUSE_WRITE_KILL_PRIV: u32 = 1 << 2; // kill suid and sgid bits
 
-    // Read flags
-    pub const FUSE_READ_LOCKOWNER: u32 = 1 << 1;
-
     // IOCTL constant
     pub const FUSE_IOCTL_MAX_IOV: u32 = 256; // maximum of in_iovecs + out_iovecs
 
@@ -716,9 +713,7 @@ pub(crate) struct fuse_read_in {
     pub(crate) size: u32,
     pub(crate) read_flags: u32,
     pub(crate) lock_owner: u64,
-    // NOTE: this field is defined as u32 in fuse_kernel.h in libfuse. However, it is then cast
-    // to an i32 when invoking the filesystem's read method
-    pub(crate) flags: i32,
+    pub(crate) flags: u32,
     pub(crate) padding: u32,
 }
 

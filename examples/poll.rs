@@ -28,6 +28,7 @@ use fuser::MountOption;
 use fuser::OpenAccMode;
 use fuser::OpenFlags;
 use fuser::PollHandle;
+use fuser::ReadFlags;
 use fuser::ReplyAttr;
 use fuser::ReplyData;
 use fuser::ReplyDirectory;
@@ -245,7 +246,7 @@ impl fuser::Filesystem for FSelFS {
         fh: FileHandle,
         _offset: i64,
         size: u32,
-        _flags: i32,
+        _flags: ReadFlags,
         _lock_owner: Option<u64>,
         reply: ReplyData,
     ) {
