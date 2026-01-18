@@ -2196,6 +2196,10 @@ fn main() {
 
     let mut options = vec![MountOption::FSName("fuser".to_string())];
 
+    if cfg!(target_os = "macos") {
+        options.push(MountOption::CUSTOM("backend=fskit".to_string()));
+    }
+
     #[cfg(feature = "abi-7-26")]
     {
         if matches.get_flag("suid") {
