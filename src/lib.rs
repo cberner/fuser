@@ -596,7 +596,7 @@ pub trait Filesystem {
         _req: &Request<'_>,
         ino: INodeNo,
         fh: FileHandle,
-        offset: i64,
+        offset: u64,
         size: u32,
         flags: ReadFlags,
         lock_owner: Option<u64>,
@@ -721,7 +721,7 @@ pub trait Filesystem {
         _req: &Request<'_>,
         ino: INodeNo,
         fh: FileHandle,
-        offset: i64,
+        offset: u64,
         reply: ReplyDirectory,
     ) {
         warn!("[Not Implemented] readdir(ino: {ino:#x?}, fh: {fh}, offset: {offset})");
@@ -738,7 +738,7 @@ pub trait Filesystem {
         _req: &Request<'_>,
         ino: INodeNo,
         fh: FileHandle,
-        offset: i64,
+        offset: u64,
         reply: ReplyDirectoryPlus,
     ) {
         warn!("[Not Implemented] readdirplus(ino: {ino:#x?}, fh: {fh}, offset: {offset})");

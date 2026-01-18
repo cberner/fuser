@@ -575,7 +575,7 @@ impl ReplyDirectory {
     pub fn add<T: AsRef<OsStr>>(
         &mut self,
         ino: INodeNo,
-        offset: i64,
+        offset: u64,
         kind: FileType,
         name: T,
     ) -> bool {
@@ -623,7 +623,7 @@ impl ReplyDirectoryPlus {
     pub fn add<T: AsRef<OsStr>>(
         &mut self,
         ino: u64,
-        offset: i64,
+        offset: u64,
         name: T,
         ttl: &Duration,
         attr: &FileAttr,

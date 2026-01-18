@@ -113,7 +113,7 @@ impl Filesystem for ClockFS<'_> {
         _req: &Request<'_>,
         ino: INodeNo,
         _fh: FileHandle,
-        offset: i64,
+        offset: u64,
         mut reply: ReplyDirectory,
     ) {
         if ino != INodeNo::ROOT {
