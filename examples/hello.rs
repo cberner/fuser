@@ -6,6 +6,7 @@ use clap::Arg;
 use clap::ArgAction;
 use clap::Command;
 use clap::crate_version;
+use log::LevelFilter;
 use fuser::Errno;
 use fuser::FileAttr;
 use fuser::FileHandle;
@@ -155,7 +156,10 @@ fn main() {
                 .help("Allow root user to access filesystem"),
         )
         .get_matches();
-    env_logger::init();
+    env_logger::builder()
+        .format_timestamp_nanos()
+        .filter_level(LevelFilter::Debug)
+        .init();
     let mountpoint = matches.get_one::<String>("MOUNT_POINT").unwrap();
     let mut options = vec![MountOption::RO, MountOption::FSName("hello".to_string())];
     if cfg!(target_os = "macos") {

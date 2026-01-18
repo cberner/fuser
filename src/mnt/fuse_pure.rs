@@ -450,6 +450,8 @@ fn fuse_mount_sys(mountpoint: &OsStr, options: &[MountOption]) -> Result<Option<
     {
         source = name;
     }
+    
+    error!("Mounting {} with options {:?} and flags={:?}", source, options, flags);
 
     #[cfg(target_os = "linux")]
     let result = nix::mount::mount(
