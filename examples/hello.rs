@@ -171,5 +171,9 @@ fn main() {
     if matches.get_flag("allow-root") {
         options.push(MountOption::AllowRoot);
     }
-    fuser::mount2(HelloFS, mountpoint, &options).unwrap();
+    if let Err(e) = fuser::mount2(HelloFS, mountpoint, &options) {
+        eprintln!("HelloFS mount FAILED: {}", e);
+    } else {
+        println!("HelloFS mounted successfully");
+    }
 }
