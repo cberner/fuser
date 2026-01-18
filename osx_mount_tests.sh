@@ -21,7 +21,7 @@ GREEN="\e[32m"
 RED="\e[31m"
 
 function run_test {
-  DIR=$(mktemp -d)
+  DIR=$(sudo mktemp -d -p /Volumes)
   cargo build --example hello > /dev/null 2>&1
   cargo run --example hello -- $DIR $2 &
   FUSE_PID=$!
