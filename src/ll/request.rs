@@ -294,7 +294,6 @@ mod op {
     use super::RequestId;
     use super::abi::consts::*;
     use super::abi::*;
-    #[cfg(feature = "abi-7-28")]
     use crate::CopyFileRangeFlags;
     use crate::OpenFlags;
     use crate::WriteFlags;
@@ -1425,15 +1424,12 @@ mod op {
     /// Read directory.
     ///
     /// TODO: Document when this is called rather than `ReadDir`
-    #[cfg(feature = "abi-7-21")]
     #[derive(Debug)]
     pub(crate) struct ReadDirPlus<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_read_in,
     }
-    #[cfg(feature = "abi-7-21")]
     impl_request!(ReadDirPlus<'a>);
-    #[cfg(feature = "abi-7-21")]
     impl ReadDirPlus<'_> {
         /// The value set by the [`Open`] method. See [`FileHandle`].
         pub(crate) fn file_handle(&self) -> FileHandle {
@@ -1450,7 +1446,6 @@ mod op {
     /// Rename a file.
     ///
     /// TODO: Document the differences to [`Rename`] and [`Exchange`]
-    #[cfg(feature = "abi-7-23")]
     #[derive(Debug)]
     pub(crate) struct Rename2<'a> {
         header: &'a fuse_in_header,
@@ -1459,9 +1454,7 @@ mod op {
         newname: &'a Path,
         old_parent: INodeNo,
     }
-    #[cfg(feature = "abi-7-23")]
     impl_request!(Rename2<'a>);
-    #[cfg(feature = "abi-7-23")]
     impl<'a> Rename2<'a> {
         pub(crate) fn from(&self) -> FilenameInDir<'a> {
             FilenameInDir::<'a> {
@@ -1489,15 +1482,12 @@ mod op {
     /// Reposition read/write file offset
     ///
     /// TODO: Document when you need to implement this.  Read and Write provide the offset anyway.
-    #[cfg(feature = "abi-7-24")]
     #[derive(Debug)]
     pub(crate) struct Lseek<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_lseek_in,
     }
-    #[cfg(feature = "abi-7-24")]
     impl_request!(Lseek<'a>);
-    #[cfg(feature = "abi-7-24")]
     impl Lseek<'_> {
         /// The value set by the [`Open`] method. See [`FileHandle`].
         pub(crate) fn file_handle(&self) -> FileHandle {
@@ -1513,7 +1503,6 @@ mod op {
     }
 
     /// Copy the specified range from the source inode to the destination inode
-    #[cfg(feature = "abi-7-28")]
     #[derive(Debug, Clone, Copy)]
     pub(crate) struct CopyFileRangeFile {
         pub(crate) inode: INodeNo,
@@ -1521,15 +1510,12 @@ mod op {
         pub(crate) file_handle: FileHandle,
         pub(crate) offset: i64,
     }
-    #[cfg(feature = "abi-7-28")]
     #[derive(Debug)]
     pub(crate) struct CopyFileRange<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_copy_file_range_in,
     }
-    #[cfg(feature = "abi-7-28")]
     impl_request!(CopyFileRange<'a>);
-    #[cfg(feature = "abi-7-28")]
     impl CopyFileRange<'_> {
         /// File and offset to copy data from
         pub(crate) fn src(&self) -> CopyFileRangeFile {
@@ -1815,12 +1801,10 @@ mod op {
                 header,
                 arg: data.fetch()?,
             }),
-            #[cfg(feature = "abi-7-21")]
             fuse_opcode::FUSE_READDIRPLUS => Operation::ReadDirPlus(ReadDirPlus {
                 header,
                 arg: data.fetch()?,
             }),
-            #[cfg(feature = "abi-7-23")]
             fuse_opcode::FUSE_RENAME2 => Operation::Rename2(Rename2 {
                 header,
                 arg: data.fetch()?,
@@ -1828,12 +1812,10 @@ mod op {
                 newname: data.fetch_str()?.as_ref(),
                 old_parent: INodeNo(header.nodeid),
             }),
-            #[cfg(feature = "abi-7-24")]
             fuse_opcode::FUSE_LSEEK => Operation::Lseek(Lseek {
                 header,
                 arg: data.fetch()?,
             }),
-            #[cfg(feature = "abi-7-28")]
             fuse_opcode::FUSE_COPY_FILE_RANGE => Operation::CopyFileRange(CopyFileRange {
                 header,
                 arg: data.fetch()?,
@@ -1872,8 +1854,7 @@ pub(crate) enum Operation<'a> {
     Forget(Forget<'a>),
     GetAttr(GetAttr<'a>),
     SetAttr(SetAttr<'a>),
-    #[allow(dead_code)]
-    ReadLink(ReadLink<'a>),
+    ReadLink(#[expect(dead_code)] ReadLink<'a>),
     SymLink(SymLink<'a>),
     MkNod(MkNod<'a>),
     MkDir(MkDir<'a>),
@@ -1884,8 +1865,7 @@ pub(crate) enum Operation<'a> {
     Open(Open<'a>),
     Read(Read<'a>),
     Write(Write<'a>),
-    #[allow(dead_code)]
-    StatFs(StatFs<'a>),
+    StatFs(#[expect(dead_code)] StatFs<'a>),
     Release(Release<'a>),
     FSync(FSync<'a>),
     SetXAttr(SetXAttr<'a>),
@@ -1908,17 +1888,12 @@ pub(crate) enum Operation<'a> {
     Destroy(Destroy<'a>),
     IoCtl(IoCtl<'a>),
     Poll(Poll<'a>),
-    #[allow(dead_code)]
-    NotifyReply(NotifyReply<'a>),
+    NotifyReply(#[expect(dead_code)] NotifyReply<'a>),
     BatchForget(BatchForget<'a>),
     FAllocate(FAllocate<'a>),
-    #[cfg(feature = "abi-7-21")]
     ReadDirPlus(ReadDirPlus<'a>),
-    #[cfg(feature = "abi-7-23")]
     Rename2(Rename2<'a>),
-    #[cfg(feature = "abi-7-24")]
     Lseek(Lseek<'a>),
-    #[cfg(feature = "abi-7-28")]
     CopyFileRange(CopyFileRange<'a>),
 
     #[cfg(target_os = "macos")]
@@ -2079,7 +2054,6 @@ impl fmt::Display for Operation<'_> {
             Operation::NotifyReply(_) => write!(f, "NOTIFYREPLY"),
             Operation::BatchForget(x) => write!(f, "BATCHFORGET nodes {:?}", x.nodes()),
             Operation::FAllocate(_) => write!(f, "FALLOCATE"),
-            #[cfg(feature = "abi-7-21")]
             Operation::ReadDirPlus(x) => write!(
                 f,
                 "READDIRPLUS fh {:?}, offset {}, size {}",
@@ -2087,9 +2061,7 @@ impl fmt::Display for Operation<'_> {
                 x.offset(),
                 x.size()
             ),
-            #[cfg(feature = "abi-7-23")]
             Operation::Rename2(x) => write!(f, "RENAME2 from {:?}, to {:?}", x.from(), x.to()),
-            #[cfg(feature = "abi-7-24")]
             Operation::Lseek(x) => write!(
                 f,
                 "LSEEK fh {:?}, offset {}, whence {}",
@@ -2097,7 +2069,6 @@ impl fmt::Display for Operation<'_> {
                 x.offset(),
                 x.whence()
             ),
-            #[cfg(feature = "abi-7-28")]
             Operation::CopyFileRange(x) => write!(
                 f,
                 "COPY_FILE_RANGE src {:?}, dest {:?}, len {}",
