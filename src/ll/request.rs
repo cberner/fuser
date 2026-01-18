@@ -272,14 +272,17 @@ macro_rules! impl_request {
 }
 
 mod op {
+    use std::cmp;
     use std::convert::TryInto;
     use std::ffi::OsStr;
     use std::fmt::Display;
+    use std::mem::offset_of;
     use std::num::NonZeroU32;
     use std::path::Path;
     use std::time::Duration;
     use std::time::SystemTime;
 
+    use zerocopy::FromZeros;
     use zerocopy::IntoBytes;
 
     use super::super::TimeOrNow;
@@ -962,13 +965,14 @@ mod op {
     #[derive(Debug)]
     pub(crate) struct Init<'a> {
         header: &'a fuse_in_header,
-        arg: &'a fuse_init_in,
+        /// Unlike other operation we put this in a box,
+        /// because we memcopy prefix into it instead of casting.
+        arg: Box<fuse_init_in>,
     }
     impl_request!(Init<'a>);
     impl<'a> Init<'a> {
         pub(crate) fn capabilities(&self) -> InitFlags {
             let flags = InitFlags::from_bits_retain(u64::from(self.arg.flags));
-            #[cfg(feature = "abi-7-36")]
             if flags.contains(InitFlags::FUSE_INIT_EXT) {
                 return InitFlags::from_bits_retain(
                     u64::from(self.arg.flags) | (u64::from(self.arg.flags2) << 32),
@@ -1725,7 +1729,20 @@ mod op {
             }),
             fuse_opcode::FUSE_INIT => Operation::Init(Init {
                 header,
-                arg: data.fetch()?,
+                arg: {
+                    // fuse_init_in may be truncated in an old version of kernel
+                    // or on macOS, or on FreeBSD.
+                    // So we copy as much as available, and zerofill the rest.
+                    let mut arg = fuse_init_in::new_zeroed();
+                    let data = data.fetch_all();
+                    // The oldest version of FUSE we support has four fields.
+                    if data.len() < offset_of!(fuse_init_in, flags2) {
+                        return None;
+                    }
+                    let prefix = cmp::min(data.len(), arg.as_bytes().len());
+                    arg.as_mut_bytes()[..prefix].copy_from_slice(&data[..prefix]);
+                    Box::new(arg)
+                },
             }),
             fuse_opcode::FUSE_OPENDIR => Operation::OpenDir(OpenDir {
                 header,
@@ -2159,31 +2176,7 @@ mod tests {
     use super::super::test::AlignedData;
     use super::*;
 
-    #[cfg(all(target_endian = "big", not(feature = "abi-7-36")))]
-    const INIT_REQUEST: AlignedData<[u8; 56]> = AlignedData([
-        // decimal 56 == hex 0x38
-        0x00, 0x00, 0x00, 0x38, 0x00, 0x00, 0x00, 0x1a, // len, opcode
-        0xde, 0xad, 0xbe, 0xef, 0xba, 0xad, 0xd0, 0x0d, // unique
-        0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, // nodeid
-        0xc0, 0x01, 0xd0, 0x0d, 0xc0, 0x01, 0xca, 0xfe, // uid, gid
-        0xc0, 0xde, 0xba, 0x5e, 0x00, 0x00, 0x00, 0x00, // pid, padding
-        0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x08, // major, minor
-        0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, // max_readahead, flags
-    ]);
-
-    #[cfg(all(target_endian = "little", not(feature = "abi-7-36")))]
-    const INIT_REQUEST: AlignedData<[u8; 56]> = AlignedData([
-        // decimal 56 == hex 0x38
-        0x38, 0x00, 0x00, 0x00, 0x1a, 0x00, 0x00, 0x00, // len, opcode
-        0x0d, 0xf0, 0xad, 0xba, 0xef, 0xbe, 0xad, 0xde, // unique
-        0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, // nodeid
-        0x0d, 0xd0, 0x01, 0xc0, 0xfe, 0xca, 0x01, 0xc0, // uid, gid
-        0x5e, 0xba, 0xde, 0xc0, 0x00, 0x00, 0x00, 0x00, // pid, padding
-        0x07, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, // major, minor
-        0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // max_readahead, flags
-    ]);
-
-    #[cfg(all(target_endian = "big", feature = "abi-7-36"))]
+    #[cfg(target_endian = "big")]
     const INIT_REQUEST: AlignedData<[u8; 104]> = AlignedData([
         // decimal 104 == hex 0x68
         0x00, 0x00, 0x00, 0x68, 0x00, 0x00, 0x00, 0x1a, // len, opcode
@@ -2200,7 +2193,7 @@ mod tests {
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     ]);
 
-    #[cfg(all(target_endian = "little", feature = "abi-7-36"))]
+    #[cfg(target_endian = "little")]
     const INIT_REQUEST: AlignedData<[u8; 104]> = AlignedData([
         // decimal 104 == hex 0x68
         0x68, 0x00, 0x00, 0x00, 0x1a, 0x00, 0x00, 0x00, // len, opcode
@@ -2251,9 +2244,6 @@ mod tests {
     #[test]
     fn short_read() {
         match AnyRequest::try_from(&INIT_REQUEST[..48]) {
-            #[cfg(not(feature = "abi-7-36"))]
-            Err(RequestError::ShortRead(48, 56)) => (),
-            #[cfg(feature = "abi-7-36")]
             Err(RequestError::ShortRead(48, 104)) => (),
             _ => panic!("Unexpected request parsing result"),
         }
@@ -2262,9 +2252,6 @@ mod tests {
     #[test]
     fn init() {
         let req = AnyRequest::try_from(&INIT_REQUEST[..]).unwrap();
-        #[cfg(not(feature = "abi-7-36"))]
-        assert_eq!(req.header.len, 56);
-        #[cfg(feature = "abi-7-36")]
         assert_eq!(req.header.len, 104);
         assert_eq!(req.header.opcode, 26);
         assert_eq!(req.unique(), RequestId(0xdead_beef_baad_f00d));
