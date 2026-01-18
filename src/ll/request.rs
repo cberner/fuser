@@ -300,6 +300,7 @@ mod op {
     use crate::OpenFlags;
     use crate::WriteFlags;
     use crate::ll::Response;
+    use crate::ll::read_flags::ReadFlags;
 
     /// Look up a directory entry by name and get its attributes.
     ///
@@ -698,15 +699,15 @@ mod op {
         }
         /// Only supported with ABI >= 7.9
         pub(crate) fn lock_owner(&self) -> Option<LockOwner> {
-            if self.arg.read_flags & FUSE_READ_LOCKOWNER != 0 {
+            if self.flags().contains(ReadFlags::FUSE_READ_LOCKOWNER) {
                 Some(LockOwner(self.arg.lock_owner))
             } else {
                 None
             }
         }
         /// The file flags, such as `O_SYNC`. Only supported with ABI >= 7.9
-        pub(crate) fn flags(&self) -> i32 {
-            self.arg.flags
+        pub(crate) fn flags(&self) -> ReadFlags {
+            ReadFlags::from_bits_retain(self.arg.flags)
         }
     }
 

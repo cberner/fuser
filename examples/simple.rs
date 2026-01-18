@@ -42,6 +42,7 @@ use fuser::KernelConfig;
 use fuser::MountOption;
 use fuser::OpenAccMode;
 use fuser::OpenFlags;
+use fuser::ReadFlags;
 use fuser::RenameFlags;
 use fuser::ReplyAttr;
 use fuser::ReplyCreate;
@@ -1451,7 +1452,7 @@ impl Filesystem for SimpleFS {
         fh: FileHandle,
         offset: i64,
         size: u32,
-        _flags: i32,
+        _flags: ReadFlags,
         _lock_owner: Option<u64>,
         reply: ReplyData,
     ) {

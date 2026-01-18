@@ -69,6 +69,7 @@ pub use crate::ll::fuse_abi::InitFlags;
 pub use crate::ll::fuse_abi::consts;
 use crate::ll::fuse_abi::consts::*;
 pub use crate::ll::ioctl_flags::IoctlFlags;
+pub use crate::ll::read_flags::ReadFlags;
 pub use crate::ll::request::FileHandle;
 pub use crate::ll::request::INodeNo;
 pub use crate::ll::write_flags::WriteFlags;
@@ -595,7 +596,7 @@ pub trait Filesystem {
         fh: FileHandle,
         offset: i64,
         size: u32,
-        flags: i32,
+        flags: ReadFlags,
         lock_owner: Option<u64>,
         reply: ReplyData,
     ) {

@@ -27,6 +27,7 @@ use fuser::INodeNo;
 use fuser::MountOption;
 use fuser::OpenAccMode;
 use fuser::OpenFlags;
+use fuser::ReadFlags;
 use fuser::ReplyAttr;
 use fuser::ReplyData;
 use fuser::ReplyDirectory;
@@ -160,7 +161,7 @@ impl Filesystem for ClockFS<'_> {
         _fh: FileHandle,
         offset: i64,
         size: u32,
-        _flags: i32,
+        _flags: ReadFlags,
         _lock_owner: Option<u64>,
         reply: ReplyData,
     ) {

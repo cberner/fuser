@@ -12,6 +12,7 @@ use fuser::FileHandle;
 use fuser::FileType;
 use fuser::INodeNo;
 use fuser::MountOption;
+use fuser::ReadFlags;
 use fuser::experimental;
 use fuser::experimental::AsyncFilesystem;
 use fuser::experimental::DirEntListBuilder;
@@ -97,7 +98,7 @@ impl AsyncFilesystem for HelloFS {
         _file_handle: FileHandle,
         offset: i64,
         _size: u32,
-        _flags: i32,
+        _flags: ReadFlags,
         _lock: Option<u64>,
         out_data: &mut Vec<u8>,
     ) -> experimental::Result<()> {
