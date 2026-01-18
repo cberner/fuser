@@ -82,7 +82,7 @@ impl Filesystem for ClockFS<'_> {
         reply.entry(
             &self.timeout,
             &ClockFS::stat(INodeNo(ClockFS::FILE_INO)).unwrap(),
-            0,
+            fuser::Generation(0),
         );
     }
 

@@ -71,7 +71,11 @@ impl AsyncFilesystem for HelloFS {
         name: &OsStr,
     ) -> experimental::Result<LookupResponse> {
         if parent == INodeNo::ROOT && name.to_str() == Some("hello.txt") {
-            Ok(LookupResponse::new(TTL, HELLO_TXT_ATTR, 0))
+            Ok(LookupResponse::new(
+                TTL,
+                HELLO_TXT_ATTR,
+                fuser::Generation(0),
+            ))
         } else {
             Err(Errno::ENOENT)
         }

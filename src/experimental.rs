@@ -8,6 +8,7 @@ use crate::FileAttr;
 use crate::FileHandle;
 use crate::FileType;
 use crate::Filesystem;
+use crate::Generation;
 use crate::INodeNo;
 use crate::ReplyAttr;
 use crate::ReplyData;
@@ -88,14 +89,14 @@ impl DirEntListBuilder<'_> {
 pub struct LookupResponse {
     ttl: Duration,
     attr: FileAttr,
-    generation: u64,
+    generation: Generation,
 }
 
 impl LookupResponse {
     /// `ttl` is the time for which this response may be cached
     /// `attr` is the attributes of the file
     /// `generation`
-    pub fn new(ttl: Duration, attr: FileAttr, generation: u64) -> Self {
+    pub fn new(ttl: Duration, attr: FileAttr, generation: Generation) -> Self {
         Self {
             ttl,
             attr,

@@ -64,7 +64,7 @@ struct HelloFS;
 impl Filesystem for HelloFS {
     fn lookup(&mut self, _req: &Request<'_>, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
         if u64::from(parent) == 1 && name.to_str() == Some("hello.txt") {
-            reply.entry(&TTL, &HELLO_TXT_ATTR, 0);
+            reply.entry(&TTL, &HELLO_TXT_ATTR, fuser::Generation(0));
         } else {
             reply.error(Errno::ENOENT);
         }

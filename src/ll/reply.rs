@@ -92,7 +92,7 @@ impl<'a> Response<'a> {
     ) -> Self {
         let d = abi::fuse_entry_out {
             nodeid: ino.into(),
-            generation: generation.into(),
+            generation: generation.0,
             entry_valid: entry_ttl.as_secs(),
             attr_valid: attr_ttl.as_secs(),
             entry_valid_nsec: entry_ttl.subsec_nanos(),

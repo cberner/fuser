@@ -62,6 +62,7 @@ pub use session::SessionACL;
 pub use session::SessionUnmounter;
 
 pub use crate::ll::Errno;
+pub use crate::ll::Generation;
 pub use crate::ll::RequestId;
 pub use crate::ll::TimeOrNow;
 pub use crate::ll::copy_file_range_flags::CopyFileRangeFlags;
