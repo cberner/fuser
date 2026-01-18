@@ -71,6 +71,7 @@ pub use crate::ll::fuse_abi::InitFlags;
 pub use crate::ll::fuse_abi::consts;
 use crate::ll::fuse_abi::consts::*;
 pub use crate::ll::ioctl_flags::IoctlFlags;
+pub use crate::ll::poll_flags::PollFlags;
 pub use crate::ll::read_flags::ReadFlags;
 pub use crate::ll::request::FileHandle;
 pub use crate::ll::request::INodeNo;
@@ -956,7 +957,7 @@ pub trait Filesystem {
         fh: FileHandle,
         ph: PollHandle,
         events: u32,
-        flags: u32,
+        flags: PollFlags,
         reply: ReplyPoll,
     ) {
         warn!(
