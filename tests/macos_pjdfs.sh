@@ -28,7 +28,7 @@ export PJDFS_EXIT_STATUS=1
 export RUST_BACKTRACE=1
 
 DATA_DIR=$(mktemp --directory)
-DIR=$(mktemp --directory)
+DIR=$(sudo mktemp --directory --tmpdir=/Volumes)
 
 cargo build --release --example simple
 cargo run --release --example simple -- -vvv --suid --data-dir $DATA_DIR --mount-point $DIR > /tmp/mount.log 2>&1 &
