@@ -22,7 +22,6 @@ use fuse2_sys::fuse_args;
 #[cfg(any(test, fuser_mount_impl = "libfuse2", fuser_mount_impl = "libfuse3"))]
 use mount_options::MountOption;
 
-#[cfg(any(test, fuser_mount_impl = "pure-rust"))]
 use crate::dev_fuse::DevFuse;
 
 /// Helper function to provide options as a `fuse_args` struct
@@ -86,7 +85,7 @@ fn libc_umount(mnt: &CStr) -> io::Result<()> {
 
 /// Warning: This will return true if the filesystem has been detached (lazy unmounted), but not
 /// yet destroyed by the kernel.
-#[cfg(any(test, fuser_mount_impl = "pure-rust"))]
+#[allow(dead_code)]
 fn is_mounted(fuse_device: &DevFuse) -> bool {
     use std::os::unix::io::AsFd;
     use std::slice;
@@ -119,6 +118,7 @@ fn is_mounted(fuse_device: &DevFuse) -> bool {
 #[cfg(test)]
 mod test {
     use std::ffi::CStr;
+    #[cfg(not(target_os = "macos"))]
     use std::mem::ManuallyDrop;
 
     use super::*;
@@ -142,6 +142,8 @@ mod test {
             },
         );
     }
+
+    #[cfg_attr(target_os = "macos", expect(dead_code))]
     fn cmd_mount() -> String {
         std::str::from_utf8(
             std::process::Command::new("sh")
