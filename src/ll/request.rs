@@ -369,61 +369,71 @@ mod op {
     }
     impl_request!(SetAttr<'_>);
     impl SetAttr<'_> {
+        fn valid(&self) -> FattrFlags {
+            FattrFlags::from_bits_retain(self.arg.valid)
+        }
         pub(crate) fn mode(&self) -> Option<u32> {
-            match self.arg.valid & FATTR_MODE {
-                0 => None,
-                _ => Some(self.arg.mode),
+            if self.valid().contains(FattrFlags::FATTR_MODE) {
+                Some(self.arg.mode)
+            } else {
+                None
             }
         }
         pub(crate) fn uid(&self) -> Option<u32> {
-            match self.arg.valid & FATTR_UID {
-                0 => None,
-                _ => Some(self.arg.uid),
+            if self.valid().contains(FattrFlags::FATTR_UID) {
+                Some(self.arg.uid)
+            } else {
+                None
             }
         }
         pub(crate) fn gid(&self) -> Option<u32> {
-            match self.arg.valid & FATTR_GID {
-                0 => None,
-                _ => Some(self.arg.gid),
+            if self.valid().contains(FattrFlags::FATTR_GID) {
+                Some(self.arg.gid)
+            } else {
+                None
             }
         }
         pub(crate) fn size(&self) -> Option<u64> {
-            match self.arg.valid & FATTR_SIZE {
-                0 => None,
-                _ => Some(self.arg.size),
+            if self.valid().contains(FattrFlags::FATTR_SIZE) {
+                Some(self.arg.size)
+            } else {
+                None
             }
         }
         pub(crate) fn atime(&self) -> Option<TimeOrNow> {
-            match self.arg.valid & FATTR_ATIME {
-                0 => None,
-                _ => Some(if self.arg.atime_now() {
+            if self.valid().contains(FattrFlags::FATTR_ATIME) {
+                Some(if self.arg.atime_now() {
                     TimeOrNow::Now
                 } else {
                     TimeOrNow::SpecificTime(system_time_from_time(
                         self.arg.atime,
                         self.arg.atimensec,
                     ))
-                }),
+                })
+            } else {
+                None
             }
         }
         pub(crate) fn mtime(&self) -> Option<TimeOrNow> {
-            match self.arg.valid & FATTR_MTIME {
-                0 => None,
-                _ => Some(if self.arg.mtime_now() {
+            if self.valid().contains(FattrFlags::FATTR_MTIME) {
+                Some(if self.arg.mtime_now() {
                     TimeOrNow::Now
                 } else {
                     TimeOrNow::SpecificTime(system_time_from_time(
                         self.arg.mtime,
                         self.arg.mtimensec,
                     ))
-                }),
+                })
+            } else {
+                None
             }
         }
         pub(crate) fn ctime(&self) -> Option<SystemTime> {
             #[cfg(feature = "abi-7-23")]
-            match self.arg.valid & FATTR_CTIME {
-                0 => None,
-                _ => Some(system_time_from_time(self.arg.ctime, self.arg.ctimensec)),
+            if self.valid().contains(FattrFlags::FATTR_CTIME) {
+                Some(system_time_from_time(self.arg.ctime, self.arg.ctimensec))
+            } else {
+                None
             }
             #[cfg(not(feature = "abi-7-23"))]
             None
@@ -433,54 +443,61 @@ mod op {
         /// This will only be set if the user passed a file-descriptor to set the
         /// attributes - i.e. they used [`libc::fchmod`] rather than [`libc::chmod`].
         pub(crate) fn file_handle(&self) -> Option<FileHandle> {
-            match self.arg.valid & FATTR_FH {
-                0 => None,
-                _ => Some(FileHandle(self.arg.fh)),
+            if self.valid().contains(FattrFlags::FATTR_FH) {
+                Some(FileHandle(self.arg.fh))
+            } else {
+                None
             }
         }
         pub(crate) fn crtime(&self) -> Option<SystemTime> {
             #[cfg(target_os = "macos")]
-            match self.arg.valid & FATTR_CRTIME {
-                0 => None,
+            if self.valid().contains(FattrFlags::FATTR_CRTIME) {
                 // During certain operation, macOS use some helper that send request to the mountpoint with `crtime` set to 0xffffffff83da4f80.
                 // That value correspond to `-2_082_844_800u64` which is the difference between the date 1904-01-01 and 1970-01-01 because macOS epoch start at 1904 and not 1970.
                 // https://github.com/macfuse/macfuse/issues/1042
-                _ if self.arg.crtime == 0xffffffff83da4f80 => None,
-                _ => Some(
-                    SystemTime::UNIX_EPOCH + Duration::new(self.arg.crtime, self.arg.crtimensec),
-                ),
+                if self.arg.crtime == 0xffffffff83da4f80 {
+                    None
+                } else {
+                    Some(
+                        SystemTime::UNIX_EPOCH
+                            + Duration::new(self.arg.crtime, self.arg.crtimensec),
+                    )
+                }
+            } else {
+                None
             }
             #[cfg(not(target_os = "macos"))]
             None
         }
         pub(crate) fn chgtime(&self) -> Option<SystemTime> {
             #[cfg(target_os = "macos")]
-            match self.arg.valid & FATTR_CHGTIME {
-                0 => None,
-                _ => Some(
-                    SystemTime::UNIX_EPOCH + Duration::new(self.arg.chgtime, self.arg.chgtimensec),
-                ),
+            if self.valid().contains(FattrFlags::FATTR_CHGTIME) {
+                Some(SystemTime::UNIX_EPOCH + Duration::new(self.arg.chgtime, self.arg.chgtimensec))
+            } else {
+                None
             }
             #[cfg(not(target_os = "macos"))]
             None
         }
         pub(crate) fn bkuptime(&self) -> Option<SystemTime> {
             #[cfg(target_os = "macos")]
-            match self.arg.valid & FATTR_BKUPTIME {
-                0 => None,
-                _ => Some(
+            if self.valid().contains(FattrFlags::FATTR_BKUPTIME) {
+                Some(
                     SystemTime::UNIX_EPOCH
                         + Duration::new(self.arg.bkuptime, self.arg.bkuptimensec),
-                ),
+                )
+            } else {
+                None
             }
             #[cfg(not(target_os = "macos"))]
             None
         }
         pub(crate) fn flags(&self) -> Option<u32> {
             #[cfg(target_os = "macos")]
-            match self.arg.valid & FATTR_FLAGS {
-                0 => None,
-                _ => Some(self.arg.flags),
+            if self.valid().contains(FattrFlags::FATTR_FLAGS) {
+                Some(self.arg.flags)
+            } else {
+                None
             }
             #[cfg(not(target_os = "macos"))]
             None
