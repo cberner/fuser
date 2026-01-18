@@ -58,7 +58,7 @@ test_passthrough:
 test: pre mount_tests pjdfs_tests xfstests
 	cargo test
 
-test_macos: pre
+test_macos:
 	cargo doc --all --no-deps --features=abi-7-21
 	./osx_mount_tests.sh
 	./tests/macos_pjdfs.sh
