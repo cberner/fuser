@@ -77,7 +77,7 @@ impl ClockFS<'_> {
 }
 
 impl Filesystem for ClockFS<'_> {
-    fn lookup(&mut self, _req: &Request<'_>, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
+    fn lookup(&mut self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
         if parent != INodeNo::ROOT || name != AsRef::<OsStr>::as_ref(&Self::FILE_NAME) {
             reply.error(Errno::ENOENT);
             return;
@@ -91,7 +91,7 @@ impl Filesystem for ClockFS<'_> {
         );
     }
 
-    fn forget(&mut self, _req: &Request<'_>, ino: INodeNo, _nlookup: u64) {
+    fn forget(&mut self, _req: &Request, ino: INodeNo, _nlookup: u64) {
         if ino == INodeNo(ClockFS::FILE_INO) {
             let prev = self.lookup_cnt.fetch_sub(_nlookup, SeqCst);
             assert!(prev >= _nlookup);
@@ -100,13 +100,7 @@ impl Filesystem for ClockFS<'_> {
         }
     }
 
-    fn getattr(
-        &mut self,
-        _req: &Request<'_>,
-        ino: INodeNo,
-        _fh: Option<FileHandle>,
-        reply: ReplyAttr,
-    ) {
+    fn getattr(&mut self, _req: &Request, ino: INodeNo, _fh: Option<FileHandle>, reply: ReplyAttr) {
         match self.stat(ino) {
             Some(a) => reply.attr(&Duration::MAX, &a),
             None => reply.error(Errno::ENOENT),
@@ -115,7 +109,7 @@ impl Filesystem for ClockFS<'_> {
 
     fn readdir(
         &mut self,
-        _req: &Request<'_>,
+        _req: &Request,
         ino: INodeNo,
         _fh: FileHandle,
         offset: i64,
@@ -140,7 +134,7 @@ impl Filesystem for ClockFS<'_> {
         }
     }
 
-    fn open(&mut self, _req: &Request<'_>, ino: INodeNo, flags: OpenFlags, reply: ReplyOpen) {
+    fn open(&mut self, _req: &Request, ino: INodeNo, flags: OpenFlags, reply: ReplyOpen) {
         if ino == INodeNo::ROOT {
             reply.error(Errno::EISDIR);
         } else if flags.acc_mode() != OpenAccMode::O_RDONLY {
@@ -156,7 +150,7 @@ impl Filesystem for ClockFS<'_> {
 
     fn read(
         &mut self,
-        _req: &Request<'_>,
+        _req: &Request,
         ino: INodeNo,
         _fh: FileHandle,
         offset: i64,
