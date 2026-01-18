@@ -59,6 +59,7 @@ pub use session::Session;
 pub use session::SessionACL;
 pub use session::SessionUnmounter;
 
+pub use crate::access_flags::AccessFlags;
 pub use crate::ll::Errno;
 pub use crate::ll::Generation;
 pub use crate::ll::RequestId;
@@ -81,6 +82,7 @@ pub use crate::open_flags::OpenFlags;
 pub use crate::rename_flags::RenameFlags;
 use crate::session::MAX_WRITE_SIZE;
 
+mod access_flags;
 mod channel;
 mod dev_fuse;
 /// Experimental APIs
@@ -829,7 +831,7 @@ pub trait Filesystem {
     /// This will be called for the `access()` system call. If the `default_permissions`
     /// mount option is given, this method is not called. This method is not called
     /// under Linux kernel versions 2.4.x
-    fn access(&mut self, _req: &Request<'_>, ino: INodeNo, mask: i32, reply: ReplyEmpty) {
+    fn access(&mut self, _req: &Request<'_>, ino: INodeNo, mask: AccessFlags, reply: ReplyEmpty) {
         warn!("[Not Implemented] access(ino: {ino:#x?}, mask: {mask})");
         reply.error(Errno::ENOSYS);
     }

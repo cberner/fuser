@@ -294,6 +294,7 @@ mod op {
     use super::RequestId;
     use super::abi::consts::*;
     use super::abi::*;
+    use crate::AccessFlags;
     use crate::CopyFileRangeFlags;
     use crate::Errno;
     use crate::IoctlFlags;
@@ -1214,8 +1215,8 @@ mod op {
     }
     impl_request!(Access<'a>);
     impl Access<'_> {
-        pub(crate) fn mask(&self) -> i32 {
-            self.arg.mask
+        pub(crate) fn mask(&self) -> AccessFlags {
+            AccessFlags::from_bits_retain(self.arg.mask)
         }
     }
 
