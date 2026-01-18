@@ -256,29 +256,6 @@ impl InitFlags {
 }
 
 pub mod consts {
-    // Bitmasks for fuse_setattr_in.valid
-    pub const FATTR_MODE: u32 = super::FattrFlags::FATTR_MODE.bits();
-    pub const FATTR_UID: u32 = super::FattrFlags::FATTR_UID.bits();
-    pub const FATTR_GID: u32 = super::FattrFlags::FATTR_GID.bits();
-    pub const FATTR_SIZE: u32 = super::FattrFlags::FATTR_SIZE.bits();
-    pub const FATTR_ATIME: u32 = super::FattrFlags::FATTR_ATIME.bits();
-    pub const FATTR_MTIME: u32 = super::FattrFlags::FATTR_MTIME.bits();
-    pub const FATTR_FH: u32 = super::FattrFlags::FATTR_FH.bits();
-    pub const FATTR_ATIME_NOW: u32 = super::FattrFlags::FATTR_ATIME_NOW.bits();
-    pub const FATTR_MTIME_NOW: u32 = super::FattrFlags::FATTR_MTIME_NOW.bits();
-    pub const FATTR_LOCKOWNER: u32 = super::FattrFlags::FATTR_LOCKOWNER.bits();
-    #[cfg(feature = "abi-7-23")]
-    pub const FATTR_CTIME: u32 = super::FattrFlags::FATTR_CTIME.bits();
-
-    #[cfg(target_os = "macos")]
-    pub const FATTR_CRTIME: u32 = super::FattrFlags::FATTR_CRTIME.bits();
-    #[cfg(target_os = "macos")]
-    pub const FATTR_CHGTIME: u32 = super::FattrFlags::FATTR_CHGTIME.bits();
-    #[cfg(target_os = "macos")]
-    pub const FATTR_BKUPTIME: u32 = super::FattrFlags::FATTR_BKUPTIME.bits();
-    #[cfg(target_os = "macos")]
-    pub const FATTR_FLAGS: u32 = super::FattrFlags::FATTR_FLAGS.bits();
-
     // Flags returned by the open request
     // bypass page cache for this open file
     pub const FOPEN_DIRECT_IO: u32 = super::FopenFlags::FOPEN_DIRECT_IO.bits();
