@@ -25,7 +25,8 @@ jobs:
 
       - name: Install packages
         run: |
-          brew update > /dev/null && brew install macfuse autoconf automake
+          brew update > /dev/null && brew install autoconf automake
+          brew install --cask macfuse
 
       - name: Install Rust
         run: |
