@@ -468,13 +468,9 @@ pub(crate) enum fuse_opcode {
     FUSE_NOTIFY_REPLY = 41,
     FUSE_BATCH_FORGET = 42,
     FUSE_FALLOCATE = 43,
-    #[cfg(feature = "abi-7-21")]
     FUSE_READDIRPLUS = 44,
-    #[cfg(feature = "abi-7-23")]
     FUSE_RENAME2 = 45,
-    #[cfg(feature = "abi-7-24")]
     FUSE_LSEEK = 46,
-    #[cfg(feature = "abi-7-28")]
     FUSE_COPY_FILE_RANGE = 47,
 
     #[cfg(target_os = "macos")]

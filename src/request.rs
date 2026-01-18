@@ -24,7 +24,6 @@ use crate::ll::Response;
 use crate::ll::fuse_abi as abi;
 use crate::reply::Reply;
 use crate::reply::ReplyDirectory;
-#[cfg(feature = "abi-7-21")]
 use crate::reply::ReplyDirectoryPlus;
 use crate::reply::ReplyRaw;
 use crate::session::Session;
@@ -484,7 +483,6 @@ impl<'a> Request<'a> {
                     self.reply(),
                 );
             }
-            #[cfg(feature = "abi-7-21")]
             ll::Operation::ReadDirPlus(x) => {
                 se.filesystem.readdirplus(
                     self,
@@ -498,7 +496,6 @@ impl<'a> Request<'a> {
                     ),
                 );
             }
-            #[cfg(feature = "abi-7-23")]
             ll::Operation::Rename2(x) => {
                 se.filesystem.rename(
                     self,
@@ -510,7 +507,6 @@ impl<'a> Request<'a> {
                     self.reply(),
                 );
             }
-            #[cfg(feature = "abi-7-24")]
             ll::Operation::Lseek(x) => {
                 se.filesystem.lseek(
                     self,
@@ -521,7 +517,6 @@ impl<'a> Request<'a> {
                     self.reply(),
                 );
             }
-            #[cfg(feature = "abi-7-28")]
             ll::Operation::CopyFileRange(x) => {
                 let (i, o) = (x.src(), x.dest());
                 se.filesystem.copy_file_range(

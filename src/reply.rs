@@ -606,7 +606,6 @@ pub struct ReplyDirectoryPlus {
 
 impl ReplyDirectoryPlus {
     /// Creates a new `ReplyDirectory` with a specified buffer size.
-    #[cfg_attr(not(feature = "abi-7-21"), expect(dead_code))]
     pub(crate) fn new<S: ReplySender>(
         unique: ll::RequestId,
         sender: S,
