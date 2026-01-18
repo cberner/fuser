@@ -272,14 +272,17 @@ macro_rules! impl_request {
 }
 
 mod op {
+    use std::cmp;
     use std::convert::TryInto;
     use std::ffi::OsStr;
     use std::fmt::Display;
+    use std::mem::offset_of;
     use std::num::NonZeroU32;
     use std::path::Path;
     use std::time::Duration;
     use std::time::SystemTime;
 
+    use zerocopy::FromZeros;
     use zerocopy::IntoBytes;
 
     use super::super::TimeOrNow;
@@ -962,21 +965,20 @@ mod op {
     #[derive(Debug)]
     pub(crate) struct Init<'a> {
         header: &'a fuse_in_header,
-        arg: &'a fuse_init_in,
+        /// Unlike other operation we put this in a box,
+        /// because we memcopy prefix into it instead of casting.
+        arg: Box<fuse_init_in>,
     }
     impl_request!(Init<'a>);
     impl<'a> Init<'a> {
         pub(crate) fn capabilities(&self) -> InitFlags {
-            #[cfg(any(target_os = "linux", target_os = "macos"))]
-            {
-                InitFlags::from_bits_retain(
+            let flags = InitFlags::from_bits_retain(u64::from(self.arg.flags));
+            if flags.contains(InitFlags::FUSE_INIT_EXT) {
+                return InitFlags::from_bits_retain(
                     u64::from(self.arg.flags) | (u64::from(self.arg.flags2) << 32),
-                )
+                );
             }
-            #[cfg(target_os = "freebsd")]
-            {
-                InitFlags::from_bits_retain(u64::from(self.arg.flags))
-            }
+            flags
         }
         pub(crate) fn max_readahead(&self) -> u32 {
             self.arg.max_readahead
@@ -1727,7 +1729,20 @@ mod op {
             }),
             fuse_opcode::FUSE_INIT => Operation::Init(Init {
                 header,
-                arg: data.fetch()?,
+                arg: {
+                    // fuse_init_in may be truncated in an old version of kernel
+                    // or on macOS, or on FreeBSD.
+                    // So we copy as much as available, and zerofill the rest.
+                    let mut arg = fuse_init_in::new_zeroed();
+                    let data = data.fetch_all();
+                    // The oldest version of FUSE we support has four fields.
+                    if data.len() < offset_of!(fuse_init_in, flags2) {
+                        return None;
+                    }
+                    let prefix = cmp::min(data.len(), arg.as_bytes().len());
+                    arg.as_mut_bytes()[..prefix].copy_from_slice(&data[..prefix]);
+                    Box::new(arg)
+                },
             }),
             fuse_opcode::FUSE_OPENDIR => Operation::OpenDir(OpenDir {
                 header,

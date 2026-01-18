@@ -811,16 +811,13 @@ pub(crate) struct fuse_access_in {
 }
 
 #[repr(C)]
-#[derive(Debug, FromBytes, KnownLayout, Immutable)]
+#[derive(Debug, FromBytes, KnownLayout, Immutable, IntoBytes)]
 pub(crate) struct fuse_init_in {
     pub(crate) major: u32,
     pub(crate) minor: u32,
     pub(crate) max_readahead: u32,
     pub(crate) flags: u32,
-    // FreeBSD does not have fields these fields.
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
     pub(crate) flags2: u32,
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
     pub(crate) unused: [u32; 11],
 }
 
