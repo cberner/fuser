@@ -297,6 +297,7 @@ mod op {
     use crate::CopyFileRangeFlags;
     use crate::IoctlFlags;
     use crate::OpenFlags;
+    use crate::PollFlags;
     use crate::WriteFlags;
     use crate::ll::Response;
     use crate::ll::read_flags::ReadFlags;
@@ -1366,8 +1367,8 @@ mod op {
         }
 
         /// The poll request's flags
-        pub(crate) fn flags(&self) -> u32 {
-            self.arg.flags
+        pub(crate) fn flags(&self) -> PollFlags {
+            PollFlags::from_bits_retain(self.arg.flags)
         }
     }
 

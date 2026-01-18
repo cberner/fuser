@@ -27,6 +27,7 @@ use fuser::INodeNo;
 use fuser::MountOption;
 use fuser::OpenAccMode;
 use fuser::OpenFlags;
+use fuser::PollFlags;
 use fuser::PollHandle;
 use fuser::ReadFlags;
 use fuser::ReplyAttr;
@@ -36,7 +37,6 @@ use fuser::ReplyEmpty;
 use fuser::ReplyEntry;
 use fuser::ReplyOpen;
 use fuser::Request;
-use fuser::consts::FUSE_POLL_SCHEDULE_NOTIFY;
 
 const NUMFILES: u8 = 16;
 const MAXBYTES: u64 = 10;
@@ -279,7 +279,7 @@ impl fuser::Filesystem for FSelFS {
         fh: FileHandle,
         ph: PollHandle,
         _events: u32,
-        flags: u32,
+        flags: PollFlags,
         reply: fuser::ReplyPoll,
     ) {
         static POLLED_ZERO: AtomicU64 = AtomicU64::new(0);
@@ -296,7 +296,7 @@ impl fuser::Filesystem for FSelFS {
         let revents = {
             let mut d = self.get_data();
 
-            if flags & FUSE_POLL_SCHEDULE_NOTIFY != 0 {
+            if flags.contains(PollFlags::FUSE_POLL_SCHEDULE_NOTIFY) {
                 d.notify_mask |= 1 << idx;
                 d.poll_handles[idx as usize] = ph.into();
             }
