@@ -16,8 +16,6 @@
 //! - supports ABI 7.19 since FUSE 2.9.1
 //! - supports ABI 7.26 since FUSE 3.0.0
 //!
-//! FreeBSD kernel headers: <https://github.com/freebsd/freebsd-src/blob/main/sys/fs/fuse/fuse_kernel.h>
-//!
 //! Items without a version annotation are valid with ABI 7.8 and later
 
 #![warn(missing_debug_implementations)]
@@ -817,10 +815,9 @@ pub(crate) struct fuse_init_in {
     pub(crate) minor: u32,
     pub(crate) max_readahead: u32,
     pub(crate) flags: u32,
-    // FreeBSD does not have fields these fields.
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[cfg(feature = "abi-7-36")]
     pub(crate) flags2: u32,
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[cfg(feature = "abi-7-36")]
     pub(crate) unused: [u32; 11],
 }
 
