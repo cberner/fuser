@@ -5,6 +5,7 @@
 //!
 //! TODO: This module is meant to go away soon in favor of `ll::Request`.
 
+use std::borrow::Cow;
 use std::convert::TryFrom;
 use std::path::Path;
 
@@ -13,6 +14,7 @@ use log::error;
 use log::warn;
 
 use crate::Filesystem;
+use crate::InitFlags;
 use crate::KernelConfig;
 use crate::PollHandle;
 use crate::RenameFlags;
@@ -116,6 +118,32 @@ impl<'a> Request<'a> {
 
                 // Remember the ABI version supported by kernel and mark the session initialized.
                 se.proto_version = Some(v);
+
+                for bit in 0..64 {
+                    let bitflags = InitFlags::from_bits_retain(1 << bit);
+                    if bitflags == InitFlags::FUSE_INIT_EXT {
+                        continue;
+                    }
+                    let bitflag_is_known = InitFlags::all().contains(bitflags);
+                    let kernel_supports = x.capabilities().contains(bitflags);
+                    let we_requested = config.requested.contains(bitflags);
+                    // On macOS, there's a clash between linux and macOS constants,
+                    // so we pick macOS ones (last).
+                    let name = if let Some((name, _)) = bitflags.iter_names().last() {
+                        Cow::Borrowed(name)
+                    } else {
+                        Cow::Owned(format!("(1 << {bit})"))
+                    };
+                    if we_requested && kernel_supports {
+                        debug!("capability {name} enabled")
+                    } else if we_requested {
+                        debug!("capability {name} not supported by kernel")
+                    } else if kernel_supports {
+                        debug!("capability {name} not requested by client")
+                    } else if bitflag_is_known {
+                        debug!("capability {name} not supported nor requested")
+                    }
+                }
 
                 // Reply with our desired version and settings. If the kernel supports a
                 // larger major version, it'll re-send a matching init message. If it
