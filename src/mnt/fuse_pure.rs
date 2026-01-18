@@ -24,6 +24,7 @@ use std::io::ErrorKind;
 use std::io::IoSliceMut;
 use std::io::Read;
 use std::mem;
+use std::os::fd::AsFd;
 use std::os::fd::BorrowedFd;
 use std::os::unix::ffi::OsStrExt;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -242,6 +243,24 @@ fn receive_fusermount_message(socket: &UnixStream) -> Result<DevFuse, Error> {
     ))
 }
 
+/// Clear `FD_CLOEXEC` after fork before exec.
+/// This is needed to pass the file descriptor to a child process without risking descriptor leak.
+unsafe fn clear_cloexec_in_pre_exec(command: &mut Command, fd: BorrowedFd<'_>) {
+    let fd = fd.as_raw_fd();
+    unsafe {
+        command.pre_exec(move || {
+            let fd = BorrowedFd::borrow_raw(fd);
+            let current_flags = fcntl(fd, FcntlArg::F_GETFD)?;
+            let current_flags = FdFlag::from_bits_retain(current_flags);
+            if current_flags.contains(FdFlag::FD_CLOEXEC) {
+                let cleared = current_flags & !FdFlag::FD_CLOEXEC;
+                fcntl(fd, FcntlArg::F_SETFD(cleared))?;
+            }
+            Ok(())
+        })
+    };
+}
+
 fn fuse_mount_fusermount(
     mountpoint: &OsStr,
     options: &[MountOption],
@@ -254,9 +273,6 @@ fn fuse_mount_fusermount(
 
     let (child_socket, receive_socket) = UnixStream::pair()?;
 
-    // TODO: do not ignore error.
-    let _ = fcntl(&child_socket, FcntlArg::F_SETFD(FdFlag::empty()));
-
     let mut builder = Command::new(&fusermount_bin);
     builder.stdout(Stdio::piped()).stderr(Stdio::piped());
     if !options.is_empty() {
@@ -268,6 +284,10 @@ fn fuse_mount_fusermount(
         .arg("--")
         .arg(mountpoint)
         .env(FUSERMOUNT_COMM_ENV, child_socket.as_raw_fd().to_string());
+
+    unsafe {
+        clear_cloexec_in_pre_exec(&mut builder, child_socket.as_fd());
+    }
 
     let fusermount_child = builder.spawn()?;
 
@@ -346,18 +366,7 @@ fn fuse_mount_mount_fusefs(
 
     builder.arg(fuse_fd.to_string()).arg(mountpoint);
 
-    unsafe {
-        builder.pre_exec(move || {
-            let fd = BorrowedFd::borrow_raw(fuse_fd);
-            let current_flags = fcntl(fd, FcntlArg::F_GETFD)?;
-            let current_flags = FdFlag::from_bits_retain(current_flags);
-            if current_flags.contains(FdFlag::FD_CLOEXEC) {
-                let cleared = current_flags & !FdFlag::FD_CLOEXEC;
-                fcntl(fd, FcntlArg::F_SETFD(cleared))?;
-            }
-            Ok(())
-        });
-    }
+    unsafe { clear_cloexec_in_pre_exec(&mut builder, fuse_device.as_fd()) };
 
     let output = builder.output()?;
     if !output.status.success() {
