@@ -40,6 +40,7 @@ use fuser::FopenFlags;
 use fuser::INodeNo;
 use fuser::InitFlags;
 use fuser::KernelConfig;
+use fuser::LockOwner;
 use fuser::MountOption;
 use fuser::OpenAccMode;
 use fuser::OpenFlags;
@@ -1457,7 +1458,7 @@ impl Filesystem for SimpleFS {
         offset: i64,
         size: u32,
         _flags: ReadFlags,
-        _lock_owner: Option<u64>,
+        _lock_owner: Option<LockOwner>,
         reply: ReplyData,
     ) {
         debug!("read() called on {ino:?} offset={offset:?} size={size:?}");
@@ -1493,7 +1494,7 @@ impl Filesystem for SimpleFS {
         data: &[u8],
         _write_flags: WriteFlags,
         _flags: i32,
-        _lock_owner: Option<u64>,
+        _lock_owner: Option<LockOwner>,
         reply: ReplyWrite,
     ) {
         debug!("write() called with {:?} size={:?}", ino, data.len());
@@ -1538,7 +1539,7 @@ impl Filesystem for SimpleFS {
         _ino: INodeNo,
         _fh: FileHandle,
         _flags: i32,
-        _lock_owner: Option<u64>,
+        _lock_owner: Option<LockOwner>,
         _flush: bool,
         reply: ReplyEmpty,
     ) {

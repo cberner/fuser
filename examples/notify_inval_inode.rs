@@ -25,6 +25,7 @@ use fuser::FileType;
 use fuser::Filesystem;
 use fuser::FopenFlags;
 use fuser::INodeNo;
+use fuser::LockOwner;
 use fuser::MountOption;
 use fuser::OpenAccMode;
 use fuser::OpenFlags;
@@ -162,7 +163,7 @@ impl Filesystem for ClockFS<'_> {
         offset: i64,
         size: u32,
         _flags: ReadFlags,
-        _lock_owner: Option<u64>,
+        _lock_owner: Option<LockOwner>,
         reply: ReplyData,
     ) {
         assert!(ino == INodeNo(Self::FILE_INO));

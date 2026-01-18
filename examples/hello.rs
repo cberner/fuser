@@ -12,6 +12,7 @@ use fuser::FileHandle;
 use fuser::FileType;
 use fuser::Filesystem;
 use fuser::INodeNo;
+use fuser::LockOwner;
 use fuser::MountOption;
 use fuser::ReadFlags;
 use fuser::ReplyAttr;
@@ -93,7 +94,7 @@ impl Filesystem for HelloFS {
         offset: i64,
         _size: u32,
         _flags: ReadFlags,
-        _lock_owner: Option<u64>,
+        _lock_owner: Option<LockOwner>,
         reply: ReplyData,
     ) {
         if u64::from(ino) == 2 {

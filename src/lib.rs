@@ -74,6 +74,7 @@ pub use crate::ll::ioctl_flags::IoctlFlags;
 pub use crate::ll::read_flags::ReadFlags;
 pub use crate::ll::request::FileHandle;
 pub use crate::ll::request::INodeNo;
+pub use crate::ll::request::LockOwner;
 pub use crate::ll::write_flags::WriteFlags;
 use crate::mnt::mount_options::check_option_conflicts;
 pub use crate::open_flags::OpenAccMode;
@@ -599,7 +600,7 @@ pub trait Filesystem {
         offset: i64,
         size: u32,
         flags: ReadFlags,
-        lock_owner: Option<u64>,
+        lock_owner: Option<LockOwner>,
         reply: ReplyData,
     ) {
         warn!(
@@ -630,7 +631,7 @@ pub trait Filesystem {
         data: &[u8],
         write_flags: WriteFlags,
         flags: i32,
-        lock_owner: Option<u64>,
+        lock_owner: Option<LockOwner>,
         reply: ReplyWrite,
     ) {
         warn!(
@@ -657,7 +658,7 @@ pub trait Filesystem {
         _req: &Request<'_>,
         ino: INodeNo,
         fh: FileHandle,
-        lock_owner: u64,
+        lock_owner: LockOwner,
         reply: ReplyEmpty,
     ) {
         warn!("[Not Implemented] flush(ino: {ino:#x?}, fh: {fh}, lock_owner: {lock_owner:?})");
@@ -678,7 +679,7 @@ pub trait Filesystem {
         _ino: INodeNo,
         _fh: FileHandle,
         _flags: i32,
-        _lock_owner: Option<u64>,
+        _lock_owner: Option<LockOwner>,
         _flush: bool,
         reply: ReplyEmpty,
     ) {
@@ -872,7 +873,7 @@ pub trait Filesystem {
         _req: &Request<'_>,
         ino: INodeNo,
         fh: FileHandle,
-        lock_owner: u64,
+        lock_owner: LockOwner,
         start: u64,
         end: u64,
         typ: i32,
@@ -898,7 +899,7 @@ pub trait Filesystem {
         _req: &Request<'_>,
         ino: INodeNo,
         fh: FileHandle,
-        lock_owner: u64,
+        lock_owner: LockOwner,
         start: u64,
         end: u64,
         typ: i32,
