@@ -147,17 +147,13 @@ impl Display for FileHandle {
 /// TODO: Document lock lifecycle and how and when to implement file locking.
 ///
 /// See [`Read`], [`Write`], [`Release`], [`Flush`], [`GetLk`], [`SetLk`], [`SetLkW`].
-///
-/// We implement conversion from [`LockOwner`] to [`u64`] but not vice-versa
-/// because all `LockOwners` are valid [`u64`]s, but not vice-versa.  So to produce
-/// a [`LockOwner`] from a [`u64`] we must be explicit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "serializable", derive(Serialize, Deserialize))]
-pub(crate) struct LockOwner(pub(crate) u64);
+pub struct LockOwner(pub u64);
 
-impl From<LockOwner> for u64 {
-    fn from(fh: LockOwner) -> Self {
-        fh.0
+impl Display for LockOwner {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        Display::fmt(&self.0, f)
     }
 }
 

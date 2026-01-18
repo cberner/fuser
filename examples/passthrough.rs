@@ -24,6 +24,7 @@ use fuser::Filesystem;
 use fuser::INodeNo;
 use fuser::InitFlags;
 use fuser::KernelConfig;
+use fuser::LockOwner;
 use fuser::MountOption;
 use fuser::OpenFlags;
 use fuser::ReplyAttr;
@@ -214,7 +215,7 @@ impl Filesystem for PassthroughFs {
         _ino: INodeNo,
         _fh: FileHandle,
         _flags: i32,
-        _lock_owner: Option<u64>,
+        _lock_owner: Option<LockOwner>,
         _flush: bool,
         reply: ReplyEmpty,
     ) {

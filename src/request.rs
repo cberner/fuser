@@ -262,7 +262,7 @@ impl<'a> Request<'a> {
                     x.offset(),
                     x.size(),
                     x.flags(),
-                    x.lock_owner().map(std::convert::Into::into),
+                    x.lock_owner(),
                     self.reply(),
                 );
             }
@@ -275,7 +275,7 @@ impl<'a> Request<'a> {
                     x.data(),
                     x.write_flags(),
                     x.flags(),
-                    x.lock_owner().map(std::convert::Into::into),
+                    x.lock_owner(),
                     self.reply(),
                 );
             }
@@ -284,7 +284,7 @@ impl<'a> Request<'a> {
                     self,
                     self.request.nodeid(),
                     x.file_handle(),
-                    x.lock_owner().into(),
+                    x.lock_owner(),
                     self.reply(),
                 );
             }
@@ -294,7 +294,7 @@ impl<'a> Request<'a> {
                     self.request.nodeid(),
                     x.file_handle(),
                     x.flags(),
-                    x.lock_owner().map(std::convert::Into::into),
+                    x.lock_owner(),
                     x.flush(),
                     self.reply(),
                 );
@@ -391,7 +391,7 @@ impl<'a> Request<'a> {
                     self,
                     self.request.nodeid(),
                     x.file_handle(),
-                    x.lock_owner().into(),
+                    x.lock_owner(),
                     x.lock().range.0,
                     x.lock().range.1,
                     x.lock().typ,
@@ -404,7 +404,7 @@ impl<'a> Request<'a> {
                     self,
                     self.request.nodeid(),
                     x.file_handle(),
-                    x.lock_owner().into(),
+                    x.lock_owner(),
                     x.lock().range.0,
                     x.lock().range.1,
                     x.lock().typ,
@@ -418,7 +418,7 @@ impl<'a> Request<'a> {
                     self,
                     self.request.nodeid(),
                     x.file_handle(),
-                    x.lock_owner().into(),
+                    x.lock_owner(),
                     x.lock().range.0,
                     x.lock().range.1,
                     x.lock().typ,

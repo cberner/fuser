@@ -24,6 +24,7 @@ use fuser::FileHandle;
 use fuser::FileType;
 use fuser::FopenFlags;
 use fuser::INodeNo;
+use fuser::LockOwner;
 use fuser::MountOption;
 use fuser::OpenAccMode;
 use fuser::OpenFlags;
@@ -226,7 +227,7 @@ impl fuser::Filesystem for FSelFS {
         _ino: INodeNo,
         _fh: FileHandle,
         _flags: i32,
-        _lock_owner: Option<u64>,
+        _lock_owner: Option<LockOwner>,
         _flush: bool,
         reply: ReplyEmpty,
     ) {
@@ -247,7 +248,7 @@ impl fuser::Filesystem for FSelFS {
         _offset: i64,
         size: u32,
         _flags: ReadFlags,
-        _lock_owner: Option<u64>,
+        _lock_owner: Option<LockOwner>,
         reply: ReplyData,
     ) {
         let fh: u64 = fh.into();
