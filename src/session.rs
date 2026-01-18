@@ -32,7 +32,6 @@ use crate::channel::Channel;
 use crate::channel::ChannelSender;
 use crate::dev_fuse::DevFuse;
 use crate::ll::Version;
-use crate::ll::fuse_abi as abi;
 use crate::mnt::Mount;
 use crate::notify::Notifier;
 use crate::request::Request;
@@ -157,8 +156,8 @@ impl<FS: Filesystem> Session<FS> {
     pub fn run(&mut self) -> io::Result<()> {
         // Buffer for receiving requests from the kernel. Only one is allocated and
         // it is reused immediately after dispatching to conserve memory and allocations.
-        let mut buffer = vec![0; BUFFER_SIZE];
-        let buf = aligned_sub_buf(&mut buffer, align_of::<abi::fuse_in_header>());
+        let mut buf: Vec<u64> = vec![0u64; BUFFER_SIZE / size_of::<u64>()];
+        let buf: &mut [u8] = bytemuck::cast_slice_mut(&mut buf);
         loop {
             // Read the next request from the given channel to kernel driver
             // The kernel driver makes sure that we get exactly one request per read
@@ -213,15 +212,6 @@ impl SessionUnmounter {
     pub fn unmount(&mut self) -> io::Result<()> {
         drop(std::mem::take(&mut *self.mount.lock().unwrap()));
         Ok(())
-    }
-}
-
-fn aligned_sub_buf(buf: &mut [u8], alignment: usize) -> &mut [u8] {
-    let off = alignment - (buf.as_ptr() as usize) % alignment;
-    if off == alignment {
-        buf
-    } else {
-        &mut buf[off..]
     }
 }
 
