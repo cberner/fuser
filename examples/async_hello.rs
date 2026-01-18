@@ -100,7 +100,7 @@ impl AsyncFilesystem for HelloFS {
         _context: &RequestContext,
         ino: INodeNo,
         _file_handle: FileHandle,
-        offset: i64,
+        offset: u64,
         _size: u32,
         _flags: ReadFlags,
         _lock: Option<u64>,
@@ -119,7 +119,7 @@ impl AsyncFilesystem for HelloFS {
         _context: &RequestContext,
         ino: INodeNo,
         _file_handle: FileHandle,
-        offset: i64,
+        offset: u64,
         mut builder: DirEntListBuilder<'_>,
     ) -> experimental::Result<()> {
         if ino != INodeNo::ROOT {
@@ -134,7 +134,7 @@ impl AsyncFilesystem for HelloFS {
 
         for (i, entry) in entries.into_iter().enumerate().skip(offset as usize) {
             // i + 1 means the index of the next entry
-            if builder.add(INodeNo(entry.0), (i + 1) as i64, entry.1, entry.2) {
+            if builder.add(INodeNo(entry.0), (i + 1) as u64, entry.1, entry.2) {
                 break;
             }
         }
