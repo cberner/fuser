@@ -226,12 +226,40 @@ bitflags! {
         const FUSE_NO_OPENDIR_SUPPORT = 1 << 24;
         /// only invalidate cached pages on explicit request
         const FUSE_EXPLICIT_INVAL_DATA = 1 << 25;
+        /// map_alignment field is valid
+        const FUSE_MAP_ALIGNMENT = 1 << 26;
+        /// filesystem supports submounts
+        const FUSE_SUBMOUNTS = 1 << 27;
+        /// fs handles killing suid/sgid/cap on write/chown/trunc (v2)
+        const FUSE_HANDLE_KILLPRIV_V2 = 1 << 28;
+        /// extended setxattr support
+        const FUSE_SETXATTR_EXT = 1 << 29;
         /// extended fuse_init_in request
         const FUSE_INIT_EXT = 1 << 30;
         /// reserved, do not use
         const FUSE_INIT_RESERVED = 1 << 31;
+        /// add security context to create/mkdir/symlink/mknod
+        const FUSE_SECURITY_CTX = 1 << 32;
+        /// filesystem supports per-inode DAX
+        const FUSE_HAS_INODE_DAX = 1 << 33;
+        /// create with supplementary group
+        const FUSE_CREATE_SUPP_GROUP = 1 << 34;
+        /// kernel supports expire-only invalidation
+        const FUSE_HAS_EXPIRE_ONLY = 1 << 35;
+        /// allow mmap for direct I/O files
+        const FUSE_DIRECT_IO_ALLOW_MMAP = 1 << 36;
         /// filesystem wants to use passthrough files
         const FUSE_PASSTHROUGH = 1 << 37;
+        /// filesystem does not support export
+        const FUSE_NO_EXPORT_SUPPORT = 1 << 38;
+        /// kernel supports resend requests
+        const FUSE_HAS_RESEND = 1 << 39;
+        /// allow idmapped mounts
+        const FUSE_ALLOW_IDMAP = 1 << 40;
+        /// kernel supports io_uring for communication
+        const FUSE_OVER_IO_URING = 1 << 41;
+        /// kernel supports request timeout
+        const FUSE_REQUEST_TIMEOUT = 1 << 42;
 
         #[cfg(target_os = "macos")]
         const FUSE_ALLOCATE = 1 << 27;
