@@ -23,8 +23,8 @@ RED="\e[31m"
 function run_test {
   DIR=$(sudo mktemp -d -p /Volumes)
   sudo chown $USER $DIR
-  cargo build --example hello > /dev/null 2>&1
-  cargo run --example hello -- $DIR $2 &
+  cargo build --example hello --features=libfuse > /dev/null 2>&1
+  cargo run --example hello --features=libfuse -- $DIR $2 &
   FUSE_PID=$!
   sleep 2
 
