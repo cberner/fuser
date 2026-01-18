@@ -1028,26 +1028,22 @@ mod op {
                 max_background: config.max_background,
                 congestion_threshold: config.congestion_threshold(),
                 max_write: config.max_write,
-                #[cfg(feature = "abi-7-23")]
                 time_gran: config.time_gran.as_nanos() as u32,
-                #[cfg(all(feature = "abi-7-23", not(feature = "abi-7-28")))]
-                reserved: [0; 9],
-                #[cfg(feature = "abi-7-28")]
                 max_pages: config.max_pages(),
-                #[cfg(feature = "abi-7-28")]
                 unused2: 0,
-                #[cfg(all(feature = "abi-7-28", not(feature = "abi-7-36")))]
-                reserved: [0; 8],
-                #[cfg(feature = "abi-7-36")]
                 flags2: flags.pair().1,
-                #[cfg(all(feature = "abi-7-36", not(feature = "abi-7-40")))]
-                reserved: [0; 7],
-                #[cfg(feature = "abi-7-40")]
                 max_stack_depth: config.max_stack_depth,
-                #[cfg(feature = "abi-7-40")]
                 reserved: [0; 6],
             };
-            Response::new_data(init.as_bytes())
+            let init = init.as_bytes();
+            let init = if self.arg.minor < 5 {
+                &init[..FUSE_COMPAT_INIT_OUT_SIZE]
+            } else if self.arg.minor < 23 {
+                &init[..FUSE_COMPAT_22_INIT_OUT_SIZE]
+            } else {
+                init
+            };
+            Response::new_data(init)
         }
     }
 
