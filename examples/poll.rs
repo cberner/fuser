@@ -110,7 +110,11 @@ impl fuser::Filesystem for FSelFS {
             }
         };
 
-        reply.entry(&Duration::ZERO, &self.get_data().filestat(idx), 0);
+        reply.entry(
+            &Duration::ZERO,
+            &self.get_data().filestat(idx),
+            fuser::Generation(0),
+        );
     }
 
     fn getattr(

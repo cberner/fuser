@@ -88,7 +88,7 @@ impl FiocFS {
 impl Filesystem for FiocFS {
     fn lookup(&mut self, _req: &Request<'_>, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
         if parent == INodeNo::ROOT && name.to_str() == Some("fioc") {
-            reply.entry(&TTL, &self.fioc_file_attr, 0);
+            reply.entry(&TTL, &self.fioc_file_attr, fuser::Generation(0));
         } else {
             reply.error(Errno::ENOENT);
         }

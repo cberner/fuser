@@ -183,10 +183,10 @@ impl Reply for ReplyEntry {
 
 impl ReplyEntry {
     /// Reply to a request with the given entry
-    pub fn entry(self, ttl: &Duration, attr: &FileAttr, generation: u64) {
+    pub fn entry(self, ttl: &Duration, attr: &FileAttr, generation: Generation) {
         self.reply.send_ll(&ll::Response::new_entry(
             attr.ino,
-            ll::Generation(generation),
+            generation,
             &attr.into(),
             *ttl,
             *ttl,
@@ -404,13 +404,20 @@ impl ReplyCreate {
     /// Reply to a request with a newly created file entry and its newly open file handle
     /// # Panics
     /// When attempting to use kernel passthrough. Use `opened_passthrough()` instead.
-    pub fn created(self, ttl: &Duration, attr: &FileAttr, generation: u64, fh: u64, flags: u32) {
+    pub fn created(
+        self,
+        ttl: &Duration,
+        attr: &FileAttr,
+        generation: Generation,
+        fh: u64,
+        flags: u32,
+    ) {
         let flags = FopenFlags::from_bits_retain(flags);
         assert!(!flags.contains(FopenFlags::FOPEN_PASSTHROUGH));
         self.reply.send_ll(&ll::Response::new_create(
             ttl,
             &attr.into(),
-            ll::Generation(generation),
+            generation,
             ll::FileHandle(fh),
             flags,
             0,
@@ -622,12 +629,12 @@ impl ReplyDirectoryPlus {
         name: T,
         ttl: &Duration,
         attr: &FileAttr,
-        generation: u64,
+        generation: Generation,
     ) -> bool {
         let name = name.as_ref();
         self.buf.push(&DirEntryPlus::new(
             INodeNo(ino),
-            Generation(generation),
+            generation,
             DirEntOffset(offset),
             name,
             *ttl,
@@ -881,7 +888,7 @@ mod test {
             flags: 0x99,
             blksize: 0xbb,
         };
-        reply.entry(&ttl, &attr, 0xaa);
+        reply.entry(&ttl, &attr, ll::Generation(0xaa));
     }
 
     #[test]
@@ -1057,7 +1064,7 @@ mod test {
             flags: 0x99,
             blksize: 0xdd,
         };
-        reply.created(&ttl, &attr, 0xaa, 0xbb, 0x0c);
+        reply.created(&ttl, &attr, ll::Generation(0xaa), 0xbb, 0x0c);
     }
 
     #[test]

@@ -562,7 +562,7 @@ impl Filesystem for SimpleFS {
         }
 
         match self.lookup_name(parent, name) {
-            Ok(attrs) => reply.entry(&Duration::new(0, 0), &attrs.into(), 0),
+            Ok(attrs) => reply.entry(&Duration::new(0, 0), &attrs.into(), fuser::Generation(0)),
             Err(error_code) => reply.error(error_code),
         }
     }
@@ -890,7 +890,7 @@ impl Filesystem for SimpleFS {
         self.write_directory_content(parent, &entries);
 
         // TODO: implement flags
-        reply.entry(&Duration::new(0, 0), &attrs.into(), 0);
+        reply.entry(&Duration::new(0, 0), &attrs.into(), fuser::Generation(0));
     }
 
     fn mkdir(
@@ -964,7 +964,7 @@ impl Filesystem for SimpleFS {
         entries.insert(name.as_bytes().to_vec(), (inode.0, FileKind::Directory));
         self.write_directory_content(parent, &entries);
 
-        reply.entry(&Duration::new(0, 0), &attrs.into(), 0);
+        reply.entry(&Duration::new(0, 0), &attrs.into(), fuser::Generation(0));
     }
 
     fn unlink(&mut self, _req: &Request<'_>, parent: INodeNo, name: &OsStr, reply: ReplyEmpty) {
@@ -1154,7 +1154,7 @@ impl Filesystem for SimpleFS {
             .unwrap();
         file.write_all(target.as_os_str().as_bytes()).unwrap();
 
-        reply.entry(&Duration::new(0, 0), &attrs.into(), 0);
+        reply.entry(&Duration::new(0, 0), &attrs.into(), fuser::Generation(0));
     }
 
     fn rename(
@@ -1396,7 +1396,7 @@ impl Filesystem for SimpleFS {
             attrs.hardlinks += 1;
             attrs.last_metadata_changed = time_now();
             self.write_inode(&attrs);
-            reply.entry(&Duration::new(0, 0), &attrs.into(), 0);
+            reply.entry(&Duration::new(0, 0), &attrs.into(), fuser::Generation(0));
         }
     }
 
@@ -1867,7 +1867,7 @@ impl Filesystem for SimpleFS {
         reply.created(
             &Duration::new(0, 0),
             &attrs.into(),
-            0,
+            fuser::Generation(0),
             self.allocate_next_file_handle(read, write),
             0,
         );
