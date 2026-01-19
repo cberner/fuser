@@ -28,6 +28,7 @@ use crate::reply::Reply;
 use crate::reply::ReplyDirectory;
 use crate::reply::ReplyDirectoryPlus;
 use crate::reply::ReplyRaw;
+use crate::reply::ReplySender;
 use crate::session::Session;
 use crate::session::SessionACL;
 
@@ -346,7 +347,11 @@ impl<'a> Request<'a> {
                     self.request.nodeid(),
                     x.file_handle(),
                     x.offset(),
-                    ReplyDirectory::new(self.request.unique(), self.ch.clone(), x.size() as usize),
+                    ReplyDirectory::new(
+                        self.request.unique(),
+                        ReplySender::Channel(self.ch.clone()),
+                        x.size() as usize,
+                    ),
                 );
             }
             ll::Operation::ReleaseDir(x) => {
@@ -519,7 +524,7 @@ impl<'a> Request<'a> {
                     x.offset(),
                     ReplyDirectoryPlus::new(
                         self.request.unique(),
-                        self.ch.clone(),
+                        ReplySender::Channel(self.ch.clone()),
                         x.size() as usize,
                     ),
                 );
@@ -592,7 +597,7 @@ impl<'a> Request<'a> {
     /// Create a reply object for this request that can be passed to the filesystem
     /// implementation and makes sure that a request is replied exactly once
     fn reply<T: Reply>(&self) -> T {
-        Reply::new(self.request.unique(), self.ch.clone())
+        Reply::new(self.request.unique(), ReplySender::Channel(self.ch.clone()))
     }
 
     /// Returns the unique identifier of this request

@@ -8,7 +8,6 @@ use crate::INodeNo;
 use crate::channel::ChannelSender;
 use crate::ll::fuse_abi::fuse_notify_code as notify_code;
 use crate::ll::notify::Notification;
-use crate::reply::ReplySender;
 
 /// A handle to a pending `poll()` request. Can be saved and used to notify the
 /// kernel when a poll is ready.
