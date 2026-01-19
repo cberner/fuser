@@ -180,6 +180,7 @@ impl Lock {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "serializable", derive(Serialize, Deserialize))]
 pub(crate) struct Version(pub(crate) u32, pub(crate) u32);
+
 impl Display for Version {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}.{}", self.0, self.1)
@@ -1050,6 +1051,27 @@ mod op {
                 init
             };
             Response::new_data(init)
+        }
+
+        /// Reply with only our version, used when kernel major version > our major version.
+        /// The kernel will then send a second INIT request with a compatible version.
+        pub(crate) fn reply_version_only(&self) -> Response<'a> {
+            let init = fuse_init_out {
+                major: FUSE_KERNEL_VERSION,
+                minor: FUSE_KERNEL_MINOR_VERSION,
+                max_readahead: 0,
+                flags: 0,
+                max_background: 0,
+                congestion_threshold: 0,
+                max_write: 0,
+                time_gran: 0,
+                max_pages: 0,
+                unused2: 0,
+                flags2: 0,
+                max_stack_depth: 0,
+                reserved: [0; 6],
+            };
+            Response::new_data(init.as_bytes())
         }
     }
 

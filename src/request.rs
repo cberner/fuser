@@ -5,7 +5,6 @@
 //!
 //! TODO: This module is meant to go away soon in favor of `ll::Request`.
 
-use std::borrow::Cow;
 use std::convert::TryFrom;
 use std::path::Path;
 
@@ -14,8 +13,6 @@ use log::error;
 use log::warn;
 
 use crate::Filesystem;
-use crate::InitFlags;
-use crate::KernelConfig;
 use crate::PollHandle;
 use crate::RenameFlags;
 use crate::Request;
@@ -24,7 +21,6 @@ use crate::ll;
 use crate::ll::Errno;
 use crate::ll::Request as _;
 use crate::ll::Response;
-use crate::ll::fuse_abi as abi;
 use crate::reply::Reply;
 use crate::reply::ReplyDirectory;
 use crate::reply::ReplyDirectoryPlus;
@@ -102,67 +98,9 @@ impl<'a> RequestWithSender<'a> {
             }
         }
         match op {
-            // Filesystem initialization
-            ll::Operation::Init(x) => {
-                // We don't support ABI versions before 7.6
-                let v = x.version();
-                if v < ll::Version(7, 6) {
-                    error!("Unsupported FUSE ABI version {v}");
-                    return Err(Errno::EPROTO);
-                }
-
-                let mut config = KernelConfig::new(x.capabilities(), x.max_readahead());
-                // Call filesystem init method and give it a chance to return an error
-                se.filesystem
-                    .init(self.request_header(), &mut config)
-                    .map_err(Errno::from_i32)?;
-
-                // Remember the ABI version supported by kernel and mark the session initialized.
-                se.proto_version = Some(v);
-
-                for bit in 0..64 {
-                    let bitflags = InitFlags::from_bits_retain(1 << bit);
-                    if bitflags == InitFlags::FUSE_INIT_EXT {
-                        continue;
-                    }
-                    let bitflag_is_known = InitFlags::all().contains(bitflags);
-                    let kernel_supports = x.capabilities().contains(bitflags);
-                    let we_requested = config.requested.contains(bitflags);
-                    // On macOS, there's a clash between linux and macOS constants,
-                    // so we pick macOS ones (last).
-                    let name = if let Some((name, _)) = bitflags.iter_names().last() {
-                        Cow::Borrowed(name)
-                    } else {
-                        Cow::Owned(format!("(1 << {bit})"))
-                    };
-                    if we_requested && kernel_supports {
-                        debug!("capability {name} enabled")
-                    } else if we_requested {
-                        debug!("capability {name} not supported by kernel")
-                    } else if kernel_supports {
-                        debug!("capability {name} not requested by client")
-                    } else if bitflag_is_known {
-                        debug!("capability {name} not supported nor requested")
-                    }
-                }
-
-                // Reply with our desired version and settings. If the kernel supports a
-                // larger major version, it'll re-send a matching init message. If it
-                // supports only lower major versions, we replied with an error above.
-                debug!(
-                    "INIT response: ABI {}.{}, flags {:#x}, max readahead {}, max write {}",
-                    abi::FUSE_KERNEL_VERSION,
-                    abi::FUSE_KERNEL_MINOR_VERSION,
-                    x.capabilities() & config.requested,
-                    config.max_readahead,
-                    config.max_write
-                );
-
-                return Ok(Some(x.reply(&config)));
-            }
-            // Any operation is invalid before initialization
-            _ if se.proto_version.is_none() => {
-                warn!("Ignoring FUSE operation before init: {}", self.request);
+            // Filesystem initialization - should not happen after handshake completed
+            ll::Operation::Init(_) => {
+                error!("Unexpected FUSE_INIT after handshake completed");
                 return Err(Errno::EIO);
             }
             // Filesystem destroyed
