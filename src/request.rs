@@ -92,7 +92,6 @@ impl<'a> Request<'a> {
                     | ll::Operation::FSyncDir(_)
                     | ll::Operation::Release(_)
                     | ll::Operation::ReleaseDir(_) => {}
-                    #[cfg(feature = "abi-7-21")]
                     ll::Operation::ReadDirPlus(_) => {}
                     _ => {
                         return Err(Errno::EACCES);
