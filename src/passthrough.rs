@@ -58,6 +58,13 @@ pub struct BackingId {
 
 impl BackingId {
     pub(crate) fn create(channel: &Arc<DevFuse>, fd: impl AsFd) -> std::io::Result<Self> {
+        if !cfg!(target_os = "linux") {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "backing IDs are only supported on Linux",
+            ));
+        }
+
         let map = fuse_backing_map {
             fd: fd.as_fd().as_raw_fd() as u32,
             flags: 0,

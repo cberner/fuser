@@ -29,7 +29,6 @@ pub use mnt::mount_options::MountOption;
 use mnt::mount_options::parse_options_from_args;
 pub use notify::Notifier;
 pub use notify::PollHandle;
-#[cfg(feature = "abi-7-40")]
 pub use passthrough::BackingId;
 pub use reply::ReplyAttr;
 pub use reply::ReplyBmap;
@@ -92,7 +91,6 @@ mod ll;
 mod mnt;
 mod notify;
 mod open_flags;
-#[cfg(feature = "abi-7-40")]
 mod passthrough;
 mod rename_flags;
 mod reply;
