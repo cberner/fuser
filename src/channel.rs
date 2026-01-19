@@ -4,7 +4,6 @@ use std::os::fd::BorrowedFd;
 use std::sync::Arc;
 
 use crate::dev_fuse::DevFuse;
-#[cfg(feature = "abi-7-40")]
 use crate::passthrough::BackingId;
 
 /// A raw communication channel to the FUSE kernel driver
@@ -53,7 +52,6 @@ impl ChannelSender {
         Ok(())
     }
 
-    #[cfg(feature = "abi-7-40")]
     pub(crate) fn open_backing(&self, fd: BorrowedFd<'_>) -> std::io::Result<BackingId> {
         BackingId::create(&self.0, fd)
     }

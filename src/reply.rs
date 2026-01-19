@@ -9,7 +9,6 @@
 use std::convert::AsRef;
 use std::ffi::OsStr;
 use std::io::IoSlice;
-#[cfg(feature = "abi-7-40")]
 use std::os::fd::BorrowedFd;
 use std::time::Duration;
 #[cfg(target_os = "macos")]
@@ -31,7 +30,6 @@ use crate::ll::reply::DirEntPlusList;
 use crate::ll::reply::DirEntry;
 use crate::ll::reply::DirEntryPlus;
 use crate::ll::{self};
-#[cfg(feature = "abi-7-40")]
 use crate::passthrough::BackingId;
 
 /// Generic reply callback to send data
@@ -60,7 +58,6 @@ impl ReplySender {
     }
 
     /// Open a backing file
-    #[cfg(feature = "abi-7-40")]
     pub(crate) fn open_backing(&self, fd: BorrowedFd<'_>) -> std::io::Result<BackingId> {
         match self {
             ReplySender::Channel(sender) => sender.open_backing(fd),
@@ -331,15 +328,15 @@ impl ReplyOpen {
     /// you can pass it as the 3rd parameter of [`ReplyOpen::opened_passthrough()`]. This is done in
     /// two separate steps because it may make sense to reuse backing IDs (to avoid having to
     /// repeatedly reopen the underlying file or potentially keep thousands of fds open).
-    #[cfg(feature = "abi-7-40")]
     pub fn open_backing(&self, fd: impl std::os::fd::AsFd) -> std::io::Result<BackingId> {
+        // TODO: assert passthrough capability is enabled.
         self.reply.sender.as_ref().unwrap().open_backing(fd.as_fd())
     }
 
     /// Reply to a request with an opened backing id. Call [`ReplyOpen::open_backing()`]
     /// to get one of these.
-    #[cfg(feature = "abi-7-40")]
     pub fn opened_passthrough(self, fh: u64, flags: u32, backing_id: &BackingId) {
+        // TODO: assert passthrough capability is enabled.
         let flags = FopenFlags::from_bits_retain(flags) | FopenFlags::FOPEN_PASSTHROUGH;
         self.reply.send_ll(&ll::Response::new_open(
             ll::FileHandle(fh),
