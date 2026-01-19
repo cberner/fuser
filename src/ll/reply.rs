@@ -27,7 +27,7 @@ pub(crate) type ResponseBuf = SmallVec<[u8; INLINE_DATA_THRESHOLD]>;
 
 #[derive(Debug)]
 pub(crate) enum Response<'a> {
-    Error(i32),
+    Error(Option<Errno>),
     Data(ResponseBuf),
     Slice(&'a [u8]),
 }
@@ -45,8 +45,8 @@ impl<'a> Response<'a> {
         };
         let header = abi::fuse_out_header {
             unique: unique.0,
-            error: if let Response::Error(errno) = self {
-                -errno
+            error: if let Response::Error(Some(errno)) = self {
+                -errno.0.get()
             } else {
                 0
             },
@@ -65,11 +65,11 @@ impl<'a> Response<'a> {
 
     // Constructors
     pub(crate) fn new_empty() -> Self {
-        Self::Error(0)
+        Self::Error(None)
     }
 
     pub(crate) fn new_error(error: Errno) -> Self {
-        Self::Error(error.into())
+        Self::Error(Some(error))
     }
 
     pub(crate) fn new_data<T: AsRef<[u8]> + Into<Vec<u8>>>(data: T) -> Self {
