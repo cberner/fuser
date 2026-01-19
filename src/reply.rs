@@ -20,6 +20,7 @@ use log::warn;
 use crate::Errno;
 use crate::FileAttr;
 use crate::FileType;
+use crate::PollEvents;
 use crate::channel::ChannelSender;
 use crate::ll::Generation;
 use crate::ll::INodeNo;
@@ -573,7 +574,7 @@ impl Reply for ReplyPoll {
 
 impl ReplyPoll {
     /// Reply to a request with ready poll events
-    pub fn poll(self, revents: u32) {
+    pub fn poll(self, revents: PollEvents) {
         self.reply.send_ll(&ll::Response::new_poll(revents));
     }
 

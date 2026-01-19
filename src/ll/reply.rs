@@ -20,6 +20,7 @@ use super::RequestId;
 use super::fuse_abi as abi;
 use super::fuse_abi::FopenFlags;
 use crate::FileType;
+use crate::PollEvents;
 
 const INLINE_DATA_THRESHOLD: usize = size_of::<u64>() * 4;
 pub(crate) type ResponseBuf = SmallVec<[u8; INLINE_DATA_THRESHOLD]>;
@@ -232,9 +233,9 @@ impl<'a> Response<'a> {
         Self::Data(v)
     }
 
-    pub(crate) fn new_poll(revents: u32) -> Self {
+    pub(crate) fn new_poll(revents: PollEvents) -> Self {
         let r = abi::fuse_poll_out {
-            revents,
+            revents: revents.bits(),
             padding: 0,
         };
         Self::from_struct(&r)
