@@ -1383,10 +1383,7 @@ mod op {
 
         /// The requested poll events
         pub(crate) fn events(&self) -> u32 {
-            #[cfg(feature = "abi-7-21")]
-            return self.arg.events;
-            #[cfg(not(feature = "abi-7-21"))]
-            return 0;
+            self.arg.events
         }
 
         /// The poll request's flags
