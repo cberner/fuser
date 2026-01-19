@@ -16,7 +16,6 @@ use std::io::Read;
 use std::io::Seek;
 use std::io::SeekFrom;
 use std::io::Write;
-use std::os::raw::c_int;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::FileExt;
 #[cfg(target_os = "linux")]
@@ -521,7 +520,7 @@ impl Filesystem for SimpleFS {
         &mut self,
         _req: &Request,
         #[allow(unused_variables)] config: &mut KernelConfig,
-    ) -> Result<(), c_int> {
+    ) -> Result<(), Errno> {
         if cfg!(feature = "abi-7-26") {
             config
                 .add_capabilities(InitFlags::FUSE_HANDLE_KILLPRIV)

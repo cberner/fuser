@@ -22,7 +22,6 @@ use std::path::Path;
 use std::time::Duration;
 use std::time::SystemTime;
 
-use libc::c_int;
 pub use ll::fuse_abi::fuse_forget_one;
 use log::warn;
 pub use mnt::mount_options::MountOption;
@@ -402,7 +401,7 @@ pub trait Filesystem {
     /// Initialize filesystem.
     /// Called before any other filesystem method.
     /// The kernel module connection can be configured using the `KernelConfig` object
-    fn init(&mut self, _req: &Request, _config: &mut KernelConfig) -> Result<(), c_int> {
+    fn init(&mut self, _req: &Request, _config: &mut KernelConfig) -> Result<(), Errno> {
         Ok(())
     }
 
