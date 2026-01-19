@@ -140,7 +140,7 @@ impl<T: AsyncFilesystem> TokioAdapter<T> {
 }
 
 impl<T: AsyncFilesystem> Filesystem for TokioAdapter<T> {
-    fn lookup(&mut self, req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
+    fn lookup(&self, req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
         match self
             .runtime
             .block_on(self.inner.lookup(&req.into(), parent, name))
@@ -154,7 +154,7 @@ impl<T: AsyncFilesystem> Filesystem for TokioAdapter<T> {
         }
     }
 
-    fn getattr(&mut self, req: &Request, ino: INodeNo, fh: Option<FileHandle>, reply: ReplyAttr) {
+    fn getattr(&self, req: &Request, ino: INodeNo, fh: Option<FileHandle>, reply: ReplyAttr) {
         match self
             .runtime
             .block_on(self.inner.getattr(&req.into(), ino, fh))
@@ -165,7 +165,7 @@ impl<T: AsyncFilesystem> Filesystem for TokioAdapter<T> {
     }
 
     fn read(
-        &mut self,
+        &self,
         req: &Request,
         ino: INodeNo,
         fh: FileHandle,
@@ -192,7 +192,7 @@ impl<T: AsyncFilesystem> Filesystem for TokioAdapter<T> {
     }
 
     fn readdir(
-        &mut self,
+        &self,
         _req: &Request,
         ino: INodeNo,
         fh: FileHandle,

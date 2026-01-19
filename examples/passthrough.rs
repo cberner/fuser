@@ -99,11 +99,13 @@ impl BackingCache {
     }
 }
 
+use std::sync::Mutex;
+
 #[derive(Debug)]
 struct PassthroughFs {
     root_attr: FileAttr,
     passthrough_file_attr: FileAttr,
-    backing_cache: BackingCache,
+    backing_cache: Mutex<BackingCache>,
 }
 
 impl PassthroughFs {
@@ -150,7 +152,7 @@ impl PassthroughFs {
         Self {
             root_attr,
             passthrough_file_attr,
-            backing_cache: BackingCache::default(),
+            backing_cache: Mutex::new(BackingCache::default()),
         }
     }
 }
@@ -164,7 +166,7 @@ impl Filesystem for PassthroughFs {
         Ok(())
     }
 
-    fn lookup(&mut self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
+    fn lookup(&self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
         if parent == INodeNo::ROOT && name.to_str() == Some("passthrough") {
             reply.entry(&TTL, &self.passthrough_file_attr, fuser::Generation(0));
         } else {
@@ -172,7 +174,7 @@ impl Filesystem for PassthroughFs {
         }
     }
 
-    fn getattr(&mut self, _req: &Request, ino: INodeNo, _fh: Option<FileHandle>, reply: ReplyAttr) {
+    fn getattr(&self, _req: &Request, ino: INodeNo, _fh: Option<FileHandle>, reply: ReplyAttr) {
         match ino.0 {
             1 => reply.attr(&TTL, &self.root_attr),
             2 => reply.attr(&TTL, &self.passthrough_file_attr),
@@ -180,7 +182,7 @@ impl Filesystem for PassthroughFs {
         }
     }
 
-    fn open(&mut self, _req: &Request, ino: INodeNo, _flags: OpenFlags, reply: ReplyOpen) {
+    fn open(&self, _req: &Request, ino: INodeNo, _flags: OpenFlags, reply: ReplyOpen) {
         if ino != INodeNo(2) {
             reply.error(Errno::ENOENT);
             return;
@@ -188,6 +190,8 @@ impl Filesystem for PassthroughFs {
 
         let (fh, id) = self
             .backing_cache
+            .lock()
+            .unwrap()
             .get_or(ino, || {
                 let file = File::open("/etc/profile")?;
                 reply.open_backing(file)
@@ -199,7 +203,7 @@ impl Filesystem for PassthroughFs {
     }
 
     fn release(
-        &mut self,
+        &self,
         _req: &Request,
         _ino: INodeNo,
         _fh: FileHandle,
@@ -208,12 +212,12 @@ impl Filesystem for PassthroughFs {
         _flush: bool,
         reply: ReplyEmpty,
     ) {
-        self.backing_cache.put(_fh.into());
+        self.backing_cache.lock().unwrap().put(_fh.into());
         reply.ok();
     }
 
     fn readdir(
-        &mut self,
+        &self,
         _req: &Request,
         ino: INodeNo,
         _fh: FileHandle,
