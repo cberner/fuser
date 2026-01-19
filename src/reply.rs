@@ -279,7 +279,7 @@ pub struct ReplyXTimes {
 
 #[cfg(target_os = "macos")]
 impl Reply for ReplyXTimes {
-    fn new<S: ReplySender>(unique: ll::RequestId, sender: S) -> ReplyXTimes {
+    fn new(unique: ll::RequestId, sender: ReplySender) -> ReplyXTimes {
         ReplyXTimes {
             reply: Reply::new(unique, sender),
         }
