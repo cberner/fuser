@@ -302,6 +302,7 @@ mod op {
     use crate::Errno;
     use crate::IoctlFlags;
     use crate::OpenFlags;
+    use crate::PollEvents;
     use crate::PollFlags;
     use crate::WriteFlags;
     use crate::ll::Response;
@@ -1409,11 +1410,8 @@ mod op {
         }
 
         /// The requested poll events
-        pub(crate) fn events(&self) -> u32 {
-            #[cfg(feature = "abi-7-21")]
-            return self.arg.events;
-            #[cfg(not(feature = "abi-7-21"))]
-            return 0;
+        pub(crate) fn events(&self) -> PollEvents {
+            PollEvents::from_bits_retain(self.arg.events)
         }
 
         /// The poll request's flags

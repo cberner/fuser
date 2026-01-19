@@ -78,6 +78,7 @@ pub use crate::ll::write_flags::WriteFlags;
 use crate::mnt::mount_options::check_option_conflicts;
 pub use crate::open_flags::OpenAccMode;
 pub use crate::open_flags::OpenFlags;
+pub use crate::poll_events::PollEvents;
 pub use crate::rename_flags::RenameFlags;
 pub use crate::request_param::Request;
 use crate::session::MAX_WRITE_SIZE;
@@ -94,6 +95,7 @@ mod notify;
 mod open_flags;
 #[cfg(feature = "abi-7-40")]
 mod passthrough;
+mod poll_events;
 mod rename_flags;
 mod reply;
 mod request;
@@ -945,7 +947,7 @@ pub trait Filesystem {
         ino: INodeNo,
         fh: FileHandle,
         ph: PollHandle,
-        events: u32,
+        events: PollEvents,
         flags: PollFlags,
         reply: ReplyPoll,
     ) {

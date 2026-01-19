@@ -28,6 +28,7 @@ use fuser::LockOwner;
 use fuser::MountOption;
 use fuser::OpenAccMode;
 use fuser::OpenFlags;
+use fuser::PollEvents;
 use fuser::PollFlags;
 use fuser::PollHandle;
 use fuser::ReadFlags;
@@ -273,7 +274,7 @@ impl fuser::Filesystem for FSelFS {
         _ino: INodeNo,
         fh: FileHandle,
         ph: PollHandle,
-        _events: u32,
+        _events: PollEvents,
         flags: PollFlags,
         reply: fuser::ReplyPoll,
     ) {
@@ -304,10 +305,10 @@ impl fuser::Filesystem for FSelFS {
                     nbytes,
                     POLLED_ZERO.swap(0, SeqCst)
                 );
-                libc::POLLIN.try_into().unwrap()
+                PollEvents::POLLIN
             } else {
                 POLLED_ZERO.fetch_add(1, SeqCst);
-                0
+                PollEvents::empty()
             }
         };
 
