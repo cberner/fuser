@@ -6,7 +6,6 @@ use std::sync::Arc;
 use crate::dev_fuse::DevFuse;
 #[cfg(feature = "abi-7-40")]
 use crate::passthrough::BackingId;
-use crate::reply::ReplySender;
 
 /// A raw communication channel to the FUSE kernel driver
 #[derive(Debug)]
@@ -44,8 +43,8 @@ impl Channel {
 #[derive(Clone, Debug)]
 pub(crate) struct ChannelSender(Arc<DevFuse>);
 
-impl ReplySender for ChannelSender {
-    fn send(&self, bufs: &[io::IoSlice<'_>]) -> io::Result<()> {
+impl ChannelSender {
+    pub(crate) fn send(&self, bufs: &[io::IoSlice<'_>]) -> io::Result<()> {
         let rc = nix::sys::uio::writev(&self.0, bufs)?;
         // writev is atomic, so do not need to check how many bytes are written.
         // libfuse does not do it either
@@ -55,7 +54,7 @@ impl ReplySender for ChannelSender {
     }
 
     #[cfg(feature = "abi-7-40")]
-    fn open_backing(&self, fd: BorrowedFd<'_>) -> std::io::Result<BackingId> {
+    pub(crate) fn open_backing(&self, fd: BorrowedFd<'_>) -> std::io::Result<BackingId> {
         BackingId::create(&self.0, fd)
     }
 }
