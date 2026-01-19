@@ -72,7 +72,7 @@ impl ClockFS<'_> {
 }
 
 impl Filesystem for ClockFS<'_> {
-    fn lookup(&mut self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
+    fn lookup(&self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
         if parent != INodeNo::ROOT || name != AsRef::<OsStr>::as_ref(&self.get_filename()) {
             reply.error(Errno::ENOENT);
             return;
@@ -86,7 +86,7 @@ impl Filesystem for ClockFS<'_> {
         );
     }
 
-    fn forget(&mut self, _req: &Request, ino: INodeNo, _nlookup: u64) {
+    fn forget(&self, _req: &Request, ino: INodeNo, _nlookup: u64) {
         if ino.0 == ClockFS::FILE_INO {
             let prev = self.lookup_cnt.fetch_sub(_nlookup, SeqCst);
             assert!(prev >= _nlookup);
@@ -95,7 +95,7 @@ impl Filesystem for ClockFS<'_> {
         }
     }
 
-    fn getattr(&mut self, _req: &Request, ino: INodeNo, _fh: Option<FileHandle>, reply: ReplyAttr) {
+    fn getattr(&self, _req: &Request, ino: INodeNo, _fh: Option<FileHandle>, reply: ReplyAttr) {
         match ClockFS::stat(ino) {
             Some(a) => reply.attr(&self.timeout, &a),
             None => reply.error(Errno::ENOENT),
@@ -103,7 +103,7 @@ impl Filesystem for ClockFS<'_> {
     }
 
     fn readdir(
-        &mut self,
+        &self,
         _req: &Request,
         ino: INodeNo,
         _fh: FileHandle,

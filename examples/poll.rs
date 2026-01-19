@@ -94,7 +94,7 @@ impl FSelFS {
 }
 
 impl fuser::Filesystem for FSelFS {
-    fn lookup(&mut self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
+    fn lookup(&self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
         if parent != INodeNo::ROOT || name.len() != 1 {
             reply.error(Errno::ENOENT);
             return;
@@ -118,7 +118,7 @@ impl fuser::Filesystem for FSelFS {
         );
     }
 
-    fn getattr(&mut self, _req: &Request, ino: INodeNo, _fh: Option<FileHandle>, reply: ReplyAttr) {
+    fn getattr(&self, _req: &Request, ino: INodeNo, _fh: Option<FileHandle>, reply: ReplyAttr) {
         if ino == INodeNo::ROOT {
             let a = FileAttr {
                 ino: INodeNo::ROOT,
@@ -149,7 +149,7 @@ impl fuser::Filesystem for FSelFS {
     }
 
     fn readdir(
-        &mut self,
+        &self,
         _req: &Request,
         ino: INodeNo,
         _fh: FileHandle,
@@ -186,7 +186,7 @@ impl fuser::Filesystem for FSelFS {
         reply.ok();
     }
 
-    fn open(&mut self, _req: &Request, ino: INodeNo, flags: OpenFlags, reply: ReplyOpen) {
+    fn open(&self, _req: &Request, ino: INodeNo, flags: OpenFlags, reply: ReplyOpen) {
         let idx = FSelData::ino_to_idx(ino);
         if idx >= NUMFILES {
             reply.error(Errno::ENOENT);
@@ -216,7 +216,7 @@ impl fuser::Filesystem for FSelFS {
     }
 
     fn release(
-        &mut self,
+        &self,
         _req: &Request,
         _ino: INodeNo,
         _fh: FileHandle,
@@ -235,7 +235,7 @@ impl fuser::Filesystem for FSelFS {
     }
 
     fn read(
-        &mut self,
+        &self,
         _req: &Request,
         _ino: INodeNo,
         fh: FileHandle,
@@ -268,7 +268,7 @@ impl fuser::Filesystem for FSelFS {
     }
 
     fn poll(
-        &mut self,
+        &self,
         _req: &Request,
         _ino: INodeNo,
         fh: FileHandle,
