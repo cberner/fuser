@@ -30,14 +30,8 @@ jobs:
 
       - name: Install Rust
         run: |
-          rustup component add --toolchain nightly rustfmt
-          rustup component add clippy
           rustc --version
           cargo --version
-
-      - name: Install cargo-deny
-        if: steps.rust-cache.outputs.cache-hit != 'true'
-        run: cargo install --force --version 0.16.2 cargo-deny --locked
 
       - name: Build all targets
         run: cargo build --all --all-targets
