@@ -331,6 +331,11 @@ impl KernelConfig {
         Ok(previous)
     }
 
+    /// Query kernel capabilities.
+    pub fn capabilities(&self) -> InitFlags {
+        self.capabilities & !InitFlags::FUSE_INIT_EXT
+    }
+
     /// Add a set of capabilities.
     ///
     /// # Errors
