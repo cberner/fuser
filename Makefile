@@ -5,6 +5,9 @@ INTERACTIVE ?= i
 build: pre
 	cargo build --examples --features=experimental
 
+format:
+	cargo +nightly fmt --all
+
 pre:
 	cargo +nightly fmt --all -- --check
 	cargo deny check licenses
