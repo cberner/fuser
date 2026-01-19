@@ -284,13 +284,6 @@ impl InitFlags {
 }
 
 pub mod consts {
-    // CUSE init request/reply flags
-    pub const CUSE_UNRESTRICTED_IOCTL: u32 = 1 << 0; // use unrestricted ioctl
-
-    // Release flags
-    pub const FUSE_RELEASE_FLUSH: u32 = 1 << 0;
-    pub const FUSE_RELEASE_FLOCK_UNLOCK: u32 = 1 << 1;
-
     // Getattr flags
     pub const FUSE_GETATTR_FH: u32 = 1 << 0;
 
