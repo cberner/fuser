@@ -64,7 +64,7 @@ const HELLO_TXT_ATTR: FileAttr = FileAttr {
 struct HelloFS;
 
 impl Filesystem for HelloFS {
-    fn lookup(&mut self, _req: &Request<'_>, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
+    fn lookup(&mut self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
         if u64::from(parent) == 1 && name.to_str() == Some("hello.txt") {
             reply.entry(&TTL, &HELLO_TXT_ATTR, fuser::Generation(0));
         } else {
@@ -72,13 +72,7 @@ impl Filesystem for HelloFS {
         }
     }
 
-    fn getattr(
-        &mut self,
-        _req: &Request<'_>,
-        ino: INodeNo,
-        _fh: Option<FileHandle>,
-        reply: ReplyAttr,
-    ) {
+    fn getattr(&mut self, _req: &Request, ino: INodeNo, _fh: Option<FileHandle>, reply: ReplyAttr) {
         match u64::from(ino) {
             1 => reply.attr(&TTL, &HELLO_DIR_ATTR),
             2 => reply.attr(&TTL, &HELLO_TXT_ATTR),
@@ -88,7 +82,7 @@ impl Filesystem for HelloFS {
 
     fn read(
         &mut self,
-        _req: &Request<'_>,
+        _req: &Request,
         ino: INodeNo,
         _fh: FileHandle,
         offset: u64,
@@ -106,7 +100,7 @@ impl Filesystem for HelloFS {
 
     fn readdir(
         &mut self,
-        _req: &Request<'_>,
+        _req: &Request,
         ino: INodeNo,
         _fh: FileHandle,
         offset: u64,

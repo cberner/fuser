@@ -169,7 +169,7 @@ impl Filesystem for PassthroughFs {
         Ok(())
     }
 
-    fn lookup(&mut self, _req: &Request<'_>, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
+    fn lookup(&mut self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
         if parent == INodeNo::ROOT && name.to_str() == Some("passthrough") {
             reply.entry(&TTL, &self.passthrough_file_attr, fuser::Generation(0));
         } else {
@@ -177,13 +177,7 @@ impl Filesystem for PassthroughFs {
         }
     }
 
-    fn getattr(
-        &mut self,
-        _req: &Request<'_>,
-        ino: INodeNo,
-        _fh: Option<FileHandle>,
-        reply: ReplyAttr,
-    ) {
+    fn getattr(&mut self, _req: &Request, ino: INodeNo, _fh: Option<FileHandle>, reply: ReplyAttr) {
         match ino.0 {
             1 => reply.attr(&TTL, &self.root_attr),
             2 => reply.attr(&TTL, &self.passthrough_file_attr),
@@ -191,7 +185,7 @@ impl Filesystem for PassthroughFs {
         }
     }
 
-    fn open(&mut self, _req: &Request<'_>, ino: INodeNo, _flags: OpenFlags, reply: ReplyOpen) {
+    fn open(&mut self, _req: &Request, ino: INodeNo, _flags: OpenFlags, reply: ReplyOpen) {
         if ino != INodeNo(2) {
             reply.error(Errno::ENOENT);
             return;
@@ -211,7 +205,7 @@ impl Filesystem for PassthroughFs {
 
     fn release(
         &mut self,
-        _req: &Request<'_>,
+        _req: &Request,
         _ino: INodeNo,
         _fh: FileHandle,
         _flags: i32,
@@ -225,7 +219,7 @@ impl Filesystem for PassthroughFs {
 
     fn readdir(
         &mut self,
-        _req: &Request<'_>,
+        _req: &Request,
         ino: INodeNo,
         _fh: FileHandle,
         offset: u64,

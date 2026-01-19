@@ -230,9 +230,11 @@ pub(crate) trait Request: Sized {
     fn uid(&self) -> Uid;
 
     /// Returns the GID that the process that triggered this request runs under.
+    #[cfg_attr(not(test), expect(dead_code))]
     fn gid(&self) -> Gid;
 
     /// Returns the PID of the process that triggered this request.
+    #[cfg_attr(not(test), expect(dead_code))]
     fn pid(&self) -> Pid;
 }
 
@@ -2147,6 +2149,10 @@ impl<'a> AnyRequest<'a> {
         )?;
         // Parse/check operation arguments
         op::parse(self.header, &opcode, self.data).ok_or(RequestError::InsufficientData)
+    }
+
+    pub(crate) fn header(&self) -> &fuse_in_header {
+        self.header
     }
 }
 
