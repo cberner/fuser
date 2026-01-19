@@ -287,10 +287,10 @@ impl<FS: Filesystem> Session<FS> {
                 .filesystem
                 .init(Request::ref_cast(request.header()), &mut config)
             {
-                let response = Response::new_error(ll::Errno::from_i32(errno));
+                let response = Response::new_error(errno);
                 <ReplyRaw as Reply>::new(request.unique(), ReplySender::Channel(self.ch.sender()))
                     .send_ll(&response);
-                return Err(io::Error::from_raw_os_error(errno));
+                return Err(io::Error::from_raw_os_error(errno.0.get()));
             }
 
             // Remember the ABI version supported by kernel and mark the session initialized.

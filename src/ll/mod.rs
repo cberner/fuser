@@ -49,7 +49,7 @@ macro_rules! no_xattr_doc {
 }
 
 /// Represents an error code to be returned to the caller
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct Errno(pub NonZeroI32);
 impl Errno {
     /// Operation not permitted

@@ -4,7 +4,6 @@
 
 use std::collections::HashMap;
 use std::ffi::OsStr;
-use std::ffi::c_int;
 use std::fs::File;
 use std::rc::Rc;
 use std::rc::Weak;
@@ -157,11 +156,7 @@ impl PassthroughFs {
 }
 
 impl Filesystem for PassthroughFs {
-    fn init(
-        &mut self,
-        _req: &Request,
-        config: &mut KernelConfig,
-    ) -> std::result::Result<(), c_int> {
+    fn init(&mut self, _req: &Request, config: &mut KernelConfig) -> Result<(), Errno> {
         config
             .add_capabilities(InitFlags::FUSE_PASSTHROUGH)
             .unwrap();
