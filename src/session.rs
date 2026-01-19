@@ -110,7 +110,10 @@ impl<FS: Filesystem> Session<FS> {
             modified_options.push(MountOption::AllowOther);
             Mount::new(mountpoint, &modified_options)?
         } else {
-            Mount::new(mountpoint, options)?
+            warn!("ping");
+            let r = Mount::new(mountpoint, options)?;
+            warn!("ping2");
+            r
         };
         warn!("Mounted successfully?");
 
