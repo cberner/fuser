@@ -295,7 +295,6 @@ mod op {
     use super::Operation;
     use super::Request;
     use super::RequestId;
-    use super::abi::consts::*;
     use super::abi::*;
     use crate::AccessFlags;
     use crate::CopyFileRangeFlags;
@@ -306,6 +305,7 @@ mod op {
     use crate::WriteFlags;
     use crate::ll::Response;
     use crate::ll::read_flags::ReadFlags;
+    use crate::ll::release_flags::ReleaseFlags;
 
     /// Look up a directory entry by name and get its attributes.
     ///
@@ -811,8 +811,13 @@ mod op {
     }
     impl_request!(Release<'_>);
     impl Release<'_> {
+        /// Release flags.
+        pub(crate) fn release_flags(&self) -> ReleaseFlags {
+            ReleaseFlags::from_bits_retain(self.arg.release_flags)
+        }
         pub(crate) fn flush(&self) -> bool {
-            self.arg.release_flags & FUSE_RELEASE_FLUSH != 0
+            self.release_flags()
+                .contains(ReleaseFlags::FUSE_RELEASE_FLUSH)
         }
         /// The value set by the [`Open`] method.
         pub(crate) fn file_handle(&self) -> FileHandle {
@@ -824,7 +829,10 @@ mod op {
             self.arg.flags
         }
         pub(crate) fn lock_owner(&self) -> Option<LockOwner> {
-            if self.arg.release_flags & FUSE_RELEASE_FLOCK_UNLOCK != 0 {
+            if self
+                .release_flags()
+                .contains(ReleaseFlags::FUSE_RELEASE_FLOCK_UNLOCK)
+            {
                 Some(LockOwner(self.arg.lock_owner))
             } else {
                 None
@@ -1132,11 +1140,19 @@ mod op {
         pub(crate) fn file_handle(&self) -> FileHandle {
             FileHandle(self.arg.fh)
         }
+        /// Release flags.
+        pub(crate) fn release_flags(&self) -> ReleaseFlags {
+            ReleaseFlags::from_bits_retain(self.arg.release_flags)
+        }
         pub(crate) fn flush(&self) -> bool {
-            self.arg.release_flags & consts::FUSE_RELEASE_FLUSH != 0
+            self.release_flags()
+                .contains(ReleaseFlags::FUSE_RELEASE_FLUSH)
         }
         pub(crate) fn lock_owner(&self) -> Option<LockOwner> {
-            if self.arg.release_flags & FUSE_RELEASE_FLOCK_UNLOCK != 0 {
+            if self
+                .release_flags()
+                .contains(ReleaseFlags::FUSE_RELEASE_FLOCK_UNLOCK)
+            {
                 Some(LockOwner(self.arg.lock_owner))
             } else {
                 None
