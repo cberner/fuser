@@ -297,12 +297,6 @@ pub mod consts {
     // Lock flags
     pub const FUSE_LK_FLOCK: u32 = 1 << 0;
 
-    // Write flags
-    pub const FUSE_WRITE_CACHE: u32 = 1 << 0; // delayed write from page cache, file handle is guessed
-    pub const FUSE_WRITE_LOCKOWNER: u32 = 1 << 1; // lock_owner field is valid
-    #[cfg(feature = "abi-7-31")]
-    pub const FUSE_WRITE_KILL_PRIV: u32 = 1 << 2; // kill suid and sgid bits
-
     // IOCTL constant
     pub const FUSE_IOCTL_MAX_IOV: u32 = 256; // maximum of in_iovecs + out_iovecs
 

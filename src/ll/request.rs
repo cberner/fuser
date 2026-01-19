@@ -771,7 +771,10 @@ mod op {
         }
         /// `lock_owner`: only supported with ABI >= 7.9
         pub(crate) fn lock_owner(&self) -> Option<LockOwner> {
-            if self.arg.write_flags & FUSE_WRITE_LOCKOWNER != 0 {
+            if self
+                .write_flags()
+                .contains(WriteFlags::FUSE_WRITE_LOCKOWNER)
+            {
                 Some(LockOwner(self.arg.lock_owner))
             } else {
                 None
