@@ -89,7 +89,7 @@ impl FiocFS {
 }
 
 impl Filesystem for FiocFS {
-    fn lookup(&mut self, _req: &Request<'_>, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
+    fn lookup(&mut self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
         if parent == INodeNo::ROOT && name.to_str() == Some("fioc") {
             reply.entry(&TTL, &self.fioc_file_attr, fuser::Generation(0));
         } else {
@@ -97,13 +97,7 @@ impl Filesystem for FiocFS {
         }
     }
 
-    fn getattr(
-        &mut self,
-        _req: &Request<'_>,
-        ino: INodeNo,
-        _fh: Option<FileHandle>,
-        reply: ReplyAttr,
-    ) {
+    fn getattr(&mut self, _req: &Request, ino: INodeNo, _fh: Option<FileHandle>, reply: ReplyAttr) {
         match ino.0 {
             1 => reply.attr(&TTL, &self.root_attr),
             2 => reply.attr(&TTL, &self.fioc_file_attr),
@@ -113,7 +107,7 @@ impl Filesystem for FiocFS {
 
     fn read(
         &mut self,
-        _req: &Request<'_>,
+        _req: &Request,
         ino: INodeNo,
         _fh: FileHandle,
         offset: u64,
@@ -131,7 +125,7 @@ impl Filesystem for FiocFS {
 
     fn readdir(
         &mut self,
-        _req: &Request<'_>,
+        _req: &Request,
         ino: INodeNo,
         _fh: FileHandle,
         offset: u64,
@@ -159,7 +153,7 @@ impl Filesystem for FiocFS {
 
     fn ioctl(
         &mut self,
-        _req: &Request<'_>,
+        _req: &Request,
         ino: INodeNo,
         _fh: FileHandle,
         _flags: IoctlFlags,
