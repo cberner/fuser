@@ -5,6 +5,7 @@
 //! filesystem is mounted, the session loop receives, dispatches and replies to kernel requests
 //! for filesystem operations under its mount point.
 
+use std::borrow::Cow;
 use std::fs::File;
 use std::io;
 use std::os::fd::AsFd;
@@ -21,20 +22,30 @@ use libc::EAGAIN;
 use libc::EINTR;
 use libc::ENODEV;
 use libc::ENOENT;
+use log::debug;
+use log::error;
 use log::info;
 use log::warn;
 use nix::unistd::Uid;
 use nix::unistd::geteuid;
 
 use crate::Filesystem;
+use crate::KernelConfig;
 use crate::MountOption;
+use crate::Request;
 use crate::channel::Channel;
 use crate::channel::ChannelSender;
 use crate::dev_fuse::DevFuse;
+use crate::ll;
+use crate::ll::Request as _;
+use crate::ll::Response;
 use crate::ll::Version;
 use crate::ll::fuse_abi as abi;
 use crate::mnt::Mount;
 use crate::notify::Notifier;
+use crate::reply::Reply;
+use crate::reply::ReplyRaw;
+use crate::reply::ReplySender;
 use crate::request::RequestWithSender;
 
 /// The max size of write requests from the kernel. The absolute minimum is 4k,
@@ -159,6 +170,9 @@ impl<FS: Filesystem> Session<FS> {
         // it is reused immediately after dispatching to conserve memory and allocations.
         let mut buffer = vec![0; BUFFER_SIZE];
         let buf = aligned_sub_buf(&mut buffer, align_of::<abi::fuse_in_header>());
+
+        self.handshake(buf)?;
+
         loop {
             // Read the next request from the given channel to kernel driver
             // The kernel driver makes sure that we get exactly one request per read
@@ -182,6 +196,149 @@ impl<FS: Filesystem> Session<FS> {
             }
         }
         Ok(())
+    }
+
+    fn handshake(&mut self, buf: &mut [u8]) -> io::Result<()> {
+        loop {
+            // Read the init request from the kernel
+            let size = match self.ch.receive(buf) {
+                Ok(size) => size,
+                Err(err) => match err.raw_os_error() {
+                    Some(ENOENT | EINTR | EAGAIN) => continue,
+                    Some(ENODEV) => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::NotConnected,
+                            "FUSE device disconnected during handshake",
+                        ));
+                    }
+                    _ => return Err(err),
+                },
+            };
+
+            // Parse the request
+            let request = match ll::AnyRequest::try_from(&buf[..size]) {
+                Ok(request) => request,
+                Err(err) => {
+                    error!("{err}");
+                    return Err(io::Error::new(io::ErrorKind::InvalidData, err.to_string()));
+                }
+            };
+
+            // Extract the init operation
+            let op = match request.operation() {
+                Ok(op) => op,
+                Err(_) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "Failed to parse FUSE operation",
+                    ));
+                }
+            };
+
+            let init = match op {
+                ll::Operation::Init(init) => init,
+                _ => {
+                    error!("Received non-init FUSE operation before init: {}", request);
+                    // Send error response and return error - non-init during handshake is invalid
+                    let response = Response::new_error(ll::Errno::EIO);
+                    <ReplyRaw as Reply>::new(
+                        request.unique(),
+                        ReplySender::Channel(self.ch.sender()),
+                    )
+                    .send_ll(&response);
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "Received non-init FUSE operation during handshake",
+                    ));
+                }
+            };
+
+            let v = init.version();
+            if v.0 > abi::FUSE_KERNEL_VERSION {
+                // Kernel has a newer major version than we support.
+                // Send our version and wait for a second INIT request with a compatible version.
+                debug!(
+                    "INIT: Kernel version {} > our version {}, sending our version and waiting for next init",
+                    v.0,
+                    abi::FUSE_KERNEL_VERSION
+                );
+                let response = init.reply_version_only();
+                <ReplyRaw as Reply>::new(request.unique(), ReplySender::Channel(self.ch.sender()))
+                    .send_ll(&response);
+                continue;
+            }
+
+            // We don't support ABI versions before 7.6
+            if v < Version(7, 6) {
+                error!("Unsupported FUSE ABI version {v}");
+                let response = Response::new_error(ll::Errno::EPROTO);
+                <ReplyRaw as Reply>::new(request.unique(), ReplySender::Channel(self.ch.sender()))
+                    .send_ll(&response);
+                return Err(io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    format!("Unsupported FUSE ABI version {v}"),
+                ));
+            }
+
+            let mut config = KernelConfig::new(init.capabilities(), init.max_readahead());
+
+            // Call filesystem init method and give it a chance to return an error
+            if let Err(errno) = self
+                .filesystem
+                .init(Request::ref_cast(request.header()), &mut config)
+            {
+                let response = Response::new_error(ll::Errno::from_i32(errno));
+                <ReplyRaw as Reply>::new(request.unique(), ReplySender::Channel(self.ch.sender()))
+                    .send_ll(&response);
+                return Err(io::Error::from_raw_os_error(errno));
+            }
+
+            // Remember the ABI version supported by kernel and mark the session initialized.
+            self.proto_version = Some(v);
+
+            // Log capability status for debugging
+            for bit in 0..64 {
+                let bitflags = abi::InitFlags::from_bits_retain(1 << bit);
+                if bitflags == abi::InitFlags::FUSE_INIT_EXT {
+                    continue;
+                }
+                let bitflag_is_known = abi::InitFlags::all().contains(bitflags);
+                let kernel_supports = init.capabilities().contains(bitflags);
+                let we_requested = config.requested.contains(bitflags);
+                // On macOS, there's a clash between linux and macOS constants,
+                // so we pick macOS ones (last).
+                let name = if let Some((name, _)) = bitflags.iter_names().last() {
+                    Cow::Borrowed(name)
+                } else {
+                    Cow::Owned(format!("(1 << {bit})"))
+                };
+                if we_requested && kernel_supports {
+                    debug!("capability {name} enabled")
+                } else if we_requested {
+                    debug!("capability {name} not supported by kernel")
+                } else if kernel_supports {
+                    debug!("capability {name} not requested by client")
+                } else if bitflag_is_known {
+                    debug!("capability {name} not supported nor requested")
+                }
+            }
+
+            // Reply with our desired version and settings.
+            debug!(
+                "INIT response: ABI {}.{}, flags {:#x}, max readahead {}, max write {}",
+                abi::FUSE_KERNEL_VERSION,
+                abi::FUSE_KERNEL_MINOR_VERSION,
+                init.capabilities() & config.requested,
+                config.max_readahead,
+                config.max_write
+            );
+
+            let response = init.reply(&config);
+            <ReplyRaw as Reply>::new(request.unique(), ReplySender::Channel(self.ch.sender()))
+                .send_ll(&response);
+
+            return Ok(());
+        }
     }
 
     /// Unmount the filesystem
