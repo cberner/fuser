@@ -83,7 +83,7 @@ impl Mount {
     }
 
     /// Enable or disable blocking if the umount operation is busy
-    pub fn set_blocking_umount(&mut self, blocking: bool) {
+    pub fn set_blocking_unmount(&mut self, blocking: bool) {
         self.blocking_umount = blocking;
     }
 
