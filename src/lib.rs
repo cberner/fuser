@@ -574,7 +574,7 @@ pub trait Filesystem {
     /// filesystem may set, to change the way the file is opened. See `fuse_file_info`
     /// structure in <`fuse_common.h`> for more details.
     fn open(&self, _req: &Request, _ino: INodeNo, _flags: OpenFlags, reply: ReplyOpen) {
-        reply.opened(0, FopenFlags::empty());
+        reply.opened(FileHandle(0), FopenFlags::empty());
     }
 
     /// Read data.
@@ -704,7 +704,7 @@ pub trait Filesystem {
     /// directory stream operations in case the contents of the directory can change
     /// between opendir and releasedir.
     fn opendir(&self, _req: &Request, _ino: INodeNo, _flags: OpenFlags, reply: ReplyOpen) {
-        reply.opened(0, FopenFlags::empty());
+        reply.opened(FileHandle(0), FopenFlags::empty());
     }
 
     /// Read directory.

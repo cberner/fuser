@@ -211,7 +211,7 @@ impl fuser::Filesystem for FSelFS {
         }
 
         reply.opened(
-            idx.into(),
+            FileHandle(idx.into()),
             FopenFlags::FOPEN_DIRECT_IO | FopenFlags::FOPEN_NONSEEKABLE,
         );
     }

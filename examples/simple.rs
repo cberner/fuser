@@ -1441,7 +1441,10 @@ impl Filesystem for SimpleFS {
                     } else {
                         FopenFlags::empty()
                     };
-                    reply.opened(self.allocate_next_file_handle(read, write), open_flags);
+                    reply.opened(
+                        FileHandle(self.allocate_next_file_handle(read, write)),
+                        open_flags,
+                    );
                 } else {
                     reply.error(Errno::EACCES);
                 }
@@ -1581,7 +1584,10 @@ impl Filesystem for SimpleFS {
                     } else {
                         FopenFlags::empty()
                     };
-                    reply.opened(self.allocate_next_file_handle(read, write), open_flags);
+                    reply.opened(
+                        FileHandle(self.allocate_next_file_handle(read, write)),
+                        open_flags,
+                    );
                 } else {
                     reply.error(Errno::EACCES);
                 }
@@ -1872,7 +1878,7 @@ impl Filesystem for SimpleFS {
             &Duration::new(0, 0),
             &attrs.into(),
             fuser::Generation(0),
-            self.allocate_next_file_handle(read, write),
+            FileHandle(self.allocate_next_file_handle(read, write)),
             0,
         );
     }

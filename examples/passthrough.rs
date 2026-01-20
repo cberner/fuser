@@ -199,7 +199,7 @@ impl Filesystem for PassthroughFs {
             .unwrap();
 
         eprintln!("  -> opened_passthrough({fh:?}, 0, {id:?});\n");
-        reply.opened_passthrough(fh, 0, &id);
+        reply.opened_passthrough(FileHandle(fh), 0, &id);
     }
 
     fn release(
