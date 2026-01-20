@@ -437,14 +437,11 @@ mod op {
             }
         }
         pub(crate) fn ctime(&self) -> Option<SystemTime> {
-            #[cfg(feature = "abi-7-23")]
             if self.valid().contains(FattrFlags::FATTR_CTIME) {
                 Some(system_time_from_time(self.arg.ctime, self.arg.ctimensec))
             } else {
                 None
             }
-            #[cfg(not(feature = "abi-7-23"))]
-            None
         }
         /// The value set by the [`Open`] method. See [`FileHandle`].
         ///
