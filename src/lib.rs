@@ -113,20 +113,12 @@ const INIT_FLAGS: InitFlags = InitFlags::FUSE_ASYNC_READ
     .union(InitFlags::FUSE_XTIMES);
 // TODO: Add FUSE_EXPORT_SUPPORT and FUSE_BIG_WRITES (requires ABI 7.10)
 
-const fn default_init_flags(#[allow(unused_variables)] capabilities: InitFlags) -> InitFlags {
-    #[cfg(not(feature = "abi-7-28"))]
-    {
-        INIT_FLAGS
+fn default_init_flags(capabilities: InitFlags) -> InitFlags {
+    let mut flags = INIT_FLAGS;
+    if capabilities.contains(InitFlags::FUSE_MAX_PAGES) {
+        flags |= InitFlags::FUSE_MAX_PAGES;
     }
-
-    #[cfg(feature = "abi-7-28")]
-    {
-        let mut flags = INIT_FLAGS;
-        if capabilities.contains(InitFlags::FUSE_MAX_PAGES) {
-            flags = flags.union(InitFlags::FUSE_MAX_PAGES);
-        }
-        flags
-    }
+    flags
 }
 
 /// File types
