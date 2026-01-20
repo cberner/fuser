@@ -249,7 +249,6 @@ impl KernelConfig {
     /// On success, returns the previous value.  
     /// # Errors
     /// If argument is too large, returns the nearest value which will succeed.
-    #[cfg(feature = "abi-7-40")]
     pub fn set_max_stack_depth(&mut self, value: u32) -> Result<u32, u32> {
         // https://lore.kernel.org/linux-fsdevel/CAOYeF9V_n93OEF_uf0Gwtd=+da0ReX8N2aaT6RfEJ9DPvs8O2w@mail.gmail.com/
         const FILESYSTEM_MAX_STACK_DEPTH: u32 = 2;
@@ -270,7 +269,6 @@ impl KernelConfig {
     /// On success returns the previous value.  
     /// # Errors
     /// If the argument does not match any valid granularity, returns the nearest value which will succeed.
-    #[cfg(feature = "abi-7-23")]
     pub fn set_time_granularity(&mut self, value: Duration) -> Result<Duration, Duration> {
         if value.as_nanos() == 0 {
             return Err(Duration::new(0, 1));
