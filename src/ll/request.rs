@@ -1040,7 +1040,7 @@ mod op {
                 flags
             };
 
-            let init = fuse_init_out {
+            let mut init = fuse_init_out {
                 major: FUSE_KERNEL_VERSION,
                 minor: FUSE_KERNEL_MINOR_VERSION,
                 max_readahead: config.max_readahead,
@@ -1052,9 +1052,14 @@ mod op {
                 max_pages: config.max_pages(),
                 unused2: 0,
                 flags2: flags.pair().1,
-                max_stack_depth: config.max_stack_depth,
+                max_stack_depth: 0,
                 reserved: [0; 6],
             };
+
+            if flags.contains(InitFlags::FUSE_PASSTHROUGH) {
+                init.max_stack_depth = config.max_stack_depth;
+            }
+
             let init = init.as_bytes();
             let init = if self.arg.minor < 5 {
                 &init[..FUSE_COMPAT_INIT_OUT_SIZE]
