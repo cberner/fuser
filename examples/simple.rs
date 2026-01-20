@@ -1541,7 +1541,7 @@ impl Filesystem for SimpleFS {
         _req: &Request,
         _ino: INodeNo,
         _fh: FileHandle,
-        _flags: i32,
+        _flags: OpenFlags,
         _lock_owner: Option<LockOwner>,
         _flush: bool,
         reply: ReplyEmpty,
@@ -1637,7 +1637,7 @@ impl Filesystem for SimpleFS {
         _req: &Request,
         _ino: INodeNo,
         _fh: FileHandle,
-        _flags: i32,
+        _flags: OpenFlags,
         reply: ReplyEmpty,
     ) {
         if let Ok(mut attrs) = self.get_inode(_ino) {

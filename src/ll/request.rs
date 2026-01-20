@@ -828,9 +828,8 @@ mod op {
             FileHandle(self.arg.fh)
         }
         /// The same flags as for open.
-        /// TODO: Document what flags are valid, or remove this
-        pub(crate) fn flags(&self) -> i32 {
-            self.arg.flags
+        pub(crate) fn flags(&self) -> OpenFlags {
+            OpenFlags(self.arg.flags)
         }
         pub(crate) fn lock_owner(&self) -> Option<LockOwner> {
             if self
@@ -1163,9 +1162,8 @@ mod op {
                 None
             }
         }
-        /// TODO: Document what values this may take
-        pub(crate) fn flags(&self) -> i32 {
-            self.arg.flags
+        pub(crate) fn flags(&self) -> OpenFlags {
+            OpenFlags(self.arg.flags)
         }
     }
 
