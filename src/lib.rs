@@ -670,7 +670,7 @@ pub trait Filesystem: Send + Sync + 'static {
         _req: &Request,
         _ino: INodeNo,
         _fh: FileHandle,
-        _flags: i32,
+        _flags: OpenFlags,
         _lock_owner: Option<LockOwner>,
         _flush: bool,
         reply: ReplyEmpty,
@@ -747,7 +747,7 @@ pub trait Filesystem: Send + Sync + 'static {
         _req: &Request,
         _ino: INodeNo,
         _fh: FileHandle,
-        _flags: i32,
+        _flags: OpenFlags,
         reply: ReplyEmpty,
     ) {
         reply.ok();
