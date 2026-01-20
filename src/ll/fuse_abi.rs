@@ -293,9 +293,6 @@ pub mod consts {
     // IOCTL constant
     pub const FUSE_IOCTL_MAX_IOV: u32 = 256; // maximum of in_iovecs + out_iovecs
 
-    // fsync flags
-    pub const FUSE_FSYNC_FDATASYNC: u32 = 1 << 0; // Sync data only, not metadata
-
     // The read buffer is required to be at least 8k, but may be much larger
     pub const FUSE_MIN_READ_BUFFER: usize = 8192;
 }

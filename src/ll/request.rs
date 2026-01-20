@@ -305,6 +305,7 @@ mod op {
     use crate::PollFlags;
     use crate::WriteFlags;
     use crate::ll::Response;
+    use crate::ll::fsync_flags::FsyncFlags;
     use crate::ll::read_flags::ReadFlags;
     use crate::ll::release_flags::ReleaseFlags;
 
@@ -855,7 +856,8 @@ mod op {
         }
         /// If set only the user data should be flushed, not the meta data.
         pub(crate) fn fdatasync(&self) -> bool {
-            self.arg.fsync_flags & consts::FUSE_FSYNC_FDATASYNC != 0
+            FsyncFlags::from_bits_retain(self.arg.fsync_flags)
+                .contains(FsyncFlags::FUSE_FSYNC_FDATASYNC)
         }
     }
 
@@ -1179,7 +1181,8 @@ mod op {
         }
         /// If set, then only the directory contents should be flushed, not the meta data.
         pub(crate) fn fdatasync(&self) -> bool {
-            self.arg.fsync_flags & consts::FUSE_FSYNC_FDATASYNC != 0
+            FsyncFlags::from_bits_retain(self.arg.fsync_flags)
+                .contains(FsyncFlags::FUSE_FSYNC_FDATASYNC)
         }
     }
 
