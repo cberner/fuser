@@ -786,9 +786,8 @@ mod op {
             }
         }
         /// flags: these are the file flags, such as `O_SYNC`. Only supported with ABI >= 7.9
-        /// TODO: Make a Flags type specifying valid values
-        pub(crate) fn flags(&self) -> i32 {
-            self.arg.flags
+        pub(crate) fn flags(&self) -> OpenFlags {
+            OpenFlags(self.arg.flags)
         }
     }
 

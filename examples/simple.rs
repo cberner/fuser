@@ -1493,7 +1493,7 @@ impl Filesystem for SimpleFS {
         offset: i64,
         data: &[u8],
         _write_flags: WriteFlags,
-        _flags: i32,
+        _flags: OpenFlags,
         _lock_owner: Option<LockOwner>,
         reply: ReplyWrite,
     ) {
