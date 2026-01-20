@@ -32,36 +32,15 @@ use zerocopy::KnownLayout;
 
 pub(crate) const FUSE_KERNEL_VERSION: u32 = 7;
 
-#[cfg(not(feature = "abi-7-20"))]
-pub(crate) const FUSE_KERNEL_MINOR_VERSION: u32 = 19;
-#[cfg(all(feature = "abi-7-20", not(feature = "abi-7-21")))]
-pub(crate) const FUSE_KERNEL_MINOR_VERSION: u32 = 20;
-#[cfg(all(feature = "abi-7-21", not(feature = "abi-7-22")))]
-pub(crate) const FUSE_KERNEL_MINOR_VERSION: u32 = 21;
-#[cfg(all(feature = "abi-7-22", not(feature = "abi-7-23")))]
-pub(crate) const FUSE_KERNEL_MINOR_VERSION: u32 = 22;
-#[cfg(all(feature = "abi-7-23", not(feature = "abi-7-24")))]
-pub(crate) const FUSE_KERNEL_MINOR_VERSION: u32 = 23;
-#[cfg(all(feature = "abi-7-24", not(feature = "abi-7-25")))]
-pub(crate) const FUSE_KERNEL_MINOR_VERSION: u32 = 24;
-#[cfg(all(feature = "abi-7-25", not(feature = "abi-7-26")))]
-pub(crate) const FUSE_KERNEL_MINOR_VERSION: u32 = 25;
-#[cfg(all(feature = "abi-7-26", not(feature = "abi-7-27")))]
-pub(crate) const FUSE_KERNEL_MINOR_VERSION: u32 = 26;
-#[cfg(all(feature = "abi-7-27", not(feature = "abi-7-28")))]
-pub(crate) const FUSE_KERNEL_MINOR_VERSION: u32 = 27;
-#[cfg(all(feature = "abi-7-28", not(feature = "abi-7-29")))]
-pub(crate) const FUSE_KERNEL_MINOR_VERSION: u32 = 28;
-#[cfg(all(feature = "abi-7-29", not(feature = "abi-7-30")))]
-pub(crate) const FUSE_KERNEL_MINOR_VERSION: u32 = 29;
-#[cfg(all(feature = "abi-7-30", not(feature = "abi-7-31")))]
-pub(crate) const FUSE_KERNEL_MINOR_VERSION: u32 = 30;
-#[cfg(all(feature = "abi-7-31", not(feature = "abi-7-36")))]
-pub(crate) const FUSE_KERNEL_MINOR_VERSION: u32 = 31;
-#[cfg(all(feature = "abi-7-36", not(feature = "abi-7-40")))]
-pub(crate) const FUSE_KERNEL_MINOR_VERSION: u32 = 36;
-#[cfg(feature = "abi-7-40")]
-pub(crate) const FUSE_KERNEL_MINOR_VERSION: u32 = 40;
+pub(crate) const FUSE_KERNEL_MINOR_VERSION: u32 = if cfg!(target_os = "macos") {
+    // macfuse headers declared the latest version as 19.
+    // In theory, it is supposed to quietly handle a newer version, but
+    // we are not sure, and it may break if the release new version.
+    // So let's declare protocol version 19 to be safe.
+    19
+} else {
+    40
+};
 
 #[repr(C)]
 #[derive(Debug, IntoBytes, Clone, Copy, KnownLayout, Immutable)]
