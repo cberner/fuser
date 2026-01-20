@@ -145,7 +145,7 @@ impl Filesystem for ClockFS<'_> {
             reply.error(Errno::ENOENT);
         } else {
             // TODO: we are supposed to pass file handle here, not ino.
-            reply.opened(ino.0, FopenFlags::FOPEN_KEEP_CACHE);
+            reply.opened(FileHandle(ino.0), FopenFlags::FOPEN_KEEP_CACHE);
         }
     }
 

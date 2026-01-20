@@ -319,10 +319,9 @@ impl ReplyOpen {
     /// # Panics
     /// When attempting to use kernel passthrough.
     /// Use [`opened_passthrough()`](Self::opened_passthrough) instead.
-    pub fn opened(self, fh: u64, flags: FopenFlags) {
+    pub fn opened(self, fh: ll::FileHandle, flags: FopenFlags) {
         assert!(!flags.contains(FopenFlags::FOPEN_PASSTHROUGH));
-        self.reply
-            .send_ll(&ll::Response::new_open(ll::FileHandle(fh), flags, 0));
+        self.reply.send_ll(&ll::Response::new_open(fh, flags, 0));
     }
 
     /// Registers a fd for passthrough, returning a `BackingId`.  Once you have the backing ID,
@@ -336,14 +335,11 @@ impl ReplyOpen {
 
     /// Reply to a request with an opened backing id. Call [`ReplyOpen::open_backing()`]
     /// to get one of these.
-    pub fn opened_passthrough(self, fh: u64, flags: u32, backing_id: &BackingId) {
+    pub fn opened_passthrough(self, fh: ll::FileHandle, flags: u32, backing_id: &BackingId) {
         // TODO: assert passthrough capability is enabled.
         let flags = FopenFlags::from_bits_retain(flags) | FopenFlags::FOPEN_PASSTHROUGH;
-        self.reply.send_ll(&ll::Response::new_open(
-            ll::FileHandle(fh),
-            flags,
-            backing_id.backing_id,
-        ));
+        self.reply
+            .send_ll(&ll::Response::new_open(fh, flags, backing_id.backing_id));
     }
 
     /// Reply to a request with the given error code
@@ -446,7 +442,7 @@ impl ReplyCreate {
         ttl: &Duration,
         attr: &FileAttr,
         generation: Generation,
-        fh: u64,
+        fh: ll::FileHandle,
         flags: u32,
     ) {
         let flags = FopenFlags::from_bits_retain(flags);
@@ -455,7 +451,7 @@ impl ReplyCreate {
             ttl,
             &attr.into(),
             generation,
-            ll::FileHandle(fh),
+            fh,
             flags,
             0,
         ));
@@ -981,7 +977,7 @@ mod test {
             ],
         });
         let reply: ReplyOpen = Reply::new(ll::RequestId(0xdeadbeef), sender);
-        reply.opened(0x1122, FopenFlags::from_bits_retain(0x33));
+        reply.opened(ll::FileHandle(0x1122), FopenFlags::from_bits_retain(0x33));
     }
 
     #[test]
@@ -1074,7 +1070,13 @@ mod test {
             flags: 0x99,
             blksize: 0xdd,
         };
-        reply.created(&ttl, &attr, ll::Generation(0xaa), 0xbb, 0x0c);
+        reply.created(
+            &ttl,
+            &attr,
+            ll::Generation(0xaa),
+            ll::FileHandle(0xbb),
+            0x0c,
+        );
     }
 
     #[test]
