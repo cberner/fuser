@@ -165,7 +165,7 @@ impl<FS: Filesystem> Session<FS> {
     /// may run concurrent by spawning threads.
     /// # Errors
     /// Returns any final error when the session comes to an end.
-    pub fn run(&mut self) -> io::Result<()> {
+    pub(crate) fn run(mut self) -> io::Result<()> {
         // Buffer for receiving requests from the kernel. Only one is allocated and
         // it is reused immediately after dispatching to conserve memory and allocations.
         let mut buffer = vec![0; BUFFER_SIZE];
@@ -179,7 +179,7 @@ impl<FS: Filesystem> Session<FS> {
             match self.ch.receive(buf) {
                 Ok(size) => match RequestWithSender::new(self.ch.sender(), &buf[..size]) {
                     // Dispatch request
-                    Some(req) => req.dispatch(self),
+                    Some(req) => req.dispatch(&mut self),
                     // Quit loop on illegal request
                     None => break,
                 },
@@ -417,14 +417,11 @@ impl BackgroundSession {
     /// Create a new background session for the given session by running its
     /// session loop in a background thread. If the returned handle is dropped,
     /// the filesystem is unmounted and the given session ends.
-    pub fn new<FS: Filesystem + Send + 'static>(se: Session<FS>) -> io::Result<BackgroundSession> {
+    fn new<FS: Filesystem>(se: Session<FS>) -> io::Result<BackgroundSession> {
         let sender = se.ch.sender();
         // Take the fuse_session, so that we can unmount it
         let mount = std::mem::take(&mut *se.mount.lock().unwrap()).map(|(_, mount)| mount);
-        let guard = thread::spawn(move || {
-            let mut se = se;
-            se.run()
-        });
+        let guard = thread::spawn(move || se.run());
         Ok(BackgroundSession {
             guard,
             sender,
