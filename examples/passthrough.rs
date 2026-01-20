@@ -20,6 +20,7 @@ use fuser::FileAttr;
 use fuser::FileHandle;
 use fuser::FileType;
 use fuser::Filesystem;
+use fuser::FopenFlags;
 use fuser::INodeNo;
 use fuser::InitFlags;
 use fuser::KernelConfig;
@@ -199,7 +200,7 @@ impl Filesystem for PassthroughFs {
             .unwrap();
 
         eprintln!("  -> opened_passthrough({fh:?}, 0, {id:?});\n");
-        reply.opened_passthrough(FileHandle(fh), 0, &id);
+        reply.opened_passthrough(FileHandle(fh), FopenFlags::empty(), &id);
     }
 
     fn release(
