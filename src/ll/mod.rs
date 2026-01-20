@@ -3,8 +3,11 @@
 mod argument;
 pub(crate) mod copy_file_range_flags;
 pub(crate) mod cuse_init_flags;
+pub(crate) mod fattr_flags;
+pub(crate) mod fopen_flags;
 pub(crate) mod fsync_flags;
 pub(crate) mod fuse_abi;
+pub(crate) mod init_flags;
 pub(crate) mod ioctl_flags;
 pub(crate) mod notify;
 pub(crate) mod poll_flags;

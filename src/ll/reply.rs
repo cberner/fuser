@@ -18,8 +18,8 @@ use super::INodeNo;
 use super::Lock;
 use super::RequestId;
 use super::fuse_abi as abi;
-use super::fuse_abi::FopenFlags;
 use crate::FileType;
+use crate::FopenFlags;
 use crate::PollEvents;
 
 const INLINE_DATA_THRESHOLD: usize = size_of::<u64>() * 4;

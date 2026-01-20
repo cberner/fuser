@@ -41,6 +41,7 @@ use crate::ll::Request as _;
 use crate::ll::Response;
 use crate::ll::Version;
 use crate::ll::fuse_abi as abi;
+use crate::ll::init_flags::InitFlags;
 use crate::mnt::Mount;
 use crate::notify::Notifier;
 use crate::reply::Reply;
@@ -298,11 +299,11 @@ impl<FS: Filesystem> Session<FS> {
 
             // Log capability status for debugging
             for bit in 0..64 {
-                let bitflags = abi::InitFlags::from_bits_retain(1 << bit);
-                if bitflags == abi::InitFlags::FUSE_INIT_EXT {
+                let bitflags = InitFlags::from_bits_retain(1 << bit);
+                if bitflags == InitFlags::FUSE_INIT_EXT {
                     continue;
                 }
-                let bitflag_is_known = abi::InitFlags::all().contains(bitflags);
+                let bitflag_is_known = InitFlags::all().contains(bitflags);
                 let kernel_supports = init.capabilities().contains(bitflags);
                 let we_requested = config.requested.contains(bitflags);
                 // On macOS, there's a clash between linux and macOS constants,

@@ -310,7 +310,9 @@ mod op {
     use crate::PollFlags;
     use crate::WriteFlags;
     use crate::ll::Response;
+    use crate::ll::fattr_flags::FattrFlags;
     use crate::ll::fsync_flags::FsyncFlags;
+    use crate::ll::init_flags::InitFlags;
     use crate::ll::read_flags::ReadFlags;
     use crate::ll::release_flags::ReleaseFlags;
 
