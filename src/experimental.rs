@@ -214,7 +214,7 @@ impl<T: AsyncFilesystem> Filesystem for TokioAdapter<T> {
 
 /// Experimental async API. Expect this to change in the future
 #[async_trait::async_trait]
-pub trait AsyncFilesystem {
+pub trait AsyncFilesystem: Send + Sync + 'static {
     async fn lookup(
         &self,
         context: &RequestContext,
