@@ -179,7 +179,12 @@ impl Lock {
 /// A newtype for ABI version
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "serializable", derive(Serialize, Deserialize))]
-pub(crate) struct Version(pub(crate) u32, pub(crate) u32);
+pub struct Version(
+    /// Major version number.
+    pub u32,
+    /// Minor version number.
+    pub u32,
+);
 
 impl Display for Version {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

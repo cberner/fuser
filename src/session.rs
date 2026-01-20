@@ -280,7 +280,7 @@ impl<FS: Filesystem> Session<FS> {
                 ));
             }
 
-            let mut config = KernelConfig::new(init.capabilities(), init.max_readahead());
+            let mut config = KernelConfig::new(init.capabilities(), init.max_readahead(), v);
 
             // Call filesystem init method and give it a chance to return an error
             if let Err(errno) = self

@@ -72,6 +72,7 @@ pub use crate::ll::read_flags::ReadFlags;
 pub use crate::ll::request::FileHandle;
 pub use crate::ll::request::INodeNo;
 pub use crate::ll::request::LockOwner;
+pub use crate::ll::request::Version;
 pub use crate::ll::write_flags::WriteFlags;
 use crate::mnt::mount_options::check_option_conflicts;
 pub use crate::open_flags::OpenAccMode;
@@ -221,10 +222,11 @@ pub struct KernelConfig {
     max_write: u32,
     time_gran: Duration,
     max_stack_depth: u32,
+    kernel_abi: Version,
 }
 
 impl KernelConfig {
-    fn new(capabilities: InitFlags, max_readahead: u32) -> Self {
+    fn new(capabilities: InitFlags, max_readahead: u32, kernel_abi: Version) -> Self {
         Self {
             capabilities,
             requested: default_init_flags(capabilities),
@@ -237,6 +239,7 @@ impl KernelConfig {
             // 1ns means nano-second granularity.
             time_gran: Duration::new(0, 1),
             max_stack_depth: 0,
+            kernel_abi,
         }
     }
 
@@ -333,6 +336,11 @@ impl KernelConfig {
     /// Query kernel capabilities.
     pub fn capabilities(&self) -> InitFlags {
         self.capabilities & !InitFlags::FUSE_INIT_EXT
+    }
+
+    /// Kernel ABI version.
+    pub fn kernel_abi(&self) -> Version {
+        self.kernel_abi
     }
 
     /// Add a set of capabilities.
