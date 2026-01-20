@@ -335,9 +335,9 @@ impl ReplyOpen {
 
     /// Reply to a request with an opened backing id. Call [`ReplyOpen::open_backing()`]
     /// to get one of these.
-    pub fn opened_passthrough(self, fh: ll::FileHandle, flags: u32, backing_id: &BackingId) {
+    pub fn opened_passthrough(self, fh: ll::FileHandle, flags: FopenFlags, backing_id: &BackingId) {
         // TODO: assert passthrough capability is enabled.
-        let flags = FopenFlags::from_bits_retain(flags) | FopenFlags::FOPEN_PASSTHROUGH;
+        let flags = flags | FopenFlags::FOPEN_PASSTHROUGH;
         self.reply
             .send_ll(&ll::Response::new_open(fh, flags, backing_id.backing_id));
     }
