@@ -58,14 +58,11 @@ use fuser::ReplyWrite;
 use fuser::ReplyXattr;
 use fuser::Request;
 use fuser::TimeOrNow;
-// #[cfg(feature = "abi-7-31")]
-// use fuser::consts::FUSE_WRITE_KILL_PRIV;
 use fuser::TimeOrNow::Now;
 use fuser::WriteFlags;
 use log::LevelFilter;
 use log::debug;
 use log::error;
-#[cfg(feature = "abi-7-26")]
 use log::info;
 use log::warn;
 use serde::Deserialize;
@@ -287,28 +284,12 @@ struct SimpleFS {
 }
 
 impl SimpleFS {
-    fn new(
-        data_dir: String,
-        direct_io: bool,
-        #[allow(unused_variables)] suid_support: bool,
-    ) -> SimpleFS {
-        #[cfg(feature = "abi-7-26")]
-        {
-            SimpleFS {
-                data_dir,
-                next_file_handle: AtomicU64::new(1),
-                direct_io,
-                suid_support,
-            }
-        }
-        #[cfg(not(feature = "abi-7-26"))]
-        {
-            SimpleFS {
-                data_dir,
-                next_file_handle: AtomicU64::new(1),
-                direct_io,
-                suid_support: false,
-            }
+    fn new(data_dir: String, direct_io: bool, suid_support: bool) -> SimpleFS {
+        SimpleFS {
+            data_dir,
+            next_file_handle: AtomicU64::new(1),
+            direct_io,
+            suid_support,
         }
     }
 
@@ -521,10 +502,12 @@ impl Filesystem for SimpleFS {
         _req: &Request,
         #[allow(unused_variables)] config: &mut KernelConfig,
     ) -> Result<(), Errno> {
-        if cfg!(feature = "abi-7-26") {
-            config
-                .add_capabilities(InitFlags::FUSE_HANDLE_KILLPRIV)
-                .unwrap();
+        if config
+            .add_capabilities(InitFlags::FUSE_HANDLE_KILLPRIV)
+            .is_err()
+        {
+            info!("FUSE_HANDLE_KILLPRIV not supported");
+            self.suid_support = false;
         }
 
         fs::create_dir_all(Path::new(&self.data_dir).join("inodes")).unwrap();
@@ -1516,7 +1499,6 @@ impl Filesystem for SimpleFS {
                 if data.len() + offset as usize > attrs.size as usize {
                     attrs.size = (data.len() + offset as usize) as u64;
                 }
-                // #[cfg(feature = "abi-7-31")]
                 // if flags & FUSE_WRITE_KILL_PRIV as i32 != 0 {
                 //     clear_suid_sgid(&mut attrs);
                 // }
@@ -2191,12 +2173,9 @@ fn main() {
 
     let mut options = vec![MountOption::FSName("fuser".to_string())];
 
-    #[cfg(feature = "abi-7-26")]
-    {
-        if matches.get_flag("suid") {
-            info!("setuid bit support enabled");
-            options.push(MountOption::Suid);
-        }
+    if matches.get_flag("suid") {
+        info!("setuid bit support enabled");
+        options.push(MountOption::Suid);
     }
     if matches.get_flag("auto-unmount") {
         options.push(MountOption::AutoUnmount);
