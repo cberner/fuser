@@ -397,7 +397,7 @@ impl KernelConfig {
 /// implementations are provided here to get a mountable filesystem that does
 /// nothing.
 #[allow(clippy::too_many_arguments)]
-pub trait Filesystem {
+pub trait Filesystem: Send + Sync + 'static {
     /// Initialize filesystem.
     /// Called before any other filesystem method.
     /// The kernel module connection can be configured using the `KernelConfig` object

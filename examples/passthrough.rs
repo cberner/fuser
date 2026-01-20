@@ -5,8 +5,6 @@
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs::File;
-use std::rc::Rc;
-use std::rc::Weak;
 use std::time::Duration;
 use std::time::UNIX_EPOCH;
 
@@ -52,7 +50,7 @@ const TTL: Duration = Duration::from_secs(1); // 1 second
 /// desired, but our little example filesystem only contains one file. :)
 #[derive(Debug, Default)]
 struct BackingCache {
-    by_handle: HashMap<u64, Rc<BackingId>>,
+    by_handle: HashMap<u64, Arc<BackingId>>,
     by_inode: HashMap<INodeNo, Weak<BackingId>>,
     next_fh: u64,
 }
@@ -71,20 +69,20 @@ impl BackingCache {
         &mut self,
         ino: INodeNo,
         callback: impl Fn() -> std::io::Result<BackingId>,
-    ) -> std::io::Result<(u64, Rc<BackingId>)> {
+    ) -> std::io::Result<(u64, Arc<BackingId>)> {
         let fh = self.next_fh();
 
         let id = if let Some(id) = self.by_inode.get(&ino).and_then(Weak::upgrade) {
             eprintln!("HIT! reusing {id:?}");
             id
         } else {
-            let id = Rc::new(callback()?);
-            self.by_inode.insert(ino, Rc::downgrade(&id));
+            let id = Arc::new(callback()?);
+            self.by_inode.insert(ino, Arc::downgrade(&id));
             eprintln!("MISS! new {id:?}");
             id
         };
 
-        self.by_handle.insert(fh, Rc::clone(&id));
+        self.by_handle.insert(fh, Arc::clone(&id));
         Ok((fh, id))
     }
 
@@ -99,7 +97,9 @@ impl BackingCache {
     }
 }
 
+use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::Weak;
 
 #[derive(Debug)]
 struct PassthroughFs {

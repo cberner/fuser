@@ -30,13 +30,13 @@ use fuser::ReplyDirectory;
 use fuser::ReplyEntry;
 use fuser::Request;
 
-struct ClockFS<'a> {
+struct ClockFS {
     file_name: Arc<Mutex<String>>,
-    lookup_cnt: &'a AtomicU64,
+    lookup_cnt: &'static AtomicU64,
     timeout: Duration,
 }
 
-impl ClockFS<'_> {
+impl ClockFS {
     const FILE_INO: u64 = 2;
 
     fn get_filename(&self) -> String {
@@ -71,7 +71,7 @@ impl ClockFS<'_> {
     }
 }
 
-impl Filesystem for ClockFS<'_> {
+impl Filesystem for ClockFS {
     fn lookup(&self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
         if parent != INodeNo::ROOT || name != AsRef::<OsStr>::as_ref(&self.get_filename()) {
             reply.error(Errno::ENOENT);
