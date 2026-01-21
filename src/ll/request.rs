@@ -257,6 +257,7 @@ mod op {
     use crate::WriteFlags;
     use crate::ll::Response;
     use crate::ll::fsync_flags::FsyncFlags;
+    use crate::ll::getattr_flags::GetattrFlags;
     use crate::ll::read_flags::ReadFlags;
     use crate::ll::release_flags::ReleaseFlags;
 
@@ -310,8 +311,13 @@ mod op {
     }
 
     impl GetAttr<'_> {
+        /// Returns the getattr flags.
+        pub(crate) fn getattr_flags(&self) -> GetattrFlags {
+            GetattrFlags::from_bits_retain(self.arg.getattr_flags)
+        }
+
         pub(crate) fn file_handle(&self) -> Option<FileHandle> {
-            if self.arg.getattr_flags & crate::FUSE_GETATTR_FH != 0 {
+            if self.getattr_flags().contains(GetattrFlags::FUSE_GETATTR_FH) {
                 Some(FileHandle(self.arg.fh))
             } else {
                 None

@@ -263,9 +263,6 @@ impl InitFlags {
 }
 
 pub mod consts {
-    // Getattr flags
-    pub const FUSE_GETATTR_FH: u32 = 1 << 0;
-
     // Lock flags
     pub const FUSE_LK_FLOCK: u32 = 1 << 0;
 

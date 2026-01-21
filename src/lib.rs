@@ -39,7 +39,6 @@ pub use crate::ll::copy_file_range_flags::CopyFileRangeFlags;
 pub use crate::ll::fuse_abi::FopenFlags;
 pub use crate::ll::fuse_abi::InitFlags;
 pub use crate::ll::fuse_abi::consts;
-use crate::ll::fuse_abi::consts::*;
 pub use crate::ll::fuse_abi::fuse_forget_one;
 pub use crate::ll::ioctl_flags::IoctlFlags;
 pub use crate::ll::poll_flags::PollFlags;
