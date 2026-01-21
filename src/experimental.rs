@@ -175,7 +175,8 @@ impl<T: AsyncFilesystem + Send + Sync + 'static> Filesystem for TokioAdapter<T> 
         fh: FileHandle,
         offset: u64,
         size: u32,
-        flags: ReadFlags,
+        read_flags: ReadFlags,
+        flags: OpenFlags,
         lock_owner: Option<LockOwner>,
         reply: ReplyData,
     ) {
@@ -184,7 +185,7 @@ impl<T: AsyncFilesystem + Send + Sync + 'static> Filesystem for TokioAdapter<T> 
         self.runtime.spawn(async move {
             let mut buf = vec![];
             match inner
-                .read(&context, ino, fh, offset, size, flags, lock_owner, &mut buf)
+                .read(&context, ino, fh, offset, size, read_flags, flags, lock_owner, &mut buf)
                 .await
             {
                 Ok(()) => reply.data(&buf),
@@ -239,7 +240,8 @@ pub trait AsyncFilesystem: Send + Sync + 'static {
         file_handle: FileHandle,
         offset: u64,
         size: u32,
-        flags: ReadFlags,
+        read_flags: ReadFlags,
+        flags: u32,
         lock: Option<LockOwner>,
         out_data: &mut Vec<u8>,
     ) -> Result<()>;

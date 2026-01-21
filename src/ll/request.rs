@@ -693,10 +693,12 @@ mod op {
                 None
             }
         }
+        
         /// The file flags, such as `O_SYNC`. Only supported with ABI >= 7.9
-        pub(crate) fn flags(&self) -> u32 {
-            self.arg.flags
+        pub(crate) fn flags(&self) -> OpenFlags {
+            OpenFlags(self.arg.flags as i32)
         }
+
         /// Read flags
         pub(crate) fn read_flags(&self) -> ReadFlags {
             ReadFlags::from_bits_retain(self.arg.read_flags)

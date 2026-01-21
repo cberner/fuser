@@ -596,7 +596,7 @@ pub trait Filesystem: Send + Sync + 'static {
         offset: u64,
         size: u32,
         read_flags: ReadFlags,
-        flags: u32,
+        flags: OpenFlags,
         lock_owner: Option<LockOwner>,
         reply: ReplyData,
     ) {
