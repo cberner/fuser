@@ -595,13 +595,14 @@ pub trait Filesystem: Send + Sync + 'static {
         fh: FileHandle,
         offset: u64,
         size: u32,
-        flags: ReadFlags,
+        read_flags: ReadFlags,
+        flags: u32,
         lock_owner: Option<LockOwner>,
         reply: ReplyData,
     ) {
         warn!(
             "[Not Implemented] read(ino: {ino:#x?}, fh: {fh}, offset: {offset}, \
-            size: {size}, flags: {flags:#x?}, lock_owner: {lock_owner:?})"
+            size: {size}, read_flags: {read_flags:#x?}, flags: {flags:#x?}, lock_owner: {lock_owner:?})"
         );
         reply.error(Errno::ENOSYS);
     }

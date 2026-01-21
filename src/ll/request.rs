@@ -687,15 +687,19 @@ mod op {
         }
         /// Only supported with ABI >= 7.9
         pub(crate) fn lock_owner(&self) -> Option<LockOwner> {
-            if self.flags().contains(ReadFlags::FUSE_READ_LOCKOWNER) {
+            if self.read_flags().contains(ReadFlags::FUSE_READ_LOCKOWNER) {
                 Some(LockOwner(self.arg.lock_owner))
             } else {
                 None
             }
         }
         /// The file flags, such as `O_SYNC`. Only supported with ABI >= 7.9
-        pub(crate) fn flags(&self) -> ReadFlags {
-            ReadFlags::from_bits_retain(self.arg.flags)
+        pub(crate) fn flags(&self) -> u32 {
+            self.arg.flags
+        }
+        /// Read flags
+        pub(crate) fn read_flags(&self) -> ReadFlags {
+            ReadFlags::from_bits_retain(self.arg.read_flags)
         }
     }
 
