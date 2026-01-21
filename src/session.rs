@@ -25,7 +25,6 @@ use libc::ENOENT;
 use log::debug;
 use log::error;
 use log::info;
-use log::warn;
 use nix::unistd::Uid;
 use nix::unistd::geteuid;
 
@@ -107,22 +106,18 @@ impl<FS: Filesystem> Session<FS> {
     ) -> io::Result<Session<FS>> {
         let mountpoint = mountpoint.as_ref();
         info!("Mounting {}", mountpoint.display());
-        // If AutoUnmount is requested, but not AllowRoot or AllowOther we enforce the ACL
-        // ourself and implicitly set AllowOther because fusermount needs allow_root or allow_other
-        // to handle the auto_unmount option
-        let (file, mount) = if options.contains(&MountOption::AutoUnmount)
+        // If AutoUnmount is requested, but not AllowRoot or AllowOther, return an error
+        // because fusermount needs allow_root or allow_other to handle the auto_unmount option
+        if options.contains(&MountOption::AutoUnmount)
             && !(options.contains(&MountOption::AllowRoot)
                 || options.contains(&MountOption::AllowOther))
         {
-            warn!(
-                "Given auto_unmount without allow_root or allow_other; adding allow_other, with userspace permission handling"
-            );
-            let mut modified_options = options.to_vec();
-            modified_options.push(MountOption::AllowOther);
-            Mount::new(mountpoint, &modified_options)?
-        } else {
-            Mount::new(mountpoint, options)?
-        };
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "auto_unmount requires allow_root or allow_other",
+            ));
+        }
+        let (file, mount) = Mount::new(mountpoint, options)?;
 
         let ch = Channel::new(file);
         let allowed = if options.contains(&MountOption::AllowRoot) {

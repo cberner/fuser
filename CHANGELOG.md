@@ -6,6 +6,7 @@
 * Add `FileType` conversion from std `FileType`
 * Rename `BackgroundSession::join` to `umount_and_join`
   and change it to return `io::Result<()>` instead of panicking
+* `allow_root` or `allow_other` must be specified when using `auto_unmount`
 
 ## 0.16.0 - 2025-09-12
 * Add support for passthrough file descriptors
