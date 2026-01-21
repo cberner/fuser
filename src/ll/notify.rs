@@ -13,6 +13,7 @@ use zerocopy::IntoBytes;
 
 use super::fuse_abi as abi;
 use crate::INodeNo;
+use crate::notify::PollHandle;
 
 const INLINE_DATA_THRESHOLD: usize = size_of::<u64>() * 4;
 type NotificationBuf = SmallVec<[u8; INLINE_DATA_THRESHOLD]>;
@@ -113,8 +114,8 @@ impl<'a> Notification<'a> {
         Ok(Self::from_struct_with_name(&r, name.as_bytes()))
     }
 
-    pub(crate) fn new_poll(kh: u64) -> Self {
-        let r = abi::fuse_notify_poll_wakeup_out { kh };
+    pub(crate) fn new_poll(kh: PollHandle) -> Self {
+        let r = abi::fuse_notify_poll_wakeup_out { kh: kh.0 };
         Self::from_struct(&r)
     }
 
@@ -202,7 +203,7 @@ mod test {
 
     #[test]
     fn poll() {
-        let n = Notification::new_poll(0x4321)
+        let n = Notification::new_poll(PollHandle(0x4321))
             .with_iovec(abi::fuse_notify_code::FUSE_POLL, ioslice_to_vec)
             .unwrap();
         let expected = vec![

@@ -9,20 +9,29 @@ use crate::channel::ChannelSender;
 use crate::ll::fuse_abi::fuse_notify_code as notify_code;
 use crate::ll::notify::Notification;
 
-/// A handle to a pending `poll()` request. Can be saved and used to notify the
-/// kernel when a poll is ready.
+/// A handle to a pending `poll()` request.
+#[derive(Copy, Clone, Debug)]
+pub struct PollHandle(pub u64);
+
+/// A [handle](PollHandle) to a pending `poll()` request coupled with notifier reference.
+/// Can be saved and used to notify the kernel when a poll is ready.
 #[derive(Clone)]
-pub struct PollHandle {
-    handle: u64,
+pub struct PollNotifier {
+    handle: PollHandle,
     notifier: Notifier,
 }
 
-impl PollHandle {
-    pub(crate) fn new(cs: ChannelSender, kh: u64) -> Self {
+impl PollNotifier {
+    pub(crate) fn new(cs: ChannelSender, kh: PollHandle) -> Self {
         Self {
             handle: kh,
             notifier: Notifier::new(cs),
         }
+    }
+
+    /// Handle associated with this poll notifier.
+    pub fn handle(&self) -> PollHandle {
+        self.handle
     }
 
     /// Notify the kernel that the associated file handle is ready to be polled.
@@ -33,13 +42,7 @@ impl PollHandle {
     }
 }
 
-impl From<PollHandle> for u64 {
-    fn from(value: PollHandle) -> Self {
-        value.handle
-    }
-}
-
-impl std::fmt::Debug for PollHandle {
+impl std::fmt::Debug for PollNotifier {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("PollHandle").field(&self.handle).finish()
     }
@@ -57,7 +60,7 @@ impl Notifier {
     /// Notify poll clients of I/O readiness
     /// # Errors
     /// Returns an error if the kernel rejects the notification.
-    pub fn poll(&self, kh: u64) -> io::Result<()> {
+    pub fn poll(&self, kh: PollHandle) -> io::Result<()> {
         let notif = Notification::new_poll(kh);
         self.send(notify_code::FUSE_POLL, &notif)
     }

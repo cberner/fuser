@@ -54,6 +54,7 @@ use crate::mnt::mount_options::check_option_conflicts;
 use crate::mnt::mount_options::parse_options_from_args;
 pub use crate::notify::Notifier;
 pub use crate::notify::PollHandle;
+pub use crate::notify::PollNotifier;
 pub use crate::open_flags::OpenAccMode;
 pub use crate::open_flags::OpenFlags;
 pub use crate::passthrough::BackingId;
@@ -936,7 +937,7 @@ pub trait Filesystem: Send + Sync + 'static {
         _req: &Request,
         ino: INodeNo,
         fh: FileHandle,
-        ph: PollHandle,
+        ph: PollNotifier,
         events: PollEvents,
         flags: PollFlags,
         reply: ReplyPoll,

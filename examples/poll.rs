@@ -31,6 +31,7 @@ use fuser::OpenFlags;
 use fuser::PollEvents;
 use fuser::PollFlags;
 use fuser::PollHandle;
+use fuser::PollNotifier;
 use fuser::ReadFlags;
 use fuser::ReplyAttr;
 use fuser::ReplyData;
@@ -46,8 +47,7 @@ const MAXBYTES: u64 = 10;
 struct FSelData {
     bytecnt: [u64; NUMFILES as usize],
     open_mask: u16,
-    notify_mask: u16,
-    poll_handles: [u64; NUMFILES as usize],
+    poll_handles: [Option<PollHandle>; NUMFILES as usize],
 }
 
 struct FSelFS {
@@ -273,7 +273,7 @@ impl fuser::Filesystem for FSelFS {
         _req: &Request,
         _ino: INodeNo,
         fh: FileHandle,
-        ph: PollHandle,
+        ph: PollNotifier,
         _events: PollEvents,
         flags: PollFlags,
         reply: fuser::ReplyPoll,
@@ -293,8 +293,7 @@ impl fuser::Filesystem for FSelFS {
             let mut d = self.get_data();
 
             if flags.contains(PollFlags::FUSE_POLL_SCHEDULE_NOTIFY) {
-                d.notify_mask |= 1 << idx;
-                d.poll_handles[idx as usize] = ph.into();
+                d.poll_handles[idx as usize] = Some(ph.handle());
             }
 
             let nbytes = d.bytecnt[idx as usize];
@@ -328,12 +327,12 @@ fn producer(data: &Mutex<FSelData>, notifier: &fuser::Notifier) {
                 let tidx = t as usize;
                 if d.bytecnt[tidx] != MAXBYTES {
                     d.bytecnt[tidx] += 1;
-                    if d.notify_mask & (1 << t) != 0 {
-                        println!("NOTIFY {t:X}");
-                        if let Err(e) = notifier.poll(d.poll_handles[tidx]) {
-                            eprintln!("poll notification failed: {e}");
-                        }
-                        d.notify_mask &= !(1 << t);
+                    let Some(handle) = d.poll_handles[tidx].take() else {
+                        continue;
+                    };
+                    println!("NOTIFY {t:X}");
+                    if let Err(e) = notifier.poll(handle) {
+                        eprintln!("poll notification failed: {e}");
                     }
                 }
 
@@ -354,8 +353,7 @@ fn main() {
     let data = Arc::new(Mutex::new(FSelData {
         bytecnt: [0; NUMFILES as usize],
         open_mask: 0,
-        notify_mask: 0,
-        poll_handles: [0; NUMFILES as usize],
+        poll_handles: [None; NUMFILES as usize],
     }));
     let fs = FSelFS { data: data.clone() };
 
