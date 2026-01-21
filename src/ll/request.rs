@@ -256,6 +256,7 @@ mod op {
     use crate::OpenFlags;
     use crate::PollEvents;
     use crate::PollFlags;
+    use crate::PollHandle;
     use crate::WriteFlags;
     use crate::bsd_file_flags::BsdFileFlags;
     use crate::ll::Response;
@@ -1377,8 +1378,8 @@ mod op {
         }
 
         /// The unique id used for the poll context by the kernel
-        pub(crate) fn kernel_handle(&self) -> u64 {
-            self.arg.kh
+        pub(crate) fn kernel_handle(&self) -> PollHandle {
+            PollHandle(self.arg.kh)
         }
 
         /// The requested poll events

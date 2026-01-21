@@ -13,7 +13,7 @@ use log::error;
 use log::warn;
 
 use crate::Filesystem;
-use crate::PollHandle;
+use crate::PollNotifier;
 use crate::RenameFlags;
 use crate::Request;
 use crate::channel::ChannelSender;
@@ -456,7 +456,7 @@ impl<'a> RequestWithSender<'a> {
                 );
             }
             ll::Operation::Poll(x) => {
-                let ph = PollHandle::new(se.ch.sender(), x.kernel_handle());
+                let ph = PollNotifier::new(se.ch.sender(), x.kernel_handle());
 
                 se.filesystem.poll(
                     self.request_header(),
