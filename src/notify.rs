@@ -75,7 +75,7 @@ impl Notifier {
     /// data in the given range)
     /// # Errors
     /// Returns an error if the kernel rejects the notification.
-    pub fn inval_inode(&self, ino: u64, offset: i64, len: i64) -> io::Result<()> {
+    pub fn inval_inode(&self, ino: INodeNo, offset: i64, len: i64) -> io::Result<()> {
         let notif = Notification::new_inval_inode(ino, offset, len);
         self.send_inval(notify_code::FUSE_NOTIFY_INVAL_INODE, &notif)
     }
@@ -84,7 +84,7 @@ impl Notifier {
     /// # Errors
     /// Returns an error if the notification data is too large.
     /// Returns an error if the kernel rejects the notification.
-    pub fn store(&self, ino: u64, offset: u64, data: &[u8]) -> io::Result<()> {
+    pub fn store(&self, ino: INodeNo, offset: u64, data: &[u8]) -> io::Result<()> {
         let notif = Notification::new_store(ino, offset, data).map_err(Self::too_big_err)?;
         // Not strictly an invalidate, but the inode we're operating
         // on may have been evicted anyway, so treat is as such
@@ -96,7 +96,7 @@ impl Notifier {
     /// # Errors
     /// Returns an error if the notification data is too large.
     /// Returns an error if the kernel rejects the notification.
-    pub fn delete(&self, parent: u64, child: u64, name: &OsStr) -> io::Result<()> {
+    pub fn delete(&self, parent: INodeNo, child: INodeNo, name: &OsStr) -> io::Result<()> {
         let notif = Notification::new_delete(parent, child, name).map_err(Self::too_big_err)?;
         self.send_inval(notify_code::FUSE_NOTIFY_DELETE, &notif)
     }

@@ -222,14 +222,18 @@ fn main() {
         drop(s);
         if !opts.no_notify && lookup_cnt.load(SeqCst) != 0 {
             if opts.notify_store {
-                if let Err(e) =
-                    notifier.store(ClockFS::FILE_INO, 0, fdata.lock().unwrap().as_bytes())
-                {
+                if let Err(e) = notifier.store(
+                    INodeNo(ClockFS::FILE_INO),
+                    0,
+                    fdata.lock().unwrap().as_bytes(),
+                ) {
                     eprintln!("Warning: failed to update kernel cache: {e}");
                 }
-            } else if let Err(e) =
-                notifier.inval_inode(ClockFS::FILE_INO, 0, olddata.len().try_into().unwrap())
-            {
+            } else if let Err(e) = notifier.inval_inode(
+                INodeNo(ClockFS::FILE_INO),
+                0,
+                olddata.len().try_into().unwrap(),
+            ) {
                 eprintln!("Warning: failed to invalidate inode: {e}");
             }
         }
