@@ -310,9 +310,11 @@ mod op {
     use crate::PollFlags;
     use crate::WriteFlags;
     use crate::ll::Response;
-    use crate::ll::fsync_flags::FsyncFlags;
-    use crate::ll::read_flags::ReadFlags;
-    use crate::ll::release_flags::ReleaseFlags;
+    use crate::ll::flags::FattrFlags;
+    use crate::ll::flags::FsyncFlags;
+    use crate::ll::flags::InitFlags;
+    use crate::ll::flags::ReadFlags;
+    use crate::ll::flags::ReleaseFlags;
 
     /// Look up a directory entry by name and get its attributes.
     ///

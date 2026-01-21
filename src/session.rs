@@ -30,6 +30,7 @@ use nix::unistd::Uid;
 use nix::unistd::geteuid;
 
 use crate::Filesystem;
+use crate::InitFlags;
 use crate::KernelConfig;
 use crate::MountOption;
 use crate::Request;
@@ -298,11 +299,11 @@ impl<FS: Filesystem> Session<FS> {
 
             // Log capability status for debugging
             for bit in 0..64 {
-                let bitflags = abi::InitFlags::from_bits_retain(1 << bit);
-                if bitflags == abi::InitFlags::FUSE_INIT_EXT {
+                let bitflags = InitFlags::from_bits_retain(1 << bit);
+                if bitflags == InitFlags::FUSE_INIT_EXT {
                     continue;
                 }
-                let bitflag_is_known = abi::InitFlags::all().contains(bitflags);
+                let bitflag_is_known = InitFlags::all().contains(bitflags);
                 let kernel_supports = init.capabilities().contains(bitflags);
                 let we_requested = config.requested.contains(bitflags);
                 // On macOS, there's a clash between linux and macOS constants,
