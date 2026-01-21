@@ -2193,6 +2193,9 @@ fn main() {
     } else {
         eprintln!("Unable to read /etc/fuse.conf");
     }
+    if options.contains(&MountOption::AutoUnmount) && !options.contains(&MountOption::AllowRoot) {
+        options.push(MountOption::AllowOther);
+    }
 
     let data_dir = matches.get_one::<String>("data-dir").unwrap().to_string();
 
