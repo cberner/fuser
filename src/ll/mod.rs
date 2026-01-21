@@ -14,7 +14,6 @@ pub(crate) mod reply;
 pub(crate) mod request;
 pub(crate) mod write_flags;
 
-use std::convert::TryInto;
 use std::num::NonZeroI32;
 use std::time::SystemTime;
 
@@ -53,7 +52,10 @@ macro_rules! no_xattr_doc {
 
 /// Represents an error code to be returned to the caller
 #[derive(Debug, Copy, Clone)]
-pub struct Errno(pub NonZeroI32);
+pub struct Errno(
+    /// Positive value.
+    NonZeroI32,
+);
 impl Errno {
     /// Operation not permitted
     pub const EPERM: Errno = errno!(libc::EPERM);
@@ -243,18 +245,22 @@ impl Errno {
     #[cfg(not(target_os = "linux"))]
     pub const NO_XATTR: Errno = Self::ENOATTR;
 
-    /// Make errno from `i32`, defaulting to `EIO` if it is zero.
+    /// Make errno from `i32`, defaulting to `EIO` if it is not positive.
     pub fn from_i32(err: i32) -> Errno {
-        err.try_into().ok().map_or(Errno::EIO, Errno)
+        NonZeroI32::new(err)
+            .filter(|err| err.get() > 0)
+            .map(Errno)
+            .unwrap_or(Errno::EIO)
+    }
+
+    pub(crate) fn code(self) -> i32 {
+        self.0.get()
     }
 }
 impl From<std::io::Error> for Errno {
     fn from(err: std::io::Error) -> Self {
         let errno = err.raw_os_error().unwrap_or(0);
-        match errno.try_into() {
-            Ok(i) => Errno(i),
-            Err(_) => Errno::EIO,
-        }
+        Errno::from_i32(errno)
     }
 }
 impl From<std::io::ErrorKind> for Errno {
@@ -265,7 +271,7 @@ impl From<std::io::ErrorKind> for Errno {
 }
 impl From<Errno> for i32 {
     fn from(x: Errno) -> Self {
-        x.0.into()
+        x.0.get()
     }
 }
 

@@ -290,7 +290,7 @@ impl<FS: Filesystem> Session<FS> {
                 let response = Response::new_error(errno);
                 <ReplyRaw as Reply>::new(request.unique(), ReplySender::Channel(self.ch.sender()))
                     .send_ll(&response);
-                return Err(io::Error::from_raw_os_error(errno.0.get()));
+                return Err(io::Error::from_raw_os_error(errno.code()));
             }
 
             // Remember the ABI version supported by kernel and mark the session initialized.
