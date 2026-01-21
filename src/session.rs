@@ -410,7 +410,7 @@ pub struct BackgroundSession {
     /// Object for creating Notifiers for client use
     sender: ChannelSender,
     /// Ensures the filesystem is unmounted when the session ends
-    _mount: Option<Mount>,
+    mount: Option<Mount>,
 }
 
 impl BackgroundSession {
@@ -428,7 +428,7 @@ impl BackgroundSession {
         Ok(BackgroundSession {
             guard,
             sender,
-            _mount: mount,
+            mount,
         })
     }
     /// Unmount the filesystem and join the background thread.
@@ -436,9 +436,9 @@ impl BackgroundSession {
         let Self {
             guard,
             sender: _,
-            _mount,
+            mount,
         } = self;
-        drop(_mount);
+        drop(mount);
         guard
             .join()
             .map_err(|_panic: Box<dyn std::any::Any + Send>| {
