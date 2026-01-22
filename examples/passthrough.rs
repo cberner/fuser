@@ -172,7 +172,7 @@ impl PassthroughFs {
 }
 
 impl Filesystem for PassthroughFs {
-    fn init(&mut self, _req: &Request, config: &mut KernelConfig) -> Result<(), Errno> {
+    fn init(&mut self, _req: &Request, config: &mut KernelConfig) -> std::io::Result<()> {
         config
             .add_capabilities(InitFlags::FUSE_PASSTHROUGH)
             .unwrap();

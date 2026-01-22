@@ -529,7 +529,7 @@ impl Filesystem for SimpleFS {
         &mut self,
         _req: &Request,
         #[allow(unused_variables)] config: &mut KernelConfig,
-    ) -> Result<(), Errno> {
+    ) -> io::Result<()> {
         if config
             .add_capabilities(InitFlags::FUSE_HANDLE_KILLPRIV)
             .is_err()
