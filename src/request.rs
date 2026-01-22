@@ -17,6 +17,7 @@ use crate::PollHandle;
 use crate::RenameFlags;
 use crate::Request;
 use crate::channel::ChannelSender;
+use crate::forget_one::ForgetOne;
 use crate::ll;
 use crate::ll::Errno;
 use crate::ll::Response;
@@ -472,7 +473,10 @@ impl<'a> RequestWithSender<'a> {
                 return Err(Errno::ENOSYS);
             }
             ll::Operation::BatchForget(x) => {
-                se.filesystem.batch_forget(self.request_header(), x.nodes()); // no reply
+                se.filesystem.batch_forget(
+                    self.request_header(),
+                    ForgetOne::slice_from_inner(x.nodes()),
+                ); // no reply
             }
             ll::Operation::FAllocate(x) => {
                 se.filesystem.fallocate(

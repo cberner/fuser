@@ -31,6 +31,7 @@ use serde::Deserialize;
 use serde::Serialize;
 
 pub use crate::access_flags::AccessFlags;
+use crate::forget_one::ForgetOne;
 pub use crate::ll::Errno;
 pub use crate::ll::Generation;
 pub use crate::ll::RequestId;
@@ -39,7 +40,6 @@ pub use crate::ll::copy_file_range_flags::CopyFileRangeFlags;
 pub use crate::ll::fuse_abi::FopenFlags;
 pub use crate::ll::fuse_abi::InitFlags;
 pub use crate::ll::fuse_abi::consts;
-pub use crate::ll::fuse_abi::fuse_forget_one;
 pub use crate::ll::ioctl_flags::IoctlFlags;
 pub use crate::ll::poll_flags::PollFlags;
 pub use crate::ll::read_flags::ReadFlags;
@@ -87,6 +87,7 @@ mod dev_fuse;
 /// Experimental APIs
 #[cfg(feature = "experimental")]
 pub mod experimental;
+mod forget_one;
 mod ll;
 mod mnt;
 mod notify;
@@ -421,11 +422,11 @@ pub trait Filesystem: Send + Sync + 'static {
     /// inodes will receive a forget message.
     fn forget(&self, _req: &Request, _ino: INodeNo, _nlookup: u64) {}
 
-    /// Like forget, but take multiple forget requests at once for performance. The default
-    /// implementation will fallback to forget.
-    fn batch_forget(&self, req: &Request, nodes: &[fuse_forget_one]) {
+    /// Like [`forget`](Self::forget), but take multiple forget requests at once for performance. The default
+    /// implementation will fallback to `forget`.
+    fn batch_forget(&self, req: &Request, nodes: &[ForgetOne]) {
         for node in nodes {
-            self.forget(req, INodeNo(node.nodeid), node.nlookup);
+            self.forget(req, node.nodeid(), node.nlookup());
         }
     }
 

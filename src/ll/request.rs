@@ -1411,7 +1411,6 @@ mod op {
         nodes: &'a [fuse_forget_one],
     }
     impl<'a> BatchForget<'a> {
-        /// TODO: Don't return `fuse_forget_one`, this should be private
         pub(crate) fn nodes(&self) -> &'a [fuse_forget_one] {
             self.nodes
         }
