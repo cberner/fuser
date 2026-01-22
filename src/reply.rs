@@ -24,7 +24,7 @@ use crate::PollEvents;
 use crate::channel::ChannelSender;
 use crate::ll::Generation;
 use crate::ll::INodeNo;
-use crate::ll::fuse_abi::FopenFlags;
+use crate::ll::flags::fopen_flags::FopenFlags;
 use crate::ll::reply::DirEntList;
 use crate::ll::reply::DirEntOffset;
 use crate::ll::reply::DirEntPlusList;
