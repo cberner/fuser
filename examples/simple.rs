@@ -29,38 +29,7 @@ use std::time::UNIX_EPOCH;
 
 use clap::Parser;
 use fuser::AccessFlags;
-
-#[derive(Parser)]
-#[command(version, author = "Christopher Berner")]
-struct Args {
-    /// Set local directory used to store data
-    #[clap(long, default_value = "/tmp/fuser")]
-    data_dir: String,
-
-    /// Act as a client, and mount FUSE at given path
-    #[clap(long, default_value = "")]
-    mount_point: String,
-
-    /// Mount FUSE with direct IO
-    #[clap(long, requires = "mount_point")]
-    direct_io: bool,
-
-    /// Automatically unmount FUSE when process exits
-    #[clap(long)]
-    auto_unmount: bool,
-
-    /// Run a filesystem check
-    #[clap(long)]
-    fsck: bool,
-
-    /// Enable setuid support when run as root
-    #[clap(long)]
-    suid: bool,
-
-    /// Sets the level of verbosity
-    #[clap(short, action = clap::ArgAction::Count)]
-    v: u8,
-}
+use fuser::BsdFileFlags;
 use fuser::Errno;
 use fuser::FileHandle;
 use fuser::Filesystem;
@@ -95,6 +64,38 @@ use log::info;
 use log::warn;
 use serde::Deserialize;
 use serde::Serialize;
+
+#[derive(Parser)]
+#[command(version, author = "Christopher Berner")]
+struct Args {
+    /// Set local directory used to store data
+    #[clap(long, default_value = "/tmp/fuser")]
+    data_dir: String,
+
+    /// Act as a client, and mount FUSE at given path
+    #[clap(long, default_value = "")]
+    mount_point: String,
+
+    /// Mount FUSE with direct IO
+    #[clap(long, requires = "mount_point")]
+    direct_io: bool,
+
+    /// Automatically unmount FUSE when process exits
+    #[clap(long)]
+    auto_unmount: bool,
+
+    /// Run a filesystem check
+    #[clap(long)]
+    fsck: bool,
+
+    /// Enable setuid support when run as root
+    #[clap(long)]
+    suid: bool,
+
+    /// Sets the level of verbosity
+    #[clap(short, action = clap::ArgAction::Count)]
+    v: u8,
+}
 
 const BLOCK_SIZE: u32 = 512;
 const MAX_NAME_LENGTH: u32 = 255;
@@ -612,7 +613,7 @@ impl Filesystem for SimpleFS {
         _crtime: Option<SystemTime>,
         _chgtime: Option<SystemTime>,
         _bkuptime: Option<SystemTime>,
-        _flags: Option<u32>,
+        _flags: Option<BsdFileFlags>,
         reply: ReplyAttr,
     ) {
         let mut attrs = match self.get_inode(ino) {

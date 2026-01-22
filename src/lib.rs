@@ -31,6 +31,7 @@ use serde::Deserialize;
 use serde::Serialize;
 
 pub use crate::access_flags::AccessFlags;
+pub use crate::bsd_file_flags::BsdFileFlags;
 use crate::forget_one::ForgetOne;
 pub use crate::ll::Errno;
 pub use crate::ll::Generation;
@@ -82,6 +83,7 @@ pub use crate::session::SessionACL;
 pub use crate::session::SessionUnmounter;
 
 mod access_flags;
+mod bsd_file_flags;
 mod channel;
 mod dev_fuse;
 /// Experimental APIs
@@ -452,7 +454,7 @@ pub trait Filesystem: Send + Sync + 'static {
         _crtime: Option<SystemTime>,
         _chgtime: Option<SystemTime>,
         _bkuptime: Option<SystemTime>,
-        flags: Option<u32>,
+        flags: Option<BsdFileFlags>,
         reply: ReplyAttr,
     ) {
         warn!(

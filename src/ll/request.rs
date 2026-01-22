@@ -255,6 +255,7 @@ mod op {
     use crate::PollEvents;
     use crate::PollFlags;
     use crate::WriteFlags;
+    use crate::bsd_file_flags::BsdFileFlags;
     use crate::ll::Response;
     use crate::ll::fsync_flags::FsyncFlags;
     use crate::ll::getattr_flags::GetattrFlags;
@@ -453,10 +454,10 @@ mod op {
             #[cfg(not(target_os = "macos"))]
             None
         }
-        pub(crate) fn flags(&self) -> Option<u32> {
+        pub(crate) fn flags(&self) -> Option<BsdFileFlags> {
             #[cfg(target_os = "macos")]
             if self.valid().contains(FattrFlags::FATTR_FLAGS) {
-                Some(self.arg.flags)
+                Some(BsdFileFlags::from_bits_retain(self.arg.flags))
             } else {
                 None
             }
