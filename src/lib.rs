@@ -401,7 +401,7 @@ pub trait Filesystem: Send + Sync + 'static {
     /// Initialize filesystem.
     /// Called before any other filesystem method.
     /// The kernel module connection can be configured using the `KernelConfig` object
-    fn init(&mut self, _req: &Request, _config: &mut KernelConfig) -> Result<(), Errno> {
+    fn init(&mut self, _req: &Request, _config: &mut KernelConfig) -> io::Result<()> {
         Ok(())
     }
 

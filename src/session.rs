@@ -28,6 +28,7 @@ use log::info;
 use nix::unistd::Uid;
 use nix::unistd::geteuid;
 
+use crate::Errno;
 use crate::Filesystem;
 use crate::KernelConfig;
 use crate::MountOption;
@@ -278,14 +279,15 @@ impl<FS: Filesystem> Session<FS> {
             let mut config = KernelConfig::new(init.capabilities(), init.max_readahead(), v);
 
             // Call filesystem init method and give it a chance to return an error
-            if let Err(errno) = self
+            if let Err(error) = self
                 .filesystem
                 .init(Request::ref_cast(request.header()), &mut config)
             {
+                let errno = Errno::from_i32(error.raw_os_error().unwrap_or(0));
                 let response = Response::new_error(errno);
                 <ReplyRaw as Reply>::new(request.unique(), ReplySender::Channel(self.ch.sender()))
                     .send_ll(&response);
-                return Err(io::Error::from_raw_os_error(errno.code()));
+                return Err(error);
             }
 
             // Remember the ABI version supported by kernel and mark the session initialized.

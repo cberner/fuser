@@ -245,7 +245,8 @@ impl Errno {
             .unwrap_or(Errno::EIO)
     }
 
-    pub(crate) fn code(self) -> i32 {
+    /// Errno value.
+    pub fn code(self) -> i32 {
         self.0.get()
     }
 }
