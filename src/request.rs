@@ -19,7 +19,6 @@ use crate::Request;
 use crate::channel::ChannelSender;
 use crate::ll;
 use crate::ll::Errno;
-use crate::ll::Request as _;
 use crate::ll::Response;
 use crate::reply::Reply;
 use crate::reply::ReplyDirectory;
