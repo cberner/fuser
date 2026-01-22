@@ -239,6 +239,8 @@ mod op {
 
     use super::super::TimeOrNow;
     use super::super::argument::ArgumentIterator;
+    use super::super::flags::fattr_flags::FattrFlags;
+    use super::super::flags::init_flags::InitFlags;
     use super::FileHandle;
     use super::FilenameInDir;
     use super::INodeNo;
@@ -257,10 +259,10 @@ mod op {
     use crate::WriteFlags;
     use crate::bsd_file_flags::BsdFileFlags;
     use crate::ll::Response;
-    use crate::ll::fsync_flags::FsyncFlags;
-    use crate::ll::getattr_flags::GetattrFlags;
-    use crate::ll::read_flags::ReadFlags;
-    use crate::ll::release_flags::ReleaseFlags;
+    use crate::ll::flags::fsync_flags::FsyncFlags;
+    use crate::ll::flags::getattr_flags::GetattrFlags;
+    use crate::ll::flags::read_flags::ReadFlags;
+    use crate::ll::flags::release_flags::ReleaseFlags;
 
     /// Look up a directory entry by name and get its attributes.
     ///

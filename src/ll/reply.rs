@@ -17,8 +17,8 @@ use super::Generation;
 use super::INodeNo;
 use super::Lock;
 use super::RequestId;
+use super::flags::fopen_flags::FopenFlags;
 use super::fuse_abi as abi;
-use super::fuse_abi::FopenFlags;
 use crate::FileType;
 use crate::PollEvents;
 
