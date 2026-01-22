@@ -24,7 +24,6 @@ pub(crate) use request::FileHandle;
 pub(crate) use request::INodeNo;
 pub(crate) use request::Lock;
 pub(crate) use request::Operation;
-pub(crate) use request::Request;
 pub use request::RequestId;
 pub(crate) use request::Version;
 

@@ -119,7 +119,6 @@ fn is_mounted(fuse_device: &DevFuse) -> bool {
 #[cfg(test)]
 mod test {
     use std::ffi::CStr;
-    use std::mem::ManuallyDrop;
 
     use super::*;
 
@@ -159,6 +158,8 @@ mod test {
     #[test]
     #[cfg(not(target_os = "macos"))]
     fn mount_unmount() {
+        use std::mem::ManuallyDrop;
+
         // We use ManuallyDrop here to leak the directory on test failure.  We don't
         // want to try and clean up the directory if it's a mountpoint otherwise we'll
         // deadlock.

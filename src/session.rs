@@ -37,7 +37,6 @@ use crate::channel::Channel;
 use crate::channel::ChannelSender;
 use crate::dev_fuse::DevFuse;
 use crate::ll;
-use crate::ll::Request as _;
 use crate::ll::Response;
 use crate::ll::Version;
 use crate::ll::fuse_abi as abi;
