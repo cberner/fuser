@@ -108,7 +108,7 @@ function run_test {
   kill $FUSE_PID
   wait $FUSE_PID
 
-  if [[ "$3" == "--auto_unmount" ]]; then
+  if [[ "$3" == "--auto-unmount" ]]; then
       # Make sure the FUSE mount automatically unmounted
       if [[ $(mount | grep hello) ]]; then
           echo -e "$RED FAILED Mount not cleaned up: $2 $3 $NC"
@@ -127,7 +127,7 @@ apt install -y fuse
 echo 'user_allow_other' >> /etc/fuse.conf
 
 run_test --features='experimental' 'without libfuse, with fusermount'
-run_test --features='experimental' 'without libfuse, with fusermount' --auto_unmount
+run_test --features='experimental' 'without libfuse, with fusermount' --auto-unmount
 test_no_user_allow_other --features='' 'without libfuse, with fusermount'
 
 apt remove --purge -y fuse
@@ -136,7 +136,7 @@ apt install -y fuse3
 echo 'user_allow_other' >> /etc/fuse.conf
 
 run_test --features='experimental' 'without libfuse, with fusermount3'
-run_test --features='experimental' 'without libfuse, with fusermount3' --auto_unmount
+run_test --features='experimental' 'without libfuse, with fusermount3' --auto-unmount
 test_no_user_allow_other --features='' 'without libfuse, with fusermount3'
 
 apt remove --purge -y fuse3
@@ -145,7 +145,7 @@ apt install -y libfuse-dev pkg-config fuse
 echo 'user_allow_other' >> /etc/fuse.conf
 
 run_test --features=libfuse,experimental 'with libfuse'
-run_test --features=libfuse,experimental 'with libfuse' --auto_unmount
+run_test --features=libfuse,experimental 'with libfuse' --auto-unmount
 
 apt remove --purge -y libfuse-dev fuse
 apt autoremove -y
@@ -153,7 +153,7 @@ apt install -y libfuse3-dev fuse3
 echo 'user_allow_other' >> /etc/fuse.conf
 
 run_test --features=libfuse,abi-7-30,experimental 'with libfuse3'
-run_test --features=libfuse,abi-7-30,experimental 'with libfuse3' --auto_unmount
+run_test --features=libfuse,abi-7-30,experimental 'with libfuse3' --auto-unmount
 
 run_allow_root_test
 

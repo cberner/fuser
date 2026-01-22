@@ -10,6 +10,7 @@
 use std::convert::TryInto;
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicU64;
@@ -18,7 +19,15 @@ use std::thread;
 use std::time::Duration;
 use std::time::UNIX_EPOCH;
 
+use clap::Parser;
 use fuser::Errno;
+
+#[derive(Parser)]
+#[command(version, author = "Zev Weiss")]
+struct Args {
+    /// Act as a client, and mount FUSE at given path
+    mount_point: PathBuf,
+}
 use fuser::FileAttr;
 use fuser::FileHandle;
 use fuser::FileType;
@@ -350,6 +359,8 @@ fn producer(data: &Mutex<FSelData>, notifier: &fuser::Notifier) {
 }
 
 fn main() {
+    let args = Args::parse();
+
     let options = vec![MountOption::RO, MountOption::FSName("fsel".to_string())];
     let data = Arc::new(Mutex::new(FSelData {
         bytecnt: [0; NUMFILES as usize],
@@ -359,8 +370,7 @@ fn main() {
     }));
     let fs = FSelFS { data: data.clone() };
 
-    let mntpt = std::env::args().nth(1).unwrap();
-    let session = fuser::Session::new(fs, mntpt, &options).unwrap();
+    let session = fuser::Session::new(fs, &args.mount_point, &options).unwrap();
     let bg = session.spawn().unwrap();
 
     producer(&data, &bg.notifier());

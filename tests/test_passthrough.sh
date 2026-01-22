@@ -25,7 +25,7 @@ fi
 
 mnt="$(mktemp -d)"
 trap 'set +e; umount "${mnt}"; wait %1; rmdir "${mnt}"' TERM INT EXIT
-sudo "${examples_passthrough}" --auto_unmount "${mnt}" &
+sudo "${examples_passthrough}" --auto-unmount "${mnt}" &
 
 for x in $(seq 10); do
     if test -f "${mnt}/passthrough"; then

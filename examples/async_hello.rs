@@ -1,11 +1,9 @@
 use std::ffi::OsStr;
+use std::path::PathBuf;
 use std::time::Duration;
 use std::time::UNIX_EPOCH;
 
-use clap::Arg;
-use clap::ArgAction;
-use clap::Command;
-use clap::crate_version;
+use clap::Parser;
 use fuser::Errno;
 use fuser::FileAttr;
 use fuser::FileHandle;
@@ -21,6 +19,21 @@ use fuser::experimental::GetAttrResponse;
 use fuser::experimental::LookupResponse;
 use fuser::experimental::RequestContext;
 use fuser::experimental::TokioAdapter;
+
+#[derive(Parser)]
+#[command(version, author = "Christopher Berner")]
+struct Args {
+    /// Act as a client, and mount FUSE at given path
+    mount_point: PathBuf,
+
+    /// Automatically unmount on process exit
+    #[clap(long)]
+    auto_unmount: bool,
+
+    /// Allow root user to access filesystem
+    #[clap(long)]
+    allow_root: bool,
+}
 
 const TTL: Duration = Duration::from_secs(1); // 1 second
 
@@ -144,39 +157,18 @@ impl AsyncFilesystem for HelloFS {
 }
 
 fn main() {
-    let matches = Command::new("hello")
-        .version(crate_version!())
-        .author("Christopher Berner")
-        .arg(
-            Arg::new("MOUNT_POINT")
-                .required(true)
-                .index(1)
-                .help("Act as a client, and mount FUSE at given path"),
-        )
-        .arg(
-            Arg::new("auto_unmount")
-                .long("auto_unmount")
-                .action(ArgAction::SetTrue)
-                .help("Automatically unmount on process exit"),
-        )
-        .arg(
-            Arg::new("allow-root")
-                .long("allow-root")
-                .action(ArgAction::SetTrue)
-                .help("Allow root user to access filesystem"),
-        )
-        .get_matches();
+    let args = Args::parse();
     env_logger::init();
-    let mountpoint = matches.get_one::<String>("MOUNT_POINT").unwrap();
+
     let mut options = vec![MountOption::RO, MountOption::FSName("hello".to_string())];
-    if matches.get_flag("auto_unmount") {
+    if args.auto_unmount {
         options.push(MountOption::AutoUnmount);
     }
-    if matches.get_flag("allow-root") {
+    if args.allow_root {
         options.push(MountOption::AllowRoot);
     }
     if options.contains(&MountOption::AutoUnmount) && !options.contains(&MountOption::AllowRoot) {
         options.push(MountOption::AllowOther);
     }
-    fuser::mount2(TokioAdapter::new(HelloFS), mountpoint, &options).unwrap();
+    fuser::mount2(TokioAdapter::new(HelloFS), &args.mount_point, &options).unwrap();
 }
