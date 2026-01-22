@@ -3,7 +3,6 @@
 
 use std::cmp::min;
 use std::collections::BTreeMap;
-use std::env;
 use std::ffi::OsStr;
 use std::fs;
 use std::fs::File;
@@ -28,11 +27,40 @@ use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
-use clap::Arg;
-use clap::ArgAction;
-use clap::Command;
-use clap::crate_version;
+use clap::Parser;
 use fuser::AccessFlags;
+
+#[derive(Parser)]
+#[command(version, author = "Christopher Berner")]
+struct Args {
+    /// Set local directory used to store data
+    #[clap(long, default_value = "/tmp/fuser")]
+    data_dir: String,
+
+    /// Act as a client, and mount FUSE at given path
+    #[clap(long, default_value = "")]
+    mount_point: String,
+
+    /// Mount FUSE with direct IO
+    #[clap(long, requires = "mount_point")]
+    direct_io: bool,
+
+    /// Automatically unmount FUSE when process exits
+    #[clap(long)]
+    auto_unmount: bool,
+
+    /// Run a filesystem check
+    #[clap(long)]
+    fsck: bool,
+
+    /// Enable setuid support when run as root
+    #[clap(long)]
+    suid: bool,
+
+    /// Sets the level of verbosity
+    #[clap(short, action = clap::ArgAction::Count)]
+    v: u8,
+}
 use fuser::Errno;
 use fuser::FileHandle;
 use fuser::Filesystem;
@@ -2114,58 +2142,9 @@ fn fuse_allow_other_enabled() -> io::Result<bool> {
 }
 
 fn main() {
-    let matches = Command::new("Fuser")
-        .version(crate_version!())
-        .author("Christopher Berner")
-        .arg(
-            Arg::new("data-dir")
-                .long("data-dir")
-                .value_name("DIR")
-                .default_value("/tmp/fuser")
-                .help("Set local directory used to store data"),
-        )
-        .arg(
-            Arg::new("mount-point")
-                .long("mount-point")
-                .value_name("MOUNT_POINT")
-                .default_value("")
-                .help("Act as a client, and mount FUSE at given path"),
-        )
-        .arg(
-            Arg::new("direct-io")
-                .long("direct-io")
-                .action(ArgAction::SetTrue)
-                .requires("mount-point")
-                .help("Mount FUSE with direct IO"),
-        )
-        .arg(
-            Arg::new("auto-unmount")
-                .long("auto-unmount")
-                .action(ArgAction::SetTrue)
-                .help("Automatically unmount FUSE when process exits"),
-        )
-        .arg(
-            Arg::new("fsck")
-                .long("fsck")
-                .action(ArgAction::SetTrue)
-                .help("Run a filesystem check"),
-        )
-        .arg(
-            Arg::new("suid")
-                .long("suid")
-                .action(ArgAction::SetTrue)
-                .help("Enable setuid support when run as root"),
-        )
-        .arg(
-            Arg::new("v")
-                .short('v')
-                .action(ArgAction::Count)
-                .help("Sets the level of verbosity"),
-        )
-        .get_matches();
+    let args = Args::parse();
 
-    let verbosity = matches.get_count("v");
-    let log_level = match verbosity {
+    let log_level = match args.v {
         0 => LevelFilter::Error,
         1 => LevelFilter::Warn,
         2 => LevelFilter::Info,
@@ -2179,11 +2158,14 @@ fn main() {
 
     let mut options = vec![MountOption::FSName("fuser".to_string())];
 
-    if matches.get_flag("suid") {
-        info!("setuid bit support enabled");
-        options.push(MountOption::Suid);
+    #[cfg(feature = "abi-7-26")]
+    {
+        if args.suid {
+            info!("setuid bit support enabled");
+            options.push(MountOption::Suid);
+        }
     }
-    if matches.get_flag("auto-unmount") {
+    if args.auto_unmount {
         options.push(MountOption::AutoUnmount);
     }
     if let Ok(enabled) = fuse_allow_other_enabled() {
@@ -2197,20 +2179,9 @@ fn main() {
         options.push(MountOption::AllowOther);
     }
 
-    let data_dir = matches.get_one::<String>("data-dir").unwrap().to_string();
-
-    let mountpoint: String = matches
-        .get_one::<String>("mount-point")
-        .unwrap()
-        .to_string();
-
     let result = fuser::mount2(
-        SimpleFS::new(
-            data_dir,
-            matches.get_flag("direct-io"),
-            matches.get_flag("suid"),
-        ),
-        mountpoint,
+        SimpleFS::new(args.data_dir, args.direct_io, args.suid),
+        &args.mount_point,
         &options,
     );
     if let Err(e) = result {
