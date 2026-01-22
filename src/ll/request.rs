@@ -983,12 +983,9 @@ mod op {
         }
 
         pub(crate) fn reply(&self, config: &crate::KernelConfig) -> Response<'a> {
-            let flags: InitFlags = self.capabilities() & config.requested; // use requested features and reported as capable
-            let flags = if cfg!(feature = "abi-7-36") {
-                flags | InitFlags::FUSE_INIT_EXT
-            } else {
-                flags
-            };
+            let flags = config.requested | InitFlags::FUSE_INIT_EXT;
+            // use requested features and reported as capable
+            let flags = flags & self.capabilities();
 
             let mut init = fuse_init_out {
                 major: FUSE_KERNEL_VERSION,
