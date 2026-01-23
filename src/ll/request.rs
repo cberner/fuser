@@ -1173,6 +1173,9 @@ mod op {
         #[expect(dead_code)]
         header: &'a fuse_in_header,
         arg: &'a fuse_lk_in,
+        /// If true, block until the lock can be acquired (SETLKW).
+        /// If false, return immediately if the lock cannot be acquired (SETLK).
+        wait: bool,
     }
     impl SetLk<'_> {
         /// The value set by the [`Open`] method. See [`FileHandle`].
@@ -1185,23 +1188,10 @@ mod op {
         pub(crate) fn lock_owner(&self) -> LockOwner {
             LockOwner(self.arg.owner)
         }
-    }
-    #[derive(Debug)]
-    pub(crate) struct SetLkW<'a> {
-        #[expect(dead_code)]
-        header: &'a fuse_in_header,
-        arg: &'a fuse_lk_in,
-    }
-    impl SetLkW<'_> {
-        /// The value set by the [`Open`] method. See [`FileHandle`].
-        pub(crate) fn file_handle(&self) -> FileHandle {
-            FileHandle(self.arg.fh)
-        }
-        pub(crate) fn lock(&self) -> Lock {
-            Lock::from_abi(&self.arg.lk)
-        }
-        pub(crate) fn lock_owner(&self) -> LockOwner {
-            LockOwner(self.arg.owner)
+        /// If true, block until the lock can be acquired (SETLKW).
+        /// If false, return immediately if the lock cannot be acquired (SETLK).
+        pub(crate) fn sleep(&self) -> bool {
+            self.wait
         }
     }
 
@@ -1790,10 +1780,12 @@ mod op {
             fuse_opcode::FUSE_SETLK => Operation::SetLk(SetLk {
                 header,
                 arg: data.fetch()?,
+                wait: false,
             }),
-            fuse_opcode::FUSE_SETLKW => Operation::SetLkW(SetLkW {
+            fuse_opcode::FUSE_SETLKW => Operation::SetLk(SetLk {
                 header,
                 arg: data.fetch()?,
+                wait: true,
             }),
             fuse_opcode::FUSE_ACCESS => Operation::Access(Access {
                 header,
@@ -1917,7 +1909,6 @@ pub(crate) enum Operation<'a> {
     FSyncDir(FSyncDir<'a>),
     GetLk(GetLk<'a>),
     SetLk(SetLk<'a>),
-    SetLkW(SetLkW<'a>),
     Access(Access<'a>),
     Create(Create<'a>),
     Interrupt(Interrupt<'a>),
@@ -2058,13 +2049,8 @@ impl fmt::Display for Operation<'_> {
             ),
             Operation::SetLk(x) => write!(
                 f,
-                "SETLK fh {:?}, lock owner {:?}",
-                x.file_handle(),
-                x.lock_owner()
-            ),
-            Operation::SetLkW(x) => write!(
-                f,
-                "SETLKW fh {:?}, lock owner {:?}",
+                "{} fh {:?}, lock owner {:?}",
+                if x.sleep() { "SETLKW" } else { "SETLK" },
                 x.file_handle(),
                 x.lock_owner()
             ),

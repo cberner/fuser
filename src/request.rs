@@ -412,21 +412,7 @@ impl<'a> RequestWithSender<'a> {
                     x.lock().range.1,
                     x.lock().typ,
                     x.lock().pid,
-                    false,
-                    self.reply(),
-                );
-            }
-            ll::Operation::SetLkW(x) => {
-                se.filesystem.setlk(
-                    self.request_header(),
-                    self.request.nodeid(),
-                    x.file_handle(),
-                    x.lock_owner(),
-                    x.lock().range.0,
-                    x.lock().range.1,
-                    x.lock().typ,
-                    x.lock().pid,
-                    true,
+                    x.sleep(),
                     self.reply(),
                 );
             }
