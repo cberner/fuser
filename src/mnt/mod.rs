@@ -19,10 +19,8 @@ use std::io;
 
 #[cfg(any(test, fuser_mount_impl = "libfuse2", fuser_mount_impl = "libfuse3"))]
 use fuse2_sys::fuse_args;
-#[cfg(any(test, fuser_mount_impl = "libfuse2", fuser_mount_impl = "libfuse3"))]
 use mount_options::MountOption;
 
-#[cfg(any(test, fuser_mount_impl = "pure-rust"))]
 use crate::dev_fuse::DevFuse;
 
 /// Helper function to provide options as a `fuse_args` struct
@@ -49,15 +47,60 @@ fn with_fuse_args<T, F: FnOnce(&fuse_args) -> T>(options: &[MountOption], f: F) 
 }
 
 use std::ffi::CStr;
+use std::path::Path;
+use std::sync::Arc;
 
-#[cfg(fuser_mount_impl = "pure-rust")]
-pub(crate) use fuse_pure::Mount;
-#[cfg(fuser_mount_impl = "libfuse2")]
-pub(crate) use fuse2::Mount;
-#[cfg(fuser_mount_impl = "libfuse3")]
-pub(crate) use fuse3::Mount;
+#[derive(Debug)]
+pub(crate) enum Mount {
+    #[cfg(fuser_mount_impl = "pure-rust")]
+    Pure(
+        #[expect(dead_code)] // Is held for drop.
+        fuse_pure::Mount,
+    ),
+    #[cfg(fuser_mount_impl = "libfuse2")]
+    Fuse2(
+        #[expect(dead_code)] // Is held for drop.
+        fuse2::Mount,
+    ),
+    #[cfg(fuser_mount_impl = "libfuse3")]
+    Fuse3(
+        #[expect(dead_code)] // Is held for drop.
+        fuse3::Mount,
+    ),
+}
 
-#[inline]
+impl Mount {
+    #[allow(unreachable_code)]
+    pub(crate) fn new(
+        mountpoint: &Path,
+        options: &[MountOption],
+    ) -> io::Result<(Arc<DevFuse>, Mount)> {
+        #[cfg(fuser_mount_impl = "pure-rust")]
+        {
+            let (dev_fuse, mount) = fuse_pure::Mount::new(mountpoint, options)?;
+            Ok((dev_fuse, Mount::Pure(mount)))
+        }
+        #[cfg(fuser_mount_impl = "libfuse2")]
+        {
+            let (dev_fuse, mount) = fuse2::Mount::new(mountpoint, options)?;
+            Ok((dev_fuse, Mount::Fuse2(mount)))
+        }
+        #[cfg(fuser_mount_impl = "libfuse3")]
+        {
+            let (dev_fuse, mount) = fuse3::Mount::new(mountpoint, options)?;
+            Ok((dev_fuse, Mount::Fuse3(mount)))
+        }
+        #[cfg(fuser_mount_impl = "internal-no-mount")]
+        {
+            let _ = (mountpoint, options);
+            Err(io::Error::other(
+                "Mount is not enabled; this is test-only configuration",
+            ))
+        }
+    }
+}
+
+#[cfg_attr(fuser_mount_impl = "internal-no-mount", expect(dead_code))]
 fn libc_umount(mnt: &CStr) -> io::Result<()> {
     #[cfg(any(
         target_os = "macos",
