@@ -3,6 +3,7 @@
 mod argument;
 pub(crate) mod flags;
 pub(crate) mod fuse_abi;
+pub(crate) mod ioctl;
 pub(crate) mod notify;
 pub(crate) mod reply;
 pub(crate) mod request;
