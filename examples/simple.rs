@@ -2159,12 +2159,9 @@ fn main() {
 
     let mut options = vec![MountOption::FSName("fuser".to_string())];
 
-    #[cfg(feature = "abi-7-26")]
-    {
-        if args.suid {
-            info!("setuid bit support enabled");
-            options.push(MountOption::Suid);
-        }
+    if args.suid {
+        info!("setuid bit support enabled");
+        options.push(MountOption::Suid);
     }
     if args.auto_unmount {
         options.push(MountOption::AutoUnmount);
