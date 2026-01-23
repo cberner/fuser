@@ -128,6 +128,7 @@ fn conflicts_with(option: &MountOption) -> Vec<MountOption> {
 }
 
 // Format option to be passed to libfuse or kernel
+#[cfg_attr(fuser_mount_impl = "internal-no-mount", expect(dead_code))]
 pub(crate) fn option_to_string(option: &MountOption) -> String {
     match option {
         MountOption::FSName(name) => format!("fsname={name}"),
