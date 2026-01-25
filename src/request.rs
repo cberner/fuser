@@ -35,7 +35,7 @@ pub(crate) struct RequestWithSender<'a> {
     /// Channel sender for sending the reply
     ch: ChannelSender,
     /// Parsed request
-    request: ll::AnyRequest<'a>,
+    pub(crate) request: ll::AnyRequest<'a>,
 }
 
 impl<'a> RequestWithSender<'a> {
@@ -55,7 +55,7 @@ impl<'a> RequestWithSender<'a> {
     /// Dispatch request to the given filesystem.
     /// This calls the appropriate filesystem operation method for the
     /// request and sends back the returned reply to the kernel
-    pub(crate) fn dispatch<FS: Filesystem>(&self, se: &mut Session<FS>) {
+    pub(crate) fn dispatch<FS: Filesystem>(&self, se: &Session<FS>) {
         debug!("{}", self.request);
         let res = match self.dispatch_req(se) {
             Ok(Some(resp)) => resp,
@@ -67,7 +67,7 @@ impl<'a> RequestWithSender<'a> {
 
     fn dispatch_req<FS: Filesystem>(
         &self,
-        se: &mut Session<FS>,
+        se: &Session<FS>,
     ) -> Result<Option<Response<'_>>, Errno> {
         let op = self.request.operation().map_err(|_| Errno::ENOSYS)?;
         // Implement allow_root & access check for auto_unmount
@@ -103,11 +103,9 @@ impl<'a> RequestWithSender<'a> {
                 error!("Unexpected FUSE_INIT after handshake completed");
                 return Err(Errno::EIO);
             }
-            // Filesystem destroyed
-            ll::Operation::Destroy(x) => {
-                se.filesystem.destroy();
-                se.destroyed = true;
-                return Ok(Some(x.reply()));
+            ll::Operation::Destroy(_x) => {
+                // This is handled before dispatch call.
+                return Err(Errno::EIO);
             }
             // Any operation is invalid after destroy
             _ if se.destroyed => {
@@ -557,7 +555,7 @@ impl<'a> RequestWithSender<'a> {
 
     /// Create a reply object for this request that can be passed to the filesystem
     /// implementation and makes sure that a request is replied exactly once
-    fn reply<T: Reply>(&self) -> T {
+    pub(crate) fn reply<T: Reply>(&self) -> T {
         Reply::new(self.request.unique(), ReplySender::Channel(self.ch.clone()))
     }
 
