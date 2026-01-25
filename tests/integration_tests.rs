@@ -1,9 +1,16 @@
-use fuser::{Errno, FileHandle, Filesystem, INodeNo, Session, SessionACL};
 use std::os::unix::fs::PermissionsExt;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
+
+use fuser::Errno;
+use fuser::FileHandle;
+use fuser::Filesystem;
+use fuser::INodeNo;
+use fuser::Session;
+use fuser::SessionACL;
 use tempfile::TempDir;
 
 /// Test that clone_fd creates a working file descriptor for multi-reader setups.

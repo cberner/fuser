@@ -1,11 +1,10 @@
-use std::{
-    io,
-    os::{
-        fd::{AsFd, BorrowedFd, FromRawFd, OwnedFd},
-        unix::prelude::AsRawFd,
-    },
-    sync::Arc,
-};
+use std::io;
+use std::os::fd::AsFd;
+use std::os::fd::BorrowedFd;
+use std::os::fd::FromRawFd;
+use std::os::fd::OwnedFd;
+use std::os::unix::prelude::AsRawFd;
+use std::sync::Arc;
 
 use crate::dev_fuse::DevFuse;
 use crate::passthrough::BackingId;

@@ -157,12 +157,12 @@ impl<FS: Filesystem> Session<FS> {
 
     /// Create a session from a cloned FUSE file descriptor for multi-reader setups.
     ///
-    /// Use this with fds obtained from [`Channel::clone_fd()`] when the primary
+    /// Use this with fds obtained from [`Session::clone_fd()`] when the primary
     /// session has already completed the FUSE INIT handshake.
     ///
     /// # Arguments
     /// * `filesystem` - The filesystem implementation to handle requests
-    /// * `fd` - A cloned fd from [`Channel::clone_fd()`]
+    /// * `fd` - A cloned fd from [`Session::clone_fd()`]
     /// * `acl` - Access control settings for the session
     ///
     /// # Important
@@ -180,7 +180,10 @@ impl<FS: Filesystem> Session<FS> {
             allowed: acl,
             session_owner: geteuid(),
             // Skip INIT - caller guarantees mount is initialized
-            proto_version: Some(Version(abi::FUSE_KERNEL_VERSION, abi::FUSE_KERNEL_MINOR_VERSION)),
+            proto_version: Some(Version(
+                abi::FUSE_KERNEL_VERSION,
+                abi::FUSE_KERNEL_MINOR_VERSION,
+            )),
             destroyed: false,
         }
     }
