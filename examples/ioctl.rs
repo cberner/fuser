@@ -1,6 +1,6 @@
 // This example requires fuse 7.11 or later. Run with:
 //
-//   cargo run --example ioctl --features abi-7-11 /tmp/foobar
+//   cargo run --example ioctl /tmp/foobar
 
 use std::ffi::OsStr;
 use std::path::PathBuf;
