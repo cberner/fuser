@@ -191,7 +191,7 @@ impl<FS: Filesystem> Session<FS> {
     /// may run concurrent by spawning threads.
     /// # Errors
     /// Returns any final error when the session comes to an end.
-    pub(crate) fn run(mut self) -> io::Result<()> {
+    pub fn run(mut self) -> io::Result<()> {
         // Buffer for receiving requests from the kernel. Only one is allocated and
         // it is reused immediately after dispatching to conserve memory and allocations.
         let mut buffer = vec![0; BUFFER_SIZE];
