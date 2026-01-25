@@ -1317,11 +1317,6 @@ mod op {
         #[expect(dead_code)]
         header: &'a fuse_in_header,
     }
-    impl<'a> Destroy<'a> {
-        pub(crate) fn reply(&self) -> Response<'a> {
-            Response::new_empty()
-        }
-    }
 
     /// Control device
     #[derive(Debug)]

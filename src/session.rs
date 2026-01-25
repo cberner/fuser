@@ -32,11 +32,13 @@ use crate::Errno;
 use crate::Filesystem;
 use crate::KernelConfig;
 use crate::MountOption;
+use crate::ReplyEmpty;
 use crate::Request;
 use crate::channel::Channel;
 use crate::channel::ChannelSender;
 use crate::dev_fuse::DevFuse;
 use crate::ll;
+use crate::ll::Operation;
 use crate::ll::Response;
 use crate::ll::Version;
 use crate::ll::flags::init_flags::InitFlags;
@@ -169,15 +171,43 @@ impl<FS: Filesystem> Session<FS> {
 
         self.handshake(buf)?;
 
+        let ret = self.event_loop(buf);
+
+        self.filesystem.destroy();
+        self.destroyed = true;
+
+        match ret {
+            Err(e) => Err(e),
+            Ok(None) => Ok(()),
+            Ok(Some(destroy_reply)) => {
+                destroy_reply.ok();
+                Ok(())
+            }
+        }
+    }
+
+    /// Return `Some` if reply to `FUSE_DESTROY` needs to be sent.
+    fn event_loop(&self, buf: &mut [u8]) -> io::Result<Option<ReplyEmpty>> {
         loop {
             // Read the next request from the given channel to kernel driver
             // The kernel driver makes sure that we get exactly one request per read
             match self.ch.receive(buf) {
                 Ok(size) => match RequestWithSender::new(self.ch.sender(), &buf[..size]) {
                     // Dispatch request
-                    Some(req) => req.dispatch(&mut self),
+                    Some(req) => {
+                        if let Ok(Operation::Destroy(_)) = req.request.operation() {
+                            return Ok(Some(req.reply()));
+                        } else {
+                            req.dispatch(self)
+                        }
+                    }
                     // Quit loop on illegal request
-                    None => break,
+                    None => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "Invalid request",
+                        ));
+                    }
                 },
                 Err(err) => match err.raw_os_error() {
                     Some(
@@ -185,13 +215,12 @@ impl<FS: Filesystem> Session<FS> {
                         | EINTR // Interrupted system call, retry
                         | EAGAIN // Explicitly instructed to try again
                     ) => continue,
-                    Some(ENODEV) => break,
+                    Some(ENODEV) => return Ok(None),
                     // Unhandled error
                     _ => return Err(err),
                 },
             }
         }
-        Ok(())
     }
 
     fn handshake(&mut self, buf: &mut [u8]) -> io::Result<()> {
