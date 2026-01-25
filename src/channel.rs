@@ -65,7 +65,7 @@ impl Channel {
     /// - `/dev/fuse` cannot be opened
     /// - The `FUSE_DEV_IOC_CLONE` ioctl fails (e.g., kernel doesn't support it)
     #[cfg(target_os = "linux")]
-    pub fn clone_fd(&self) -> io::Result<OwnedFd> {
+    pub(crate) fn clone_fd(&self) -> io::Result<OwnedFd> {
         // Open a new /dev/fuse fd
         // SAFETY: libc::open is safe to call with a valid path
         let fd = unsafe { libc::open(c"/dev/fuse".as_ptr(), libc::O_RDWR) };

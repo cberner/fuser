@@ -172,16 +172,15 @@ impl<FS: Filesystem> Session<FS> {
     /// Each cloned fd handles its own request/response pairs - the FUSE kernel
     /// requires that the fd which reads a request is the same fd that sends the response.
     pub fn from_fd_initialized(filesystem: FS, fd: OwnedFd, acl: SessionACL) -> Self {
-        let ch = Channel::new(Arc::new(fd.into()));
+        let ch = Channel::new(Arc::new(DevFuse(File::from(fd))));
         Session {
             filesystem,
             ch,
             mount: Arc::new(Mutex::new(None)),
             allowed: acl,
-            session_owner: geteuid().as_raw(),
-            proto_major: abi::FUSE_KERNEL_VERSION,
-            proto_minor: abi::FUSE_KERNEL_MINOR_VERSION,
-            initialized: true, // Skip INIT - caller guarantees mount is initialized
+            session_owner: geteuid(),
+            // Skip INIT - caller guarantees mount is initialized
+            proto_version: Some(Version(abi::FUSE_KERNEL_VERSION, abi::FUSE_KERNEL_MINOR_VERSION)),
             destroyed: false,
         }
     }
@@ -198,7 +197,10 @@ impl<FS: Filesystem> Session<FS> {
         let mut buffer = vec![0; BUFFER_SIZE];
         let buf = aligned_sub_buf(&mut buffer, align_of::<abi::fuse_in_header>());
 
-        self.handshake(buf)?;
+        // Skip handshake if session is already initialized (e.g., from_fd_initialized)
+        if self.proto_version.is_none() {
+            self.handshake(buf)?;
+        }
 
         // Get sender for replies - each fd (including cloned fds) handles its own request/response pairs
         let sender = self.ch.sender();

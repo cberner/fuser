@@ -1,30 +1,10 @@
-use fuser::{Filesystem, Session, SessionACL};
+use fuser::{Errno, FileHandle, Filesystem, INodeNo, Session, SessionACL};
 use std::os::unix::fs::PermissionsExt;
-use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::Duration;
 use tempfile::TempDir;
-
-#[test]
-fn unmount_no_send() {
-    struct NoSendFS(
-        // Rc to make this !Send
-        #[allow(dead_code)] Rc<()>,
-    );
-
-    impl Filesystem for NoSendFS {}
-
-    let tmpdir: TempDir = tempfile::tempdir().unwrap();
-    let mut session = Session::new(NoSendFS(Rc::new(())), tmpdir.path(), &[]).unwrap();
-    let mut unmounter = session.unmount_callable();
-    thread::spawn(move || {
-        thread::sleep(Duration::from_secs(1));
-        unmounter.unmount().unwrap();
-    });
-    session.run().unwrap();
-}
 
 /// Test that clone_fd creates a working file descriptor for multi-reader setups.
 #[cfg(target_os = "linux")]
@@ -39,19 +19,19 @@ fn clone_fd_multi_reader() {
 
     impl Filesystem for CountingFS {
         fn getattr(
-            &mut self,
-            _req: &fuser::Request<'_>,
-            ino: u64,
-            _fh: Option<u64>,
+            &self,
+            _req: &fuser::Request,
+            ino: INodeNo,
+            _fh: Option<FileHandle>,
             reply: fuser::ReplyAttr,
         ) {
             self.count.fetch_add(1, Ordering::SeqCst);
-            if ino == 1 {
+            if ino == INodeNo::ROOT {
                 // Root directory
                 reply.attr(
                     &Duration::from_secs(1),
                     &fuser::FileAttr {
-                        ino: 1,
+                        ino: INodeNo::ROOT,
                         size: 0,
                         blocks: 0,
                         atime: std::time::UNIX_EPOCH,
@@ -69,7 +49,7 @@ fn clone_fd_multi_reader() {
                     },
                 );
             } else {
-                reply.error(libc::ENOENT);
+                reply.error(Errno::ENOENT);
             }
         }
     }
@@ -102,8 +82,6 @@ fn clone_fd_multi_reader() {
 #[cfg(target_os = "linux")]
 #[test]
 fn from_fd_initialized_works() {
-    use std::sync::Barrier;
-
     // Filesystem that tracks request count per instance with artificial delay
     // to ensure kernel dispatches to both readers
     struct SlowCountingFS {
@@ -112,10 +90,10 @@ fn from_fd_initialized_works() {
 
     impl Filesystem for SlowCountingFS {
         fn getattr(
-            &mut self,
-            _req: &fuser::Request<'_>,
-            ino: u64,
-            _fh: Option<u64>,
+            &self,
+            _req: &fuser::Request,
+            ino: INodeNo,
+            _fh: Option<FileHandle>,
             reply: fuser::ReplyAttr,
         ) {
             self.count.fetch_add(1, Ordering::SeqCst);
@@ -124,11 +102,11 @@ fn from_fd_initialized_works() {
             // will dispatch concurrent requests to the other reader
             thread::sleep(Duration::from_millis(50));
 
-            if ino == 1 {
+            if ino == INodeNo::ROOT {
                 reply.attr(
                     &Duration::from_secs(0), // No caching to ensure requests reach FUSE
                     &fuser::FileAttr {
-                        ino: 1,
+                        ino: INodeNo::ROOT,
                         size: 0,
                         blocks: 0,
                         atime: std::time::UNIX_EPOCH,
@@ -146,7 +124,7 @@ fn from_fd_initialized_works() {
                     },
                 );
             } else {
-                reply.error(libc::ENOENT);
+                reply.error(Errno::ENOENT);
             }
         }
     }
@@ -157,7 +135,7 @@ fn from_fd_initialized_works() {
     let primary_count = Arc::new(AtomicUsize::new(0));
     let reader_count = Arc::new(AtomicUsize::new(0));
 
-    let mut session = Session::new(
+    let session = Session::new(
         SlowCountingFS {
             count: primary_count.clone(),
         },
@@ -165,45 +143,35 @@ fn from_fd_initialized_works() {
         &[],
     )
     .unwrap();
-    let mut unmounter = session.unmount_callable();
 
-    // Clone fd for second reader
+    // Clone fd for second reader BEFORE spawning the primary (spawn takes ownership)
     let cloned_fd = session.clone_fd().expect("clone_fd should succeed");
 
-    // Barrier to synchronize reader threads
-    let barrier = Arc::new(Barrier::new(3)); // 2 readers + 1 main thread
+    // Save path for concurrent access (before session is moved)
+    let path = tmpdir.path().to_path_buf();
+
+    // Spawn primary session in background
+    let primary_bg = session.spawn().unwrap();
 
     // Start second reader in a thread
-    let barrier_clone = barrier.clone();
     let reader_count_clone = reader_count.clone();
     let reader_handle = thread::spawn(move || {
-        let mut reader_session = Session::from_fd_initialized(
+        let reader_session = Session::from_fd_initialized(
             SlowCountingFS {
                 count: reader_count_clone,
             },
             cloned_fd,
             SessionACL::All,
         );
-        barrier_clone.wait(); // Signal ready
-        // Run until unmount
-        let _ = reader_session.run();
+        // Spawn in background - the thread will run until ENODEV when primary unmounts
+        let bg = reader_session.spawn().unwrap();
+        // Keep BackgroundSession alive - when dropped it will wait for the thread
+        // The thread exits on ENODEV when primary unmounts
+        drop(bg);
     });
-
-    // Start primary session in a thread
-    let barrier_clone = barrier.clone();
-    let session_handle = thread::spawn(move || {
-        barrier_clone.wait(); // Signal ready
-        let _ = session.run();
-    });
-
-    // Wait for both readers to be ready
-    barrier.wait();
 
     // Give readers time to start processing
     thread::sleep(Duration::from_millis(100));
-
-    // Save path for concurrent access
-    let path = tmpdir.path().to_path_buf();
 
     // Generate concurrent requests from multiple threads
     // With 50ms delay per request and concurrent threads, the kernel should
@@ -236,11 +204,11 @@ fn from_fd_initialized_works() {
     // Let any in-flight requests complete
     thread::sleep(Duration::from_millis(200));
 
-    // Unmount to stop the sessions
-    unmounter.unmount().unwrap();
+    // Unmount by dropping the primary BackgroundSession
+    // This will cause the secondary to exit with ENODEV
+    drop(primary_bg);
 
-    // Wait for threads to finish
-    let _ = session_handle.join();
+    // Wait for reader thread to finish
     let _ = reader_handle.join();
 
     // Verify both readers processed requests
