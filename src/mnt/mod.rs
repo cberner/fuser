@@ -90,7 +90,7 @@ impl Mount {
             let (dev_fuse, mount) = fuse3::Mount::new(mountpoint, options)?;
             Ok((dev_fuse, Mount::Fuse3(mount)))
         }
-        #[cfg(fuser_mount_impl = "internal-no-mount")]
+        #[cfg(fuser_mount_impl = "macos-no-mount")]
         {
             let _ = (mountpoint, options);
             Err(io::Error::other(
@@ -100,7 +100,7 @@ impl Mount {
     }
 }
 
-#[cfg_attr(fuser_mount_impl = "internal-no-mount", expect(dead_code))]
+#[cfg_attr(fuser_mount_impl = "macos-no-mount", expect(dead_code))]
 fn libc_umount(mnt: &CStr) -> io::Result<()> {
     #[cfg(any(
         target_os = "macos",
