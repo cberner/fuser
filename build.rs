@@ -1,7 +1,7 @@
 fn main() {
     // Register rustc cfg for switching between mount implementations.
     println!(
-        "cargo::rustc-check-cfg=cfg(fuser_mount_impl, values(\"pure-rust\", \"libfuse2\", \"libfuse3\", \"internal-no-mount\"))"
+        "cargo::rustc-check-cfg=cfg(fuser_mount_impl, values(\"pure-rust\", \"libfuse2\", \"libfuse3\", \"macos-no-mount\"))"
     );
 
     let target_os =
@@ -14,8 +14,8 @@ fn main() {
     {
         println!("cargo::rustc-cfg=fuser_mount_impl=\"pure-rust\"");
     } else if target_os == "macos" {
-        if cfg!(feature = "internal-no-mount") {
-            println!("cargo::rustc-cfg=fuser_mount_impl=\"internal-no-mount\"");
+        if cfg!(feature = "macos-no-mount") {
+            println!("cargo::rustc-cfg=fuser_mount_impl=\"macos-no-mount\"");
         } else {
             pkg_config::Config::new()
                 .atleast_version("2.6.0")

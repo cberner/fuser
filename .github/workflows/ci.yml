@@ -134,7 +134,7 @@ jobs:
 
       - name: Build
         run: |
-          cargo check --features=internal-no-mount
+          cargo check --features=macos-no-mount
           cargo build --all --all-targets
           cargo build --all --all-targets --all-features
 

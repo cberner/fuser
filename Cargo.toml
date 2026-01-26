@@ -63,8 +63,8 @@ abi-7-36 = []
 abi-7-40 = []
 # Disable mount implementations. Code will compile but won't work.
 # Can be used like this on Linux to check macOS code compiles:
-# cargo check --target x86_64-apple-darwin --features=internal-no-mount
-internal-no-mount = []
+# cargo check --target x86_64-apple-darwin --features=macos-no-mount
+macos-no-mount = []
 
 [[example]]
 name = "async_hello"
