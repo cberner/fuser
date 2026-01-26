@@ -9,8 +9,6 @@ use std::path::Path;
 use std::ptr;
 use std::sync::Arc;
 
-use log::warn;
-
 use super::MountOption;
 use super::fuse3_sys::fuse_lowlevel_ops;
 use super::fuse3_sys::fuse_session_destroy;
@@ -31,12 +29,15 @@ fn ensure_last_os_error() -> io::Error {
 }
 
 #[derive(Debug)]
-pub(crate) struct Mount {
+pub(crate) struct MountImpl {
     fuse_session: *mut c_void,
     mountpoint: CString,
 }
-impl Mount {
-    pub(crate) fn new(mnt: &Path, options: &[MountOption]) -> io::Result<(Arc<DevFuse>, Mount)> {
+impl MountImpl {
+    pub(crate) fn new(
+        mnt: &Path,
+        options: &[MountOption],
+    ) -> io::Result<(Arc<DevFuse>, MountImpl)> {
         let mnt = CString::new(mnt.as_os_str().as_bytes()).unwrap();
         with_fuse_args(options, |args| {
             let ops = fuse_lowlevel_ops::default();
@@ -52,7 +53,7 @@ impl Mount {
             if fuse_session.is_null() {
                 return Err(io::Error::last_os_error());
             }
-            let mount = Mount {
+            let mount = MountImpl {
                 fuse_session,
                 mountpoint: mnt.clone(),
             };
@@ -72,9 +73,8 @@ impl Mount {
             Ok((Arc::new(DevFuse(file)), mount))
         })
     }
-}
-impl Drop for Mount {
-    fn drop(&mut self) {
+
+    pub(crate) fn umount_impl(&mut self) -> io::Result<()> {
         use std::io::ErrorKind::PermissionDenied;
 
         if let Err(err) = super::libc_umount(&self.mountpoint) {
@@ -85,11 +85,12 @@ impl Drop for Mount {
                 unsafe {
                     fuse_session_unmount(self.fuse_session);
                     fuse_session_destroy(self.fuse_session);
-                    return;
+                    return Ok(());
                 }
             }
-            warn!("umount failed with {err:?}");
+            return Err(err);
         }
+        Ok(())
     }
 }
-unsafe impl Send for Mount {}
+unsafe impl Send for MountImpl {}

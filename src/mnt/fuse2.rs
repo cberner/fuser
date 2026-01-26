@@ -6,8 +6,6 @@ use std::os::unix::prelude::OsStrExt;
 use std::path::Path;
 use std::sync::Arc;
 
-use log::warn;
-
 use super::MountOption;
 use super::fuse2_sys::*;
 use super::with_fuse_args;
@@ -23,14 +21,14 @@ fn ensure_last_os_error() -> io::Error {
 }
 
 #[derive(Debug)]
-pub(crate) struct Mount {
+pub(crate) struct MountImpl {
     mountpoint: CString,
 }
-impl Mount {
+impl MountImpl {
     pub(crate) fn new(
         mountpoint: &Path,
         options: &[MountOption],
-    ) -> io::Result<(Arc<DevFuse>, Mount)> {
+    ) -> io::Result<(Arc<DevFuse>, MountImpl)> {
         let mountpoint = CString::new(mountpoint.as_os_str().as_bytes()).unwrap();
         with_fuse_args(options, |args| {
             let fd = unsafe { fuse_mount_compat25(mountpoint.as_ptr(), args) };
@@ -38,13 +36,12 @@ impl Mount {
                 Err(ensure_last_os_error())
             } else {
                 let file = unsafe { File::from_raw_fd(fd) };
-                Ok((Arc::new(DevFuse(file)), Mount { mountpoint }))
+                Ok((Arc::new(DevFuse(file)), MountImpl { mountpoint }))
             }
         })
     }
-}
-impl Drop for Mount {
-    fn drop(&mut self) {
+
+    pub(crate) fn umount_impl(&mut self) -> io::Result<()> {
         use std::io::ErrorKind::PermissionDenied;
 
         // fuse_unmount_compat22 unfortunately doesn't return a status. Additionally,
@@ -66,10 +63,11 @@ impl Drop for Mount {
                 )))]
                 unsafe {
                     fuse_unmount_compat22(self.mountpoint.as_ptr());
-                    return;
+                    return Ok(());
                 }
             }
-            warn!("umount failed with {:?}", err);
+            return Err(err);
         }
+        Ok(())
     }
 }

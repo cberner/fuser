@@ -48,52 +48,52 @@ const FUSERMOUNT_COMM_ENV: &str = "_FUSE_COMMFD";
 const MOUNT_FUSEFS_BIN: &str = "mount_fusefs";
 
 #[derive(Debug)]
-pub(crate) struct Mount {
+pub(crate) struct MountImpl {
     mountpoint: CString,
     auto_unmount_socket: Option<UnixStream>,
     fuse_device: Arc<DevFuse>,
 }
-impl Mount {
+impl MountImpl {
     pub(crate) fn new(
         mountpoint: &Path,
         options: &[MountOption],
-    ) -> io::Result<(Arc<DevFuse>, Mount)> {
+    ) -> io::Result<(Arc<DevFuse>, MountImpl)> {
         let mountpoint = mountpoint.canonicalize()?;
         let (file, sock) = fuse_mount_pure(mountpoint.as_os_str(), options)?;
         let file = Arc::new(file);
         Ok((
             file.clone(),
-            Mount {
+            MountImpl {
                 mountpoint: CString::new(mountpoint.as_os_str().as_bytes())?,
                 auto_unmount_socket: sock,
                 fuse_device: file,
             },
         ))
     }
-}
 
-impl Drop for Mount {
-    fn drop(&mut self) {
+    pub(crate) fn umount_impl(&mut self) -> io::Result<()> {
         if !is_mounted(&self.fuse_device) {
             // If the filesystem has already been unmounted, avoid unmounting it again.
             // Unmounting it a second time could cause a race with a newly mounted filesystem
             // living at the same mountpoint
-            return;
+            return Ok(());
         }
         if let Some(sock) = mem::take(&mut self.auto_unmount_socket) {
             drop(sock);
             // fusermount in auto-unmount mode, no more work to do.
-            return;
+            return Ok(());
         }
         if let Err(err) = super::libc_umount(&self.mountpoint) {
             if err.kind() == ErrorKind::PermissionDenied {
                 // Linux always returns EPERM for non-root users.  We have to let the
                 // library go through the setuid-root "fusermount -u" to unmount.
-                fuse_unmount_pure(&self.mountpoint)
+                fuse_unmount_pure(&self.mountpoint);
+                return Ok(());
             } else {
-                error!("Unmount failed: {}", err)
+                return Err(err);
             }
         }
+        Ok(())
     }
 }
 

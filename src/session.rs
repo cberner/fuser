@@ -368,8 +368,11 @@ impl<FS: Filesystem> Session<FS> {
     }
 
     /// Unmount the filesystem
-    pub fn unmount(&mut self) {
-        drop(std::mem::take(&mut *self.mount.lock().unwrap()));
+    pub fn unmount(&mut self) -> io::Result<()> {
+        if let Some((_path, mount)) = std::mem::take(&mut *self.mount.lock().unwrap()) {
+            mount.umount()?;
+        }
+        Ok(())
     }
 
     /// Returns a thread-safe object that can be used to unmount the Filesystem
@@ -394,7 +397,9 @@ pub struct SessionUnmounter {
 impl SessionUnmounter {
     /// Unmount the filesystem
     pub fn unmount(&mut self) -> io::Result<()> {
-        drop(std::mem::take(&mut *self.mount.lock().unwrap()));
+        if let Some((_path, mount)) = std::mem::take(&mut *self.mount.lock().unwrap()) {
+            mount.umount()?;
+        }
         Ok(())
     }
 }
@@ -461,7 +466,9 @@ impl BackgroundSession {
             sender: _,
             mount,
         } = self;
-        drop(mount);
+        if let Some(mount) = mount {
+            mount.umount()?;
+        }
         guard
             .join()
             .map_err(|_panic: Box<dyn std::any::Any + Send>| {
