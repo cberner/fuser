@@ -13,9 +13,6 @@ pre:
 	cargo deny check licenses
 	cargo clippy --all-targets
 	cargo clippy --all-targets --no-default-features
-	cargo clippy --all-targets --features=abi-7-30
-	cargo clippy --all-targets --features=abi-7-36
-	cargo clippy --all-targets --features=abi-7-40
 
 xfstests:
 	docker build -t fuser:xfstests -f xfstests.Dockerfile .
@@ -62,7 +59,7 @@ test: pre mount_tests pjdfs_tests xfstests
 	cargo test
 
 test_macos: pre
-	cargo doc --all --no-deps --features=abi-7-21
+	cargo doc --all --no-deps
 	cargo test --all --all-targets --features=libfuse -- --skip=mnt::test::mount_unmount
 	./osx_mount_tests.sh
 	./tests/macos_pjdfs.sh
