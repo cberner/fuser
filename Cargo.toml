@@ -44,6 +44,8 @@ pkg-config = "0.3.14"
 default = []
 experimental = ["async-trait", "tokio"]
 libfuse = []
+libfuse2 = ["libfuse"]
+libfuse3 = ["libfuse"]
 serializable = ["serde"]
 macfuse-4-compat = []
 # abi-7-xx feature flags are deprecated and don't do anything.
