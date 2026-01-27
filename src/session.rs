@@ -74,8 +74,8 @@ pub enum SessionACL {
 /// The session data structure
 #[derive(Debug)]
 pub struct Session<FS: Filesystem> {
-    /// Filesystem operation implementations
-    pub(crate) filesystem: FS,
+    /// Filesystem operation implementations. None after `destroy` called.
+    pub(crate) filesystem: Option<FS>,
     /// Communication channel to the kernel driver
     pub(crate) ch: Channel,
     /// Handle to the mount.  Dropping this unmounts.
@@ -88,8 +88,6 @@ pub struct Session<FS: Filesystem> {
     /// FUSE protocol version, as reported by the kernel.
     /// The field is set to `Some` when the init message is received.
     pub(crate) proto_version: Option<Version>,
-    /// True if the filesystem was destroyed (destroy operation done)
-    pub(crate) destroyed: bool,
 }
 
 impl<FS: Filesystem> AsFd for Session<FS> {
@@ -132,13 +130,12 @@ impl<FS: Filesystem> Session<FS> {
         };
 
         Ok(Session {
-            filesystem,
+            filesystem: Some(filesystem),
             ch,
             mount: Arc::new(Mutex::new(Some((mountpoint.to_owned(), mount)))),
             allowed,
             session_owner: geteuid(),
             proto_version: None,
-            destroyed: false,
         })
     }
 
@@ -147,13 +144,12 @@ impl<FS: Filesystem> Session<FS> {
     pub fn from_fd(filesystem: FS, fd: OwnedFd, acl: SessionACL) -> Self {
         let ch = Channel::new(Arc::new(DevFuse(File::from(fd))));
         Session {
-            filesystem,
+            filesystem: Some(filesystem),
             ch,
             mount: Arc::new(Mutex::new(None)),
             allowed: acl,
             session_owner: geteuid(),
             proto_version: None,
-            destroyed: false,
         }
     }
 
@@ -173,8 +169,9 @@ impl<FS: Filesystem> Session<FS> {
 
         let ret = self.event_loop(buf);
 
-        self.filesystem.destroy();
-        self.destroyed = true;
+        if let Some(mut filesystem) = self.filesystem.take() {
+            filesystem.destroy();
+        }
 
         match ret {
             Err(e) => Err(e),
@@ -308,10 +305,14 @@ impl<FS: Filesystem> Session<FS> {
             let mut config = KernelConfig::new(init.capabilities(), init.max_readahead(), v);
 
             // Call filesystem init method and give it a chance to return an error
-            if let Err(error) = self
-                .filesystem
-                .init(Request::ref_cast(request.header()), &mut config)
-            {
+            let Some(filesystem) = &mut self.filesystem else {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Bug: filesystem must be initialized during handshake",
+                ));
+            };
+            let res = filesystem.init(Request::ref_cast(request.header()), &mut config);
+            if let Err(error) = res {
                 let errno = Errno::from_i32(error.raw_os_error().unwrap_or(0));
                 let response = Response::new_error(errno);
                 <ReplyRaw as Reply>::new(request.unique(), ReplySender::Channel(self.ch.sender()))
@@ -422,9 +423,8 @@ impl<FS: 'static + Filesystem + Send> Session<FS> {
 
 impl<FS: Filesystem> Drop for Session<FS> {
     fn drop(&mut self) {
-        if !self.destroyed {
-            self.filesystem.destroy();
-            self.destroyed = true;
+        if let Some(mut filesystem) = self.filesystem.take() {
+            filesystem.destroy();
         }
 
         if let Some((mountpoint, _mount)) = std::mem::take(&mut *self.mount.lock().unwrap()) {
