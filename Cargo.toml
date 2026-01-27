@@ -1,15 +1,25 @@
+[workspace]
+members = [".", "fuser-tests"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.85"
+authors = ["Christopher Berner <me@cberner.com>"]
+license = "MIT"
+repository = "https://github.com/cberner/fuser"
+
 [package]
 name = "fuser"
 description = "Filesystem in Userspace (FUSE) for Rust"
-license = "MIT"
-repository = "https://github.com/cberner/fuser"
+license.workspace = true
+repository.workspace = true
 documentation = "https://docs.rs/fuser"
 homepage = "https://github.com/cberner/fuser"
 version = "0.16.0"
-edition = "2024"
-rust-version = "1.85"
+edition.workspace = true
+rust-version.workspace = true
 readme = "README.md"
-authors = ["Christopher Berner <me@cberner.com>"]
+authors.workspace = true
 keywords = ["fuse", "filesystem", "system", "bindings"]
 categories = ["external-ffi-bindings", "api-bindings", "filesystem", "os::unix-apis"]
 build = "build.rs"
