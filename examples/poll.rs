@@ -12,7 +12,6 @@ use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::SeqCst;
 use std::thread;
@@ -21,6 +20,8 @@ use std::time::UNIX_EPOCH;
 
 use clap::Parser;
 use fuser::Errno;
+use parking_lot::Mutex;
+use parking_lot::MutexGuard;
 
 #[derive(Parser)]
 #[command(version, author = "Zev Weiss")]
@@ -98,8 +99,8 @@ impl FSelData {
 }
 
 impl FSelFS {
-    fn get_data(&self) -> std::sync::MutexGuard<'_, FSelData> {
-        self.data.lock().unwrap()
+    fn get_data(&self) -> MutexGuard<'_, FSelData> {
+        self.data.lock()
     }
 }
 
@@ -329,7 +330,7 @@ fn producer(data: &Mutex<FSelData>, notifier: &fuser::Notifier) {
     let mut nr = 1;
     loop {
         {
-            let mut d = data.lock().unwrap();
+            let mut d = data.lock();
             let mut t = idx;
 
             for _ in 0..nr {

@@ -9,7 +9,6 @@
 use std::convert::TryInto;
 use std::ffi::OsStr;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::SeqCst;
 use std::thread;
@@ -36,6 +35,7 @@ use fuser::ReplyDirectory;
 use fuser::ReplyEntry;
 use fuser::ReplyOpen;
 use fuser::Request;
+use parking_lot::Mutex;
 
 struct ClockFS {
     file_contents: Arc<Mutex<String>>,
@@ -52,7 +52,7 @@ impl ClockFS {
             Self::FILE_INO => (
                 FileType::RegularFile,
                 0o444,
-                self.file_contents.lock().unwrap().len(),
+                self.file_contents.lock().len(),
             ),
             _ => return None,
         };
@@ -161,7 +161,7 @@ impl Filesystem for ClockFS {
         reply: ReplyData,
     ) {
         assert!(ino == INodeNo(Self::FILE_INO));
-        let file = self.file_contents.lock().unwrap();
+        let file = self.file_contents.lock();
         let filedata = file.as_bytes();
         let dlen = filedata.len().try_into().unwrap();
         let Ok(start) = offset.min(dlen).try_into() else {
@@ -217,16 +217,14 @@ fn main() {
     let _bg = session.spawn().unwrap();
 
     loop {
-        let mut s = fdata.lock().unwrap();
+        let mut s = fdata.lock();
         let olddata = std::mem::replace(&mut *s, now_string());
         drop(s);
         if !opts.no_notify && lookup_cnt.load(SeqCst) != 0 {
             if opts.notify_store {
-                if let Err(e) = notifier.store(
-                    INodeNo(ClockFS::FILE_INO),
-                    0,
-                    fdata.lock().unwrap().as_bytes(),
-                ) {
+                if let Err(e) =
+                    notifier.store(INodeNo(ClockFS::FILE_INO), 0, fdata.lock().as_bytes())
+                {
                     eprintln!("Warning: failed to update kernel cache: {e}");
                 }
             } else if let Err(e) = notifier.inval_inode(

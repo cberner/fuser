@@ -14,7 +14,6 @@ use std::os::fd::OwnedFd;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::thread::JoinHandle;
 use std::thread::{self};
 
@@ -27,6 +26,7 @@ use log::error;
 use log::info;
 use nix::unistd::Uid;
 use nix::unistd::geteuid;
+use parking_lot::Mutex;
 
 use crate::Errno;
 use crate::Filesystem;
@@ -158,7 +158,7 @@ impl<FS: Filesystem> Session<FS> {
     pub fn spawn(self) -> io::Result<BackgroundSession> {
         let sender = self.ch.sender();
         // Take the fuse_session, so that we can unmount it
-        let mount = std::mem::take(&mut *self.mount.lock().unwrap()).map(|(_, mount)| mount);
+        let mount = std::mem::take(&mut *self.mount.lock()).map(|(_, mount)| mount);
         let guard = thread::spawn(move || self.run());
         Ok(BackgroundSession {
             guard,
@@ -384,7 +384,7 @@ impl<FS: Filesystem> Session<FS> {
 
     /// Unmount the filesystem
     pub fn unmount(&mut self) -> io::Result<()> {
-        if let Some((_path, mount)) = std::mem::take(&mut *self.mount.lock().unwrap()) {
+        if let Some((_path, mount)) = std::mem::take(&mut *self.mount.lock()) {
             mount.umount()?;
         }
         Ok(())
@@ -412,7 +412,7 @@ pub struct SessionUnmounter {
 impl SessionUnmounter {
     /// Unmount the filesystem
     pub fn unmount(&mut self) -> io::Result<()> {
-        if let Some((_path, mount)) = std::mem::take(&mut *self.mount.lock().unwrap()) {
+        if let Some((_path, mount)) = std::mem::take(&mut *self.mount.lock()) {
             mount.umount()?;
         }
         Ok(())
@@ -434,7 +434,7 @@ impl<FS: Filesystem> Drop for Session<FS> {
             filesystem.destroy();
         }
 
-        if let Some((mountpoint, _mount)) = std::mem::take(&mut *self.mount.lock().unwrap()) {
+        if let Some((mountpoint, _mount)) = std::mem::take(&mut *self.mount.lock()) {
             info!("unmounting session at {}", mountpoint.display());
         }
     }
