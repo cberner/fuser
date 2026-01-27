@@ -20,9 +20,9 @@ task:
   build_script:
     - cargo build --all --all-targets
   doc_script:
-    - cargo doc --all --no-deps --features=abi-7-21
+    - cargo doc --all --no-deps
   test_script:
     - cargo test --all --all-targets -- --skip=mnt::test::mount_unmount
-    - cargo test --all --all-targets --features=abi-7-21 -- --skip=mnt::test::mount_unmount
+    - cargo test --all --all-targets -- --skip=mnt::test::mount_unmount
     - ./bsd_mount_tests.sh
     - ./tests/bsd_pjdfs.sh

@@ -1,5 +1,14 @@
 # FUSE for Rust - Changelog
 
+## 0.17 - Unreleased
+
+* Change integers to newtypes in various public APIs
+* Add `FileType` conversion from std `FileType`
+* Rename `BackgroundSession::join` to `umount_and_join`
+  and change it to return `io::Result<()>` instead of panicking
+* `allow_root` or `allow_other` must be specified when using `auto_unmount`
+* feature flags `abi-7-xx` are ignored and will be removed in 0.18.
+
 ## 0.16.0 - 2025-09-12
 * Add support for passthrough file descriptors
 * Change `KernelConfig` capabilities flags parameters to `u64`

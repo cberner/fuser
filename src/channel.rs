@@ -1,22 +1,14 @@
-use std::{
-    fs::File,
-    io,
-    os::{
-        fd::{AsFd, BorrowedFd},
-        unix::prelude::AsRawFd,
-    },
-    sync::Arc,
-};
+use std::io;
+use std::os::fd::AsFd;
+use std::os::fd::BorrowedFd;
+use std::sync::Arc;
 
-use libc::{c_int, c_void, size_t};
-
-#[cfg(feature = "abi-7-40")]
+use crate::dev_fuse::DevFuse;
 use crate::passthrough::BackingId;
-use crate::reply::ReplySender;
 
 /// A raw communication channel to the FUSE kernel driver
 #[derive(Debug)]
-pub struct Channel(Arc<File>);
+pub(crate) struct Channel(Arc<DevFuse>);
 
 impl AsFd for Channel {
     fn as_fd(&self) -> BorrowedFd<'_> {
@@ -28,30 +20,19 @@ impl Channel {
     /// Create a new communication channel to the kernel driver by mounting the
     /// given path. The kernel driver will delegate filesystem operations of
     /// the given path to the channel.
-    pub(crate) fn new(device: Arc<File>) -> Self {
+    pub(crate) fn new(device: Arc<DevFuse>) -> Self {
         Self(device)
     }
 
     /// Receives data up to the capacity of the given buffer (can block).
-    pub fn receive(&self, buffer: &mut [u8]) -> io::Result<usize> {
-        let rc = unsafe {
-            libc::read(
-                self.0.as_raw_fd(),
-                buffer.as_ptr() as *mut c_void,
-                buffer.len() as size_t,
-            )
-        };
-        if rc < 0 {
-            Err(io::Error::last_os_error())
-        } else {
-            Ok(rc as usize)
-        }
+    pub(crate) fn receive(&self, buffer: &mut [u8]) -> io::Result<usize> {
+        Ok(nix::unistd::read(&self.0, buffer)?)
     }
 
     /// Returns a sender object for this channel. The sender object can be
     /// used to send to the channel. Multiple sender objects can be used
     /// and they can safely be sent to other threads.
-    pub fn sender(&self) -> ChannelSender {
+    pub(crate) fn sender(&self) -> ChannelSender {
         // Since write/writev syscalls are threadsafe, we can simply create
         // a sender by using the same file and use it in other threads.
         ChannelSender(self.0.clone())
@@ -59,27 +40,19 @@ impl Channel {
 }
 
 #[derive(Clone, Debug)]
-pub struct ChannelSender(Arc<File>);
+pub(crate) struct ChannelSender(Arc<DevFuse>);
 
-impl ReplySender for ChannelSender {
-    fn send(&self, bufs: &[io::IoSlice<'_>]) -> io::Result<()> {
-        let rc = unsafe {
-            libc::writev(
-                self.0.as_raw_fd(),
-                bufs.as_ptr() as *const libc::iovec,
-                bufs.len() as c_int,
-            )
-        };
-        if rc < 0 {
-            Err(io::Error::last_os_error())
-        } else {
-            debug_assert_eq!(bufs.iter().map(|b| b.len()).sum::<usize>(), rc as usize);
-            Ok(())
-        }
+impl ChannelSender {
+    pub(crate) fn send(&self, bufs: &[io::IoSlice<'_>]) -> io::Result<()> {
+        let rc = nix::sys::uio::writev(&self.0, bufs)?;
+        // writev is atomic, so do not need to check how many bytes are written.
+        // libfuse does not do it either
+        // https://github.com/libfuse/libfuse/blob/6278995cca991978abd25ebb2c20ebd3fc9e8a13/lib/fuse_lowlevel.c#L267
+        debug_assert_eq!(bufs.iter().map(|b| b.len()).sum::<usize>(), rc);
+        Ok(())
     }
 
-    #[cfg(feature = "abi-7-40")]
-    fn open_backing(&self, fd: BorrowedFd<'_>) -> std::io::Result<BackingId> {
+    pub(crate) fn open_backing(&self, fd: BorrowedFd<'_>) -> std::io::Result<BackingId> {
         BackingId::create(&self.0, fd)
     }
 }

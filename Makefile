@@ -3,16 +3,16 @@ INTERACTIVE ?= i
 
 
 build: pre
-	cargo build --examples
+	cargo build --examples --features=experimental
+
+format:
+	cargo +nightly fmt --all
 
 pre:
-	cargo fmt --all -- --check
+	cargo +nightly fmt --all -- --check
 	cargo deny check licenses
 	cargo clippy --all-targets
 	cargo clippy --all-targets --no-default-features
-	cargo clippy --all-targets --features=abi-7-30
-	cargo clippy --all-targets --features=abi-7-36
-	cargo clippy --all-targets --features=abi-7-40
 
 xfstests:
 	docker build -t fuser:xfstests -f xfstests.Dockerfile .
@@ -24,7 +24,7 @@ xfstests:
 pjdfs_tests: pjdfs_tests_fuse2 pjdfs_tests_fuse3 pjdfs_tests_pure
 
 pjdfs_tests_fuse2:
-	docker build --build-arg BUILD_FEATURES='--features=abi-7-19,libfuse' -t fuser:pjdfs-2 -f pjdfs.Dockerfile .
+	docker build --build-arg BUILD_FEATURES='--features=libfuse' -t fuser:pjdfs-2 -f pjdfs.Dockerfile .
 	# Additional permissions are needed to be able to mount FUSE
 	docker run --rm -$(INTERACTIVE)t --cap-add SYS_ADMIN --device /dev/fuse --security-opt apparmor:unconfined \
 	 -v "$(shell pwd)/logs:/code/logs" fuser:pjdfs-2 bash -c "cd /code/fuser && ./pjdfs.sh"
@@ -36,7 +36,7 @@ pjdfs_tests_fuse3:
 	 -v "$(shell pwd)/logs:/code/logs" fuser:pjdfs-3 bash -c "cd /code/fuser && ./pjdfs.sh"
 
 pjdfs_tests_pure:
-	docker build --build-arg BUILD_FEATURES='--features=abi-7-19' -t fuser:pjdfs-pure -f pjdfs.Dockerfile .
+	docker build --build-arg BUILD_FEATURES='' -t fuser:pjdfs-pure -f pjdfs.Dockerfile .
 	# Additional permissions are needed to be able to mount FUSE
 	docker run --rm -$(INTERACTIVE)t --cap-add SYS_ADMIN --device /dev/fuse --security-opt apparmor:unconfined \
 	 -v "$(shell pwd)/logs:/code/logs" fuser:pjdfs-pure bash -c "cd /code/fuser && ./pjdfs.sh"
@@ -48,6 +48,8 @@ mount_tests:
 	 fuser:mount_tests bash -c "cd /code/fuser && bash ./simplefs_tests.sh"
 	docker run --rm -$(INTERACTIVE)t --cap-add SYS_ADMIN --device /dev/fuse --security-opt apparmor:unconfined \
 	 fuser:mount_tests bash -c "cd /code/fuser && bash ./mount_tests.sh"
+	docker run --rm -$(INTERACTIVE)t --cap-add SYS_ADMIN --device /dev/fuse --security-opt apparmor:unconfined \
+	 fuser:mount_tests bash -c "cd /code/fuser && bash ./tests/experimental_mount_tests.sh"
 
 test_passthrough:
 	cargo build --example passthrough --features=abi-7-40
@@ -57,7 +59,7 @@ test: pre mount_tests pjdfs_tests xfstests
 	cargo test
 
 test_macos: pre
-	cargo doc --all --no-deps --features=abi-7-21
+	cargo doc --all --no-deps
 	cargo test --all --all-targets --features=libfuse -- --skip=mnt::test::mount_unmount
 	./osx_mount_tests.sh
 	./tests/macos_pjdfs.sh

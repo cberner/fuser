@@ -1,16 +1,16 @@
-use super::UnmountOption;
-use super::{MountOption, fuse2_sys::*, unmount_options, with_fuse_args};
-use log::warn;
-use std::ffi::{CStr, c_int};
-use std::time::Duration;
-use std::{
-    ffi::CString,
-    fs::File,
-    io,
-    os::unix::prelude::{FromRawFd, OsStrExt},
-    path::Path,
-    sync::Arc,
-};
+use std::ffi::CString;
+use std::fs::File;
+use std::io;
+use std::os::unix::prelude::FromRawFd;
+use std::os::unix::prelude::OsStrExt;
+use std::path::Path;
+use std::sync::Arc;
+
+use super::MountOption;
+use super::fuse2_sys::*;
+use super::with_fuse_args;
+use crate::dev_fuse::DevFuse;
+use super::unmount_options::UnmountOption;
 
 /// Ensures that an os error is never 0/Success
 fn ensure_last_os_error() -> io::Error {
@@ -22,15 +22,15 @@ fn ensure_last_os_error() -> io::Error {
 }
 
 #[derive(Debug)]
-pub struct Mount {
+pub(crate) struct MountImpl {
     mountpoint: CString,
-    blocking_umount: bool,
-    unmount_flags: Option<Vec<UnmountOption>>,
-    unmounted: bool,
 }
 
-impl Mount {
-    pub fn new(mountpoint: &Path, options: &[MountOption]) -> io::Result<(Arc<File>, Mount)> {
+impl MountImpl {
+    pub(crate) fn new(
+        mountpoint: &Path,
+        options: &[MountOption],
+    ) -> io::Result<(Arc<DevFuse>, MountImpl)> {
         let mountpoint = CString::new(mountpoint.as_os_str().as_bytes()).unwrap();
         with_fuse_args(options, |args| {
             let fd = unsafe { fuse_mount_compat25(mountpoint.as_ptr(), args) };
@@ -38,129 +38,38 @@ impl Mount {
                 Err(ensure_last_os_error())
             } else {
                 let file = unsafe { File::from_raw_fd(fd) };
-                Ok((
-                    Arc::new(file),
-                    Mount {
-                        mountpoint,
-                        blocking_umount: false,
-                        unmount_flags: None,
-                        unmounted: false,
-                    },
-                ))
+                Ok((Arc::new(DevFuse(file)), MountImpl { mountpoint }))
             }
         })
     }
 
-    /// Enable or disable blocking if the umount operation is busy
-    pub fn set_blocking_unmount(&mut self, blocking: bool) {
-        self.blocking_unmount = blocking;
-    }
+    pub(crate) fn umount_impl(&mut self, flags: &[UnmountOption]) -> io::Result<()> {
+        use std::io::ErrorKind::PermissionDenied;
 
-    /// Override fuser's default umount behavior
-    pub fn set_unmount_flags(&mut self, flags: Option<&[UnmountOption]>) {
-        self.unmount_flags = flags.map(|f| f.to_vec());
-    }
-
-    /// Internal method for [`Self::unmount`] and [`Self::drop`]
-    fn _unmount(&mut self) -> Result<(), (Self, io::Error)> {
-        if self.unmounted {
-            return Ok(());
-        }
-        if let Err(err) = fuse2_umount(
-            &self.mountpoint,
-            self.unmount_flags.as_deref(),
-            self.blocking_umount,
-        ) {
-            return Err((self, err));
-        }
-        self.unmounted = true;
-        Ok(())
-    }
-
-    /// Consume the Mount and unmount the filesystem
-    pub fn unmount(mut self) -> Result<(), (Self, io::Error)> {
-        if let Err(err) = self._unmount() {
-            return Err((self, err));
+        // fuse_unmount_compat22 unfortunately doesn't return a status. Additionally,
+        // it attempts to call realpath, which in turn calls into the filesystem. So
+        // if the filesystem returns an error, the unmount does not take place, with
+        // no indication of the error available to the caller. So we call unmount
+        // directly, which is what osxfuse does anyway, since we already converted
+        // to the real path when we first mounted.
+        if let Err(err) = super::libc_umount(&self.mountpoint, flags) {
+            // Linux always returns EPERM for non-root users.  We have to let the
+            // library go through the setuid-root "fusermount -u" to unmount.
+            if err.kind() == PermissionDenied {
+                #[cfg(not(any(
+                    target_os = "macos",
+                    target_os = "freebsd",
+                    target_os = "dragonfly",
+                    target_os = "openbsd",
+                    target_os = "netbsd"
+                )))]
+                unsafe {
+                    fuse_unmount_compat22(self.mountpoint.as_ptr());
+                    return Ok(());
+                }
+            }
+            return Err(err);
         }
         Ok(())
-    }
-}
-
-impl Drop for Mount {
-    fn drop(&mut self) {
-        if let Err(err) = self._unmount() {
-            error!("umount failed with {:?}", err);
-        }
-    }
-}
-
-fn cvt(res: i32) -> io::Result<()> {
-    if res == 0 {
-        Ok(())
-    } else {
-        Err(io::Error::last_os_error())
-    }
-}
-
-fn fuse2_umount(
-    mountpoint: &CStr,
-    flags: Option<&[UnmountOption]>,
-    blocking: bool,
-) -> Result<(), io::Error> {
-    #[cfg(not(any(
-        target_os = "macos",
-        target_os = "freebsd",
-        target_os = "dragonfly",
-        target_os = "openbsd",
-        target_os = "netbsd"
-    )))]
-    use std::io::ErrorKind::PermissionDenied;
-    use std::io::ErrorKind::ResourceBusy;
-    loop {
-        let flags = flags.unwrap_or(&[]);
-        let int_flags = unmount_options::to_unmount_syscall(flags);
-        let result = {
-            // FIXME: Add umount fallback if linux version is <2.1.116
-            #[cfg(target_os = "linux")]
-            let res = cvt(unsafe { libc::umount2(mountpoint.as_ptr(), int_flags) });
-            #[cfg(target_os = "macos")]
-            let res = cvt(unsafe { libc::unmount(mountpoint.as_ptr(), int_flags) });
-            #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-            let res = super::libc_umount(mountpoint);
-            res
-        };
-        let error = match result {
-            Ok(()) => return Ok(()),
-            Err(e) => e,
-        };
-        // Block operation using a sleep wait until last handle is closed
-        if error.kind() == ResourceBusy && blocking {
-            std::thread::sleep(Duration::from_secs_f64(0.5));
-            continue;
-        }
-        // Linux always returns EPERM for non-root users.  We have to let the
-        // library go through the seqtuid-root "fusermount -u" to unmount.
-        #[cfg(not(any(
-            target_os = "macos",
-            target_os = "freebsd",
-            target_os = "dragonfly",
-            target_os = "openbsd",
-            target_os = "netbsd"
-        )))]
-        if error.kind() == PermissionDenied {
-            break;
-        }
-        return Err(error);
-    }
-
-    // fuse_unmount_compat22 unfortunately doesn't return a status. Additionally,
-    // it attempts to call realpath, which in turn calls into the filesystem. So
-    // if the filesystem returns an error, the unmount does not take place, with
-    // no indication of the error available to the caller. So we call unmount
-    // directly, which is what osxfuse does anyway, since we already converted
-    // to the real path when we first mounted.
-    unsafe {
-        fuse_unmount_compat22(mountpoint.as_ptr());
-        return Ok(());
     }
 }

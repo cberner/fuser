@@ -85,7 +85,7 @@ fn conflicts_with(option: &UnmountOption) -> Vec<UnmountOption> {
     }
 }
 
-pub fn check_option_conflicts(options: &[UnmountOption]) -> Result<(), io::Error> {
+pub(crate) fn check_option_conflicts(options: &[UnmountOption]) -> Result<(), io::Error> {
     let mut options_set = HashSet::new();
     options_set.extend(options.iter().cloned());
     let conflicting: HashSet<UnmountOption> = options.iter().flat_map(conflicts_with).collect();
@@ -101,7 +101,7 @@ pub fn check_option_conflicts(options: &[UnmountOption]) -> Result<(), io::Error
     }
 }
 
-pub fn to_fusermount_option(option: &UnmountOption) -> Option<String> {
+pub(crate) fn to_fusermount_option(option: &UnmountOption) -> Option<String> {
     match option {
         UnmountOption::Force => None,
         #[cfg(not(any(
@@ -131,7 +131,7 @@ pub fn to_fusermount_option(option: &UnmountOption) -> Option<String> {
     }
 }
 
-pub fn to_unmount_syscall(options: &[UnmountOption]) -> c_int {
+pub(crate) fn to_unmount_syscall(options: &[UnmountOption]) -> c_int {
     let mut res: c_int = 0;
     for option in options {
         match option {

@@ -40,6 +40,6 @@ function run_test {
 run_test 'without libfuse'
 
 # TODO: auto unmount doesn't seem to be supported on FreeBSD
-# run_test 'with libfuse' --auto_unmount
+# run_test 'with libfuse' --auto-unmount
 
 export TEST_EXIT_STATUS=0

@@ -1,32 +1,37 @@
+#[allow(unused)]
+use std::convert::TryInto;
+#[allow(unused)]
+use std::ffi::OsStr;
 use std::io;
 
-#[allow(unused)]
-use std::{convert::TryInto, ffi::OsStr};
+use crate::INodeNo;
+use crate::channel::ChannelSender;
+use crate::ll::fuse_abi::fuse_notify_code as notify_code;
+use crate::ll::notify::Notification;
 
-use crate::{
-    channel::ChannelSender,
-    ll::{fuse_abi::fuse_notify_code as notify_code, notify::Notification},
+/// A handle to a pending `poll()` request.
+#[derive(Copy, Clone, Debug)]
+pub struct PollHandle(pub u64);
 
-    // What we're sending here aren't really replies, but they
-    // move in the same direction (userspace->kernel), so we can
-    // reuse ReplySender for it.
-    reply::ReplySender,
-};
-
-/// A handle to a pending `poll()` request. Can be saved and used to notify the
-/// kernel when a poll is ready.
+/// A [handle](PollHandle) to a pending `poll()` request coupled with notifier reference.
+/// Can be saved and used to notify the kernel when a poll is ready.
 #[derive(Clone)]
-pub struct PollHandle {
-    handle: u64,
+pub struct PollNotifier {
+    handle: PollHandle,
     notifier: Notifier,
 }
 
-impl PollHandle {
-    pub(crate) fn new(cs: ChannelSender, kh: u64) -> Self {
+impl PollNotifier {
+    pub(crate) fn new(cs: ChannelSender, kh: PollHandle) -> Self {
         Self {
             handle: kh,
             notifier: Notifier::new(cs),
         }
+    }
+
+    /// Handle associated with this poll notifier.
+    pub fn handle(&self) -> PollHandle {
+        self.handle
     }
 
     /// Notify the kernel that the associated file handle is ready to be polled.
@@ -37,13 +42,7 @@ impl PollHandle {
     }
 }
 
-impl From<PollHandle> for u64 {
-    fn from(value: PollHandle) -> Self {
-        value.handle
-    }
-}
-
-impl std::fmt::Debug for PollHandle {
+impl std::fmt::Debug for PollNotifier {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("PollHandle").field(&self.handle).finish()
     }
@@ -61,7 +60,7 @@ impl Notifier {
     /// Notify poll clients of I/O readiness
     /// # Errors
     /// Returns an error if the kernel rejects the notification.
-    pub fn poll(&self, kh: u64) -> io::Result<()> {
+    pub fn poll(&self, kh: PollHandle) -> io::Result<()> {
         let notif = Notification::new_poll(kh);
         self.send(notify_code::FUSE_POLL, &notif)
     }
@@ -70,7 +69,7 @@ impl Notifier {
     /// # Errors
     /// Returns an error if the notification data is too large.
     /// Returns an error if the kernel rejects the notification.
-    pub fn inval_entry(&self, parent: u64, name: &OsStr) -> io::Result<()> {
+    pub fn inval_entry(&self, parent: INodeNo, name: &OsStr) -> io::Result<()> {
         let notif = Notification::new_inval_entry(parent, name).map_err(Self::too_big_err)?;
         self.send_inval(notify_code::FUSE_NOTIFY_INVAL_ENTRY, &notif)
     }
@@ -79,7 +78,7 @@ impl Notifier {
     /// data in the given range)
     /// # Errors
     /// Returns an error if the kernel rejects the notification.
-    pub fn inval_inode(&self, ino: u64, offset: i64, len: i64) -> io::Result<()> {
+    pub fn inval_inode(&self, ino: INodeNo, offset: i64, len: i64) -> io::Result<()> {
         let notif = Notification::new_inval_inode(ino, offset, len);
         self.send_inval(notify_code::FUSE_NOTIFY_INVAL_INODE, &notif)
     }
@@ -88,7 +87,7 @@ impl Notifier {
     /// # Errors
     /// Returns an error if the notification data is too large.
     /// Returns an error if the kernel rejects the notification.
-    pub fn store(&self, ino: u64, offset: u64, data: &[u8]) -> io::Result<()> {
+    pub fn store(&self, ino: INodeNo, offset: u64, data: &[u8]) -> io::Result<()> {
         let notif = Notification::new_store(ino, offset, data).map_err(Self::too_big_err)?;
         // Not strictly an invalidate, but the inode we're operating
         // on may have been evicted anyway, so treat is as such
@@ -100,7 +99,7 @@ impl Notifier {
     /// # Errors
     /// Returns an error if the notification data is too large.
     /// Returns an error if the kernel rejects the notification.
-    pub fn delete(&self, parent: u64, child: u64, name: &OsStr) -> io::Result<()> {
+    pub fn delete(&self, parent: INodeNo, child: INodeNo, name: &OsStr) -> io::Result<()> {
         let notif = Notification::new_delete(parent, child, name).map_err(Self::too_big_err)?;
         self.send_inval(notify_code::FUSE_NOTIFY_DELETE, &notif)
     }
