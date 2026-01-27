@@ -21,13 +21,7 @@ xfstests:
 	 --memory=2g --kernel-memory=200m \
 	 -v "$(shell pwd)/logs:/code/logs" fuser:xfstests bash -c "cd /code/fuser && ./xfstests.sh"
 
-pjdfs_tests: pjdfs_tests_fuse2 pjdfs_tests_fuse3 pjdfs_tests_pure
-
-pjdfs_tests_fuse2:
-	docker build --build-arg BUILD_FEATURES='--features=libfuse' -t fuser:pjdfs-2 -f pjdfs.Dockerfile .
-	# Additional permissions are needed to be able to mount FUSE
-	docker run --rm -$(INTERACTIVE)t --cap-add SYS_ADMIN --device /dev/fuse --security-opt apparmor:unconfined \
-	 -v "$(shell pwd)/logs:/code/logs" fuser:pjdfs-2 bash -c "cd /code/fuser && ./pjdfs.sh"
+pjdfs_tests: pjdfs_tests_fuse3 pjdfs_tests_pure
 
 pjdfs_tests_fuse3:
 	docker build --build-arg BUILD_FEATURES='--features=abi-7-31,libfuse' -t fuser:pjdfs-3 -f pjdfs.Dockerfile .

@@ -5,6 +5,7 @@
 #![warn(missing_debug_implementations)]
 #![allow(missing_docs)]
 #![allow(non_camel_case_types)]
+#![allow(dead_code)]
 use libc::c_char;
 use libc::c_int;
 use libc::c_uint;
@@ -14,7 +15,14 @@ use libc::mode_t;
 use libc::off_t;
 use libc::size_t;
 
-use super::fuse2_sys::fuse_args;
+/// FFI struct for passing arguments to libfuse functions.
+#[repr(C)]
+#[derive(Debug)]
+pub(crate) struct fuse_args {
+    pub argc: c_int,
+    pub argv: *const *const c_char,
+    pub allocated: c_int,
+}
 // Opaque types for FUSE-specific pointers
 type fuse_req_t = *mut c_void;
 type fuse_pollhandle = *mut c_void;

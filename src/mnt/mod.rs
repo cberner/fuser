@@ -2,13 +2,9 @@
 //!
 //! Raw communication channel to the FUSE kernel driver.
 
-#[cfg(fuser_mount_impl = "libfuse2")]
-mod fuse2;
-#[cfg(any(test, fuser_mount_impl = "libfuse2", fuser_mount_impl = "libfuse3"))]
-mod fuse2_sys;
 #[cfg(fuser_mount_impl = "libfuse3")]
 mod fuse3;
-#[cfg(fuser_mount_impl = "libfuse3")]
+#[cfg(any(test, fuser_mount_impl = "libfuse3"))]
 mod fuse3_sys;
 
 #[cfg(fuser_mount_impl = "pure-rust")]
@@ -17,15 +13,15 @@ pub(crate) mod mount_options;
 
 use std::io;
 
-#[cfg(any(test, fuser_mount_impl = "libfuse2", fuser_mount_impl = "libfuse3"))]
-use fuse2_sys::fuse_args;
+#[cfg(any(test, fuser_mount_impl = "libfuse3"))]
+use fuse3_sys::fuse_args;
 use mount_options::MountOption;
 
 use crate::dev_fuse::DevFuse;
 
 /// Helper function to provide options as a `fuse_args` struct
 /// (which contains an argc count and an argv pointer)
-#[cfg(any(test, fuser_mount_impl = "libfuse2", fuser_mount_impl = "libfuse3"))]
+#[cfg(any(test, fuser_mount_impl = "libfuse3"))]
 fn with_fuse_args<T, F: FnOnce(&fuse_args) -> T>(options: &[MountOption], f: F) -> T {
     use std::ffi::CString;
 
@@ -57,11 +53,6 @@ pub(crate) enum Mount {
         #[expect(dead_code)] // Is held for drop.
         fuse_pure::Mount,
     ),
-    #[cfg(fuser_mount_impl = "libfuse2")]
-    Fuse2(
-        #[expect(dead_code)] // Is held for drop.
-        fuse2::Mount,
-    ),
     #[cfg(fuser_mount_impl = "libfuse3")]
     Fuse3(
         #[expect(dead_code)] // Is held for drop.
@@ -79,11 +70,6 @@ impl Mount {
         {
             let (dev_fuse, mount) = fuse_pure::Mount::new(mountpoint, options)?;
             Ok((dev_fuse, Mount::Pure(mount)))
-        }
-        #[cfg(fuser_mount_impl = "libfuse2")]
-        {
-            let (dev_fuse, mount) = fuse2::Mount::new(mountpoint, options)?;
-            Ok((dev_fuse, Mount::Fuse2(mount)))
         }
         #[cfg(fuser_mount_impl = "libfuse3")]
         {

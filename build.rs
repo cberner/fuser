@@ -1,7 +1,7 @@
 fn main() {
     // Register rustc cfg for switching between mount implementations.
     println!(
-        "cargo::rustc-check-cfg=cfg(fuser_mount_impl, values(\"pure-rust\", \"libfuse2\", \"libfuse3\", \"macos-no-mount\"))"
+        "cargo::rustc-check-cfg=cfg(fuser_mount_impl, values(\"pure-rust\", \"libfuse3\", \"macos-no-mount\"))"
     );
 
     let target_os =
@@ -18,30 +18,20 @@ fn main() {
             println!("cargo::rustc-cfg=fuser_mount_impl=\"macos-no-mount\"");
         } else {
             pkg_config::Config::new()
-                .atleast_version("2.6.0")
-                .probe("fuse") // for macFUSE 4.x
+                .atleast_version("3.0.0")
+                .probe("fuse") // for macFUSE 4.x (libfuse3 compatible)
                 .map_err(|e| eprintln!("{e}"))
                 .unwrap();
-            println!("cargo::rustc-cfg=fuser_mount_impl=\"libfuse2\"");
+            println!("cargo::rustc-cfg=fuser_mount_impl=\"libfuse3\"");
             println!("cargo::rustc-cfg=feature=\"macfuse-4-compat\"");
         }
     } else {
-        // First try to link with libfuse3
-        if pkg_config::Config::new()
+        // Link with libfuse3
+        pkg_config::Config::new()
             .atleast_version("3.0.0")
             .probe("fuse3")
             .map_err(|e| eprintln!("{e}"))
-            .is_ok()
-        {
-            println!("cargo::rustc-cfg=fuser_mount_impl=\"libfuse3\"");
-        } else {
-            // Fallback to libfuse
-            pkg_config::Config::new()
-                .atleast_version("2.6.0")
-                .probe("fuse")
-                .map_err(|e| eprintln!("{e}"))
-                .unwrap();
-            println!("cargo::rustc-cfg=fuser_mount_impl=\"libfuse2\"");
-        }
+            .unwrap();
+        println!("cargo::rustc-cfg=fuser_mount_impl=\"libfuse3\"");
     }
 }
