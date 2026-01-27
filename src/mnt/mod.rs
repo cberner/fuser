@@ -148,7 +148,7 @@ impl Mount {
                 Some(libc::EBUSY) => true,
                 Some(libc::EAGAIN) => true,
                 Some(libc::EFAULT) => false,
-                Some(libc::EINVAL) => true,
+                Some(libc::EINVAL) => false,
                 Some(libc::ENAMETOOLONG) => false,
                 Some(libc::ENOENT) => false,
                 Some(libc::ENOMEM) => true,

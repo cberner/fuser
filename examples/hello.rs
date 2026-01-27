@@ -1,4 +1,5 @@
 use std::ffi::OsStr;
+use std::io;
 use std::path::PathBuf;
 use std::time::Duration;
 use std::time::UNIX_EPOCH;
@@ -154,5 +155,20 @@ fn main() {
     if options.contains(&MountOption::AutoUnmount) && !options.contains(&MountOption::AllowRoot) {
         options.push(MountOption::AllowOther);
     }
-    fuser::mount2(HelloFS, &args.mount_point, &options).unwrap();
+    let mut session = fuser::spawn_mount2(HelloFS, &args.mount_point, &options).unwrap();
+    std::io::stdin().read_line(&mut String::new()).unwrap();
+    loop {
+        let result = session.umount_and_join(&[]);
+        if let Err((session_inner, error)) = result {
+            if let Some(session_inner) = session_inner {
+                session = session_inner;
+                eprintln!("error: {error}");
+            } else {
+                Result::<(), io::Error>::Err(error).expect("should unmount");
+                break;
+            }
+        } else {
+            break;
+        }
+    }
 }
