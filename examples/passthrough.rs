@@ -112,8 +112,9 @@ impl BackingCache {
 }
 
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::sync::Weak;
+
+use parking_lot::Mutex;
 
 #[derive(Debug)]
 struct PassthroughFs {
@@ -205,7 +206,6 @@ impl Filesystem for PassthroughFs {
         let (fh, id) = self
             .backing_cache
             .lock()
-            .unwrap()
             .get_or(ino, || {
                 let file = File::open("/etc/profile")?;
                 reply.open_backing(file)
@@ -226,7 +226,7 @@ impl Filesystem for PassthroughFs {
         _flush: bool,
         reply: ReplyEmpty,
     ) {
-        self.backing_cache.lock().unwrap().put(_fh.into());
+        self.backing_cache.lock().put(_fh.into());
         reply.ok();
     }
 
