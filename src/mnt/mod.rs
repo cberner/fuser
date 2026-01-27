@@ -184,6 +184,7 @@ impl Drop for Mount {
                 Ok(()) => break,
                 Err(err) => {
                     if err.raw_os_error() == Some(libc::EBUSY) {
+                        log::warn!("Unmount failed due to EBUSY, retrying...");
                         std::thread::sleep(std::time::Duration::from_secs(1));
                         continue;
                     } else {

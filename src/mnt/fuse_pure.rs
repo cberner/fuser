@@ -3,6 +3,17 @@
 //! This is a small set of bindings that are required to mount/unmount FUSE filesystems and
 //! open/close a fd to the FUSE kernel driver.
 
+use log::debug;
+use log::error;
+use log::warn;
+use nix::fcntl::FcntlArg;
+use nix::fcntl::FdFlag;
+use nix::fcntl::OFlag;
+use nix::fcntl::fcntl;
+use nix::sys::socket::ControlMessageOwned;
+use nix::sys::socket::MsgFlags;
+use nix::sys::socket::SockaddrStorage;
+use nix::sys::socket::recvmsg;
 use std::ffi::CStr;
 use std::ffi::CString;
 use std::ffi::OsStr;
@@ -25,17 +36,6 @@ use std::path::Path;
 use std::process::Command;
 use std::process::Stdio;
 use std::sync::Arc;
-use log::debug;
-use log::error;
-use log::warn;
-use nix::fcntl::FcntlArg;
-use nix::fcntl::FdFlag;
-use nix::fcntl::OFlag;
-use nix::fcntl::fcntl;
-use nix::sys::socket::ControlMessageOwned;
-use nix::sys::socket::MsgFlags;
-use nix::sys::socket::SockaddrStorage;
-use nix::sys::socket::recvmsg;
 
 use super::is_mounted;
 use super::mount_options::MountOption;
@@ -81,7 +81,7 @@ impl MountImpl {
             // living at the same mountpoint
             return Ok(());
         }
-        // FIXME: check if removing unmount socket may affect the unmounting process.
+        // FIXME: removing unmount socket affects the unmounting process.
         if let Some(sock) = mem::take(&mut self.auto_unmount_socket) {
             drop(sock);
             // fusermount in auto-unmount mode, no more work to do.
@@ -162,7 +162,9 @@ fn fuse_unmount_pure(mountpoint: &CStr, flags: &[UnmountOption]) -> Result<(), i
                     "fusermount failed: {}",
                     String::from_utf8_lossy(&output.stderr)
                 );
-                // FIXME: fusermount does not return the actual unmount error code
+                // FIXME: fusermount does not return the actual unmount error code in the process
+                // (e.g. should the `umount2` call in `fusermount` return `EBUSY`, we should
+                // return `EBUSY` here)
                 Err(io::Error::from_raw_os_error(libc::EIO))
             }
         }
