@@ -2,7 +2,7 @@
 
 # Run like:
 #
-#   cargo build --example passthrough --features=abi-7-40
+#   cargo build --example passthrough
 #   sudo tests/test_passthrough.sh target/debug/examples/passthrough
 
 set -eux
