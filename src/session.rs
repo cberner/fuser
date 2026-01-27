@@ -157,6 +157,20 @@ impl<FS: Filesystem> Session<FS> {
         }
     }
 
+    /// Run the session loop in a background thread. If the returned handle is dropped,
+    /// the filesystem is unmounted and the given session ends.
+    pub fn spawn(self) -> io::Result<BackgroundSession> {
+        let sender = self.ch.sender();
+        // Take the fuse_session, so that we can unmount it
+        let mount = std::mem::take(&mut *self.mount.lock().unwrap()).map(|(_, mount)| mount);
+        let guard = thread::spawn(move || self.run());
+        Ok(BackgroundSession {
+            guard,
+            sender,
+            mount,
+        })
+    }
+
     /// Run the session loop that receives kernel requests and dispatches them to method
     /// calls into the filesystem. This read-dispatch-loop is non-concurrent to prevent
     /// having multiple buffers (which take up much memory), but the filesystem methods
@@ -413,13 +427,6 @@ fn aligned_sub_buf(buf: &mut [u8], alignment: usize) -> &mut [u8] {
     }
 }
 
-impl<FS: 'static + Filesystem + Send> Session<FS> {
-    /// Run the session loop in a background thread
-    pub fn spawn(self) -> io::Result<BackgroundSession> {
-        BackgroundSession::new(self)
-    }
-}
-
 impl<FS: Filesystem> Drop for Session<FS> {
     fn drop(&mut self) {
         if !self.destroyed {
@@ -445,20 +452,6 @@ pub struct BackgroundSession {
 }
 
 impl BackgroundSession {
-    /// Create a new background session for the given session by running its
-    /// session loop in a background thread. If the returned handle is dropped,
-    /// the filesystem is unmounted and the given session ends.
-    fn new<FS: Filesystem>(se: Session<FS>) -> io::Result<BackgroundSession> {
-        let sender = se.ch.sender();
-        // Take the fuse_session, so that we can unmount it
-        let mount = std::mem::take(&mut *se.mount.lock().unwrap()).map(|(_, mount)| mount);
-        let guard = thread::spawn(move || se.run());
-        Ok(BackgroundSession {
-            guard,
-            sender,
-            mount,
-        })
-    }
     /// Unmount the filesystem and join the background thread.
     pub fn umount_and_join(self) -> io::Result<()> {
         let Self {
