@@ -52,7 +52,7 @@ mount_tests:
 	 fuser:mount_tests bash -c "cd /code/fuser && bash ./tests/experimental_mount_tests.sh"
 
 test_passthrough:
-	cargo build --example passthrough --features=abi-7-40
+	cargo build --example passthrough
 	sudo tests/test_passthrough.sh target/debug/examples/passthrough
 
 test: pre mount_tests pjdfs_tests xfstests
