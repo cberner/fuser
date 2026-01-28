@@ -43,12 +43,22 @@ pjdfs_tests_pure:
 
 mount_tests:
 	docker build -t fuser:mount_tests -f mount_tests.Dockerfile .
+	mkdir -p docker-cargo-caches/target docker-cargo-caches/git docker-cargo-caches/registry
 	# Additional permissions are needed to be able to mount FUSE
 	docker run --rm -$(INTERACTIVE)t --cap-add SYS_ADMIN --device /dev/fuse --security-opt apparmor:unconfined \
+	 -v "$(shell pwd)/docker-cargo-caches/target:/code/fuser/target" \
+	 -v "$(shell pwd)/docker-cargo-caches/git:/root/.cargo/git" \
+	 -v "$(shell pwd)/docker-cargo-caches/registry:/root/.cargo/registry" \
 	 fuser:mount_tests bash -c "cd /code/fuser && cargo run -p fuser-tests -- simple"
 	docker run --rm -$(INTERACTIVE)t --cap-add SYS_ADMIN --device /dev/fuse --security-opt apparmor:unconfined \
+	 -v "$(shell pwd)/docker-cargo-caches/target:/code/fuser/target" \
+	 -v "$(shell pwd)/docker-cargo-caches/git:/root/.cargo/git" \
+	 -v "$(shell pwd)/docker-cargo-caches/registry:/root/.cargo/registry" \
 	 fuser:mount_tests bash -c "cd /code/fuser && bash ./mount_tests.sh"
 	docker run --rm -$(INTERACTIVE)t --cap-add SYS_ADMIN --device /dev/fuse --security-opt apparmor:unconfined \
+	 -v "$(shell pwd)/docker-cargo-caches/target:/code/fuser/target" \
+	 -v "$(shell pwd)/docker-cargo-caches/git:/root/.cargo/git" \
+	 -v "$(shell pwd)/docker-cargo-caches/registry:/root/.cargo/registry" \
 	 fuser:mount_tests bash -c "cd /code/fuser && bash ./tests/experimental_mount_tests.sh"
 
 test_passthrough:
