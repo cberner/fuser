@@ -8,18 +8,11 @@ use tempfile::TempDir;
 use tokio::fs::File;
 use tokio::process::Command;
 
-pub(crate) async fn run_simple_tests() -> anyhow::Result<()> {
-    tokio::select! {
-        result = run_simple_tests_impl() => result,
-        x = tokio::signal::ctrl_c() => {
-            // Wait for signal so `kill_on_drop` will kill the process.
-            x?;
-            bail!("Interrupted by Ctrl+C")
-        }
-    }
-}
+use crate::ansi::green;
+use crate::command_utils::command_output;
+use crate::command_utils::command_success;
 
-async fn run_simple_tests_impl() -> anyhow::Result<()> {
+pub(crate) async fn run_simple_tests() -> anyhow::Result<()> {
     // Create temp directories
     let data_dir = TempDir::new().context("Failed to create data directory")?;
     let mount_dir = TempDir::new().context("Failed to create mount directory")?;
@@ -29,15 +22,7 @@ async fn run_simple_tests_impl() -> anyhow::Result<()> {
 
     // Build the simple example
     eprintln!("Building simple example...");
-    let build_status = Command::new("cargo")
-        .args(["build", "--example", "simple"])
-        .status()
-        .await
-        .context("Failed to run cargo build")?;
-
-    if !build_status.success() {
-        bail!("Failed to build simple example");
-    }
+    command_success(["cargo", "build", "--example", "simple"]).await?;
 
     // Run the simple example
     eprintln!("Starting simple filesystem...");
@@ -62,12 +47,7 @@ async fn run_simple_tests_impl() -> anyhow::Result<()> {
     tokio::time::sleep(Duration::from_secs(2)).await;
 
     // Check if FUSE was successfully mounted
-    let mount_output = Command::new("mount")
-        .output()
-        .await
-        .context("Failed to run mount command")?;
-
-    let mount_info = String::from_utf8_lossy(&mount_output.stdout);
+    let mount_info = command_output(["mount"]).await?;
     if !mount_info.contains("fuser") {
         bail!("FUSE mount not found in mount output");
     }
@@ -84,26 +64,16 @@ async fn run_simple_tests_impl() -> anyhow::Result<()> {
     File::create(&file_b)
         .await
         .context("Failed to touch file 'b'")?;
-    eprintln!("OK touch file");
+    green!("OK touch file");
 
-    // Unmount
     eprintln!("Unmounting...");
-    let umount_status = Command::new("umount")
-        .arg(mount_dir.path())
-        .status()
-        .await
-        .context("Failed to run umount")?;
+    command_success(["umount", mount_dir.path().to_str().unwrap()]).await?;
 
-    if !umount_status.success() {
-        bail!("Failed to unmount");
-    }
-
-    // Kill the FUSE process
     fuse_process
         .kill()
         .await
         .context("Failed to kill FUSE process")?;
 
-    eprintln!("All simple tests passed!");
+    green!("All simple tests passed!");
     Ok(())
 }
