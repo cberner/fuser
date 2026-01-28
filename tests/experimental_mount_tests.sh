@@ -18,7 +18,7 @@ function run_allow_root_test {
   useradd fusertest1
   useradd fusertest2
   DIR=$(su fusertest1 -c "mktemp --directory")
-  cargo build --example async_hello --features libfuse,abi-7-30 > /dev/null 2>&1
+  cargo build --example async_hello --features=libfuse3 > /dev/null 2>&1
   su fusertest1 -c "target/debug/examples/async_hello $DIR --allow-root" &
   FUSE_PID=$!
   sleep 2
@@ -144,16 +144,16 @@ apt autoremove -y
 apt install -y libfuse-dev pkg-config fuse
 echo 'user_allow_other' >> /etc/fuse.conf
 
-run_test --features=libfuse,experimental 'with libfuse'
-run_test --features=libfuse,experimental 'with libfuse' --auto-unmount
+run_test --features=libfuse2,experimental 'with libfuse'
+run_test --features=libfuse2,experimental 'with libfuse' --auto-unmount
 
 apt remove --purge -y libfuse-dev fuse
 apt autoremove -y
 apt install -y libfuse3-dev fuse3
 echo 'user_allow_other' >> /etc/fuse.conf
 
-run_test --features=libfuse,abi-7-30,experimental 'with libfuse3'
-run_test --features=libfuse,abi-7-30,experimental 'with libfuse3' --auto-unmount
+run_test --features=libfuse3,experimental 'with libfuse3'
+run_test --features=libfuse3,experimental 'with libfuse3' --auto-unmount
 
 run_allow_root_test
 
