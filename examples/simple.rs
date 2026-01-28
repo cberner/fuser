@@ -1890,7 +1890,7 @@ impl Filesystem for SimpleFS {
             &attrs.into(),
             fuser::Generation(0),
             FileHandle(self.allocate_next_file_handle(read, write)),
-            0,
+            FopenFlags::empty(),
         );
     }
 
