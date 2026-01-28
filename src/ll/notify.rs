@@ -11,8 +11,8 @@ use smallvec::smallvec;
 use zerocopy::Immutable;
 use zerocopy::IntoBytes;
 
-use super::fuse_abi as abi;
 use crate::INodeNo;
+use crate::ll::fuse_abi as abi;
 use crate::notify::PollHandle;
 
 const INLINE_DATA_THRESHOLD: usize = size_of::<u64>() * 4;
@@ -136,8 +136,8 @@ impl<'a> Notification<'a> {
 
 #[cfg(test)]
 mod test {
-    use super::super::test::ioslice_to_vec;
-    use super::*;
+    use crate::ll::notify::*;
+    use crate::ll::test::ioslice_to_vec;
 
     #[test]
     fn inval_entry() {

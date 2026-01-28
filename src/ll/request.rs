@@ -18,10 +18,10 @@ use serde::Deserialize;
 #[cfg(feature = "serializable")]
 use serde::Serialize;
 
-use super::argument::ArgumentIterator;
-use super::fuse_abi as abi;
-use super::fuse_abi::fuse_in_header;
-use super::fuse_abi::fuse_opcode;
+use crate::ll::argument::ArgumentIterator;
+use crate::ll::fuse_abi as abi;
+use crate::ll::fuse_abi::fuse_in_header;
+use crate::ll::fuse_abi::fuse_opcode;
 
 /// Error that may occur while reading and parsing a request from the kernel driver.
 #[derive(Debug)]
@@ -237,18 +237,6 @@ mod op {
     use zerocopy::FromZeros;
     use zerocopy::IntoBytes;
 
-    use super::super::TimeOrNow;
-    use super::super::argument::ArgumentIterator;
-    use super::super::flags::fattr_flags::FattrFlags;
-    use super::super::flags::init_flags::InitFlags;
-    use super::FileHandle;
-    use super::FilenameInDir;
-    use super::INodeNo;
-    use super::Lock;
-    use super::LockOwner;
-    use super::Operation;
-    use super::RequestId;
-    use super::abi::*;
     use crate::AccessFlags;
     use crate::CopyFileRangeFlags;
     use crate::Errno;
@@ -260,10 +248,22 @@ mod op {
     use crate::WriteFlags;
     use crate::bsd_file_flags::BsdFileFlags;
     use crate::ll::Response;
+    use crate::ll::TimeOrNow;
+    use crate::ll::argument::ArgumentIterator;
+    use crate::ll::flags::fattr_flags::FattrFlags;
     use crate::ll::flags::fsync_flags::FsyncFlags;
     use crate::ll::flags::getattr_flags::GetattrFlags;
+    use crate::ll::flags::init_flags::InitFlags;
     use crate::ll::flags::read_flags::ReadFlags;
     use crate::ll::flags::release_flags::ReleaseFlags;
+    use crate::ll::request::FileHandle;
+    use crate::ll::request::FilenameInDir;
+    use crate::ll::request::INodeNo;
+    use crate::ll::request::Lock;
+    use crate::ll::request::LockOwner;
+    use crate::ll::request::Operation;
+    use crate::ll::request::RequestId;
+    use crate::ll::request::abi::*;
 
     /// Look up a directory entry by name and get its attributes.
     ///
@@ -2211,8 +2211,8 @@ impl<'a> TryFrom<&'a [u8]> for AnyRequest<'a> {
 mod tests {
     use std::ffi::OsStr;
 
-    use super::super::test::AlignedData;
-    use super::*;
+    use crate::ll::request::*;
+    use crate::ll::test::AlignedData;
 
     #[cfg(target_endian = "big")]
     const INIT_REQUEST: AlignedData<[u8; 104]> = AlignedData([

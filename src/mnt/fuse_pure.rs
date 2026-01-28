@@ -37,10 +37,10 @@ use nix::sys::socket::MsgFlags;
 use nix::sys::socket::SockaddrStorage;
 use nix::sys::socket::recvmsg;
 
-use super::is_mounted;
-use super::mount_options::MountOption;
-use super::mount_options::option_to_string;
 use crate::dev_fuse::DevFuse;
+use crate::mnt::is_mounted;
+use crate::mnt::mount_options::MountOption;
+use crate::mnt::mount_options::option_to_string;
 
 const FUSERMOUNT_BIN: &str = "fusermount";
 const FUSERMOUNT3_BIN: &str = "fusermount3";
@@ -83,7 +83,7 @@ impl MountImpl {
             // fusermount in auto-unmount mode, no more work to do.
             return Ok(());
         }
-        if let Err(err) = super::libc_umount(&self.mountpoint) {
+        if let Err(err) = crate::mnt::libc_umount(&self.mountpoint) {
             if err.kind() == ErrorKind::PermissionDenied {
                 // Linux always returns EPERM for non-root users.  We have to let the
                 // library go through the setuid-root "fusermount -u" to unmount.

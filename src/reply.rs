@@ -753,9 +753,9 @@ mod test {
     use zerocopy::Immutable;
     use zerocopy::IntoBytes;
 
-    use super::*;
     use crate::FileAttr;
     use crate::FileType;
+    use crate::reply::*;
 
     #[derive(Debug, IntoBytes, Immutable)]
     #[repr(C)]

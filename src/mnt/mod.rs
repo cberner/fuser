@@ -181,7 +181,7 @@ fn is_mounted(fuse_device: &DevFuse) -> bool {
 mod test {
     use std::ffi::CStr;
 
-    use super::*;
+    use crate::mnt::*;
 
     #[test]
     fn fuse_args() {
