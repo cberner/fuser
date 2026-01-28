@@ -82,11 +82,11 @@ impl MountImpl {
             return Ok(());
         }
         // FIXME: removing unmount socket affects the unmounting process.
-        if let Some(sock) = mem::take(&mut self.auto_unmount_socket) {
-            drop(sock);
-            // fusermount in auto-unmount mode, no more work to do.
-            return Ok(());
-        }
+        // if let Some(sock) = mem::take(&mut self.auto_unmount_socket) {
+        //     drop(sock);
+        //     // fusermount in auto-unmount mode, no more work to do.
+        //     return Ok(());
+        // }
         if let Err(err) = super::libc_umount(&self.mountpoint, flags) {
             if err.kind() == ErrorKind::PermissionDenied {
                 // Linux always returns EPERM for non-root users.  We have to let the
