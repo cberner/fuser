@@ -19,7 +19,7 @@ use std::io;
 
 #[cfg(any(test, fuser_mount_impl = "libfuse2", fuser_mount_impl = "libfuse3"))]
 use fuse2_sys::fuse_args;
-use log::error;
+use log::warn;
 use mount_options::MountOption;
 
 use crate::dev_fuse::DevFuse;
@@ -112,7 +112,8 @@ impl Mount {
 impl Drop for Mount {
     fn drop(&mut self) {
         if let Err(err) = self.umount_impl() {
-            error!("Unmount failed: {}", err);
+            // This is not necessarily an error: may happen if a user called 'umount'.
+            warn!("Unmount failed: {}", err);
         }
     }
 }
