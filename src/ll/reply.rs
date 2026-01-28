@@ -11,16 +11,16 @@ use smallvec::smallvec;
 use zerocopy::Immutable;
 use zerocopy::IntoBytes;
 
-use super::Errno;
-use super::FileHandle;
-use super::Generation;
-use super::INodeNo;
-use super::Lock;
-use super::RequestId;
-use super::flags::fopen_flags::FopenFlags;
-use super::fuse_abi as abi;
 use crate::FileType;
 use crate::PollEvents;
+use crate::ll::Errno;
+use crate::ll::FileHandle;
+use crate::ll::Generation;
+use crate::ll::INodeNo;
+use crate::ll::Lock;
+use crate::ll::RequestId;
+use crate::ll::flags::fopen_flags::FopenFlags;
+use crate::ll::fuse_abi as abi;
 
 const INLINE_DATA_THRESHOLD: usize = size_of::<u64>() * 4;
 pub(crate) type ResponseBuf = SmallVec<[u8; INLINE_DATA_THRESHOLD]>;
@@ -508,8 +508,8 @@ impl DirEntPlusList {
 mod test {
     use std::num::NonZeroI32;
 
-    use super::super::test::ioslice_to_vec;
-    use super::*;
+    use crate::ll::reply::*;
+    use crate::ll::test::ioslice_to_vec;
 
     #[test]
     fn reply_empty() {

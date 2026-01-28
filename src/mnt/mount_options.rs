@@ -186,7 +186,7 @@ pub(crate) fn parse_options_from_args(args: &[&OsStr]) -> io::Result<Vec<MountOp
 mod test {
     use std::os::unix::prelude::OsStrExt;
 
-    use super::*;
+    use crate::mnt::mount_options::*;
 
     #[test]
     fn option_checking() {
@@ -195,7 +195,7 @@ mod test {
     }
     #[test]
     fn option_round_trip() {
-        use super::MountOption::*;
+        use crate::mnt::mount_options::MountOption::*;
         for x in &[
             FSName("Blah".to_owned()),
             Subtype("Bloo".to_owned()),
@@ -223,7 +223,7 @@ mod test {
 
     #[test]
     fn test_parse_options() {
-        use super::MountOption::*;
+        use crate::mnt::mount_options::MountOption::*;
 
         assert_eq!(parse_options_from_args(&[]).unwrap(), &[]);
 

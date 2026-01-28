@@ -9,15 +9,15 @@ use std::path::Path;
 use std::ptr;
 use std::sync::Arc;
 
-use super::MountOption;
-use super::fuse3_sys::fuse_lowlevel_ops;
-use super::fuse3_sys::fuse_session_destroy;
-use super::fuse3_sys::fuse_session_fd;
-use super::fuse3_sys::fuse_session_mount;
-use super::fuse3_sys::fuse_session_new;
-use super::fuse3_sys::fuse_session_unmount;
-use super::with_fuse_args;
 use crate::dev_fuse::DevFuse;
+use crate::mnt::MountOption;
+use crate::mnt::fuse3_sys::fuse_lowlevel_ops;
+use crate::mnt::fuse3_sys::fuse_session_destroy;
+use crate::mnt::fuse3_sys::fuse_session_fd;
+use crate::mnt::fuse3_sys::fuse_session_mount;
+use crate::mnt::fuse3_sys::fuse_session_new;
+use crate::mnt::fuse3_sys::fuse_session_unmount;
+use crate::mnt::with_fuse_args;
 
 /// Ensures that an os error is never 0/Success
 fn ensure_last_os_error() -> io::Error {
@@ -77,7 +77,7 @@ impl MountImpl {
     pub(crate) fn umount_impl(&mut self) -> io::Result<()> {
         use std::io::ErrorKind::PermissionDenied;
 
-        if let Err(err) = super::libc_umount(&self.mountpoint) {
+        if let Err(err) = crate::mnt::libc_umount(&self.mountpoint) {
             // Linux always returns EPERM for non-root users.  We have to let the
             // library go through the setuid-root "fusermount -u" to unmount.
             if err.kind() == PermissionDenied {

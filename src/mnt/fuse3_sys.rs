@@ -14,7 +14,7 @@ use libc::mode_t;
 use libc::off_t;
 use libc::size_t;
 
-use super::fuse2_sys::fuse_args;
+use crate::mnt::fuse2_sys::fuse_args;
 // Opaque types for FUSE-specific pointers
 type fuse_req_t = *mut c_void;
 type fuse_pollhandle = *mut c_void;

@@ -6,10 +6,10 @@ use std::os::unix::prelude::OsStrExt;
 use std::path::Path;
 use std::sync::Arc;
 
-use super::MountOption;
-use super::fuse2_sys::*;
-use super::with_fuse_args;
 use crate::dev_fuse::DevFuse;
+use crate::mnt::MountOption;
+use crate::mnt::fuse2_sys::*;
+use crate::mnt::with_fuse_args;
 
 /// Ensures that an os error is never 0/Success
 fn ensure_last_os_error() -> io::Error {
@@ -50,7 +50,7 @@ impl MountImpl {
         // no indication of the error available to the caller. So we call unmount
         // directly, which is what osxfuse does anyway, since we already converted
         // to the real path when we first mounted.
-        if let Err(err) = super::libc_umount(&self.mountpoint) {
+        if let Err(err) = crate::mnt::libc_umount(&self.mountpoint) {
             // Linux always returns EPERM for non-root users.  We have to let the
             // library go through the setuid-root "fusermount -u" to unmount.
             if err.kind() == PermissionDenied {
