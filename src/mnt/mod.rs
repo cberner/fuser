@@ -52,7 +52,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 #[derive(Debug)]
-pub(crate) enum Mount {
+enum MountImpl {
     #[cfg(fuser_mount_impl = "pure-rust")]
     Pure(fuse_pure::MountImpl),
     #[cfg(fuser_mount_impl = "libfuse2")]
@@ -60,6 +60,25 @@ pub(crate) enum Mount {
     #[cfg(fuser_mount_impl = "libfuse3")]
     Fuse3(fuse3::MountImpl),
 }
+
+impl MountImpl {
+    fn umount_impl(&mut self) -> io::Result<()> {
+        match self {
+            #[cfg(fuser_mount_impl = "pure-rust")]
+            MountImpl::Pure(mount) => mount.umount_impl(),
+            #[cfg(fuser_mount_impl = "libfuse2")]
+            MountImpl::Fuse2(mount) => mount.umount_impl(),
+            #[cfg(fuser_mount_impl = "libfuse3")]
+            MountImpl::Fuse3(mount) => mount.umount_impl(),
+            // This branch is needed because Rust does not consider & empty enum non-empty.
+            #[cfg(fuser_mount_impl = "macos-no-mount")]
+            _ => Ok(()),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct Mount(Option<MountImpl>);
 
 impl Mount {
     pub(crate) fn new(
@@ -69,17 +88,17 @@ impl Mount {
         #[cfg(fuser_mount_impl = "pure-rust")]
         {
             let (dev_fuse, mount) = fuse_pure::MountImpl::new(mountpoint, options)?;
-            Ok((dev_fuse, Mount::Pure(mount)))
+            Ok((dev_fuse, Mount(Some(MountImpl::Pure(mount)))))
         }
         #[cfg(fuser_mount_impl = "libfuse2")]
         {
             let (dev_fuse, mount) = fuse2::MountImpl::new(mountpoint, options)?;
-            Ok((dev_fuse, Mount::Fuse2(mount)))
+            Ok((dev_fuse, Mount(Some(MountImpl::Fuse2(mount)))))
         }
         #[cfg(fuser_mount_impl = "libfuse3")]
         {
             let (dev_fuse, mount) = fuse3::MountImpl::new(mountpoint, options)?;
-            Ok((dev_fuse, Mount::Fuse3(mount)))
+            Ok((dev_fuse, Mount(Some(MountImpl::Fuse3(mount)))))
         }
         #[cfg(fuser_mount_impl = "macos-no-mount")]
         {
@@ -90,30 +109,21 @@ impl Mount {
         }
     }
 
-    fn umount_impl(&mut self) -> io::Result<()> {
-        match self {
-            #[cfg(fuser_mount_impl = "pure-rust")]
-            Mount::Pure(mount) => mount.umount_impl(),
-            #[cfg(fuser_mount_impl = "libfuse2")]
-            Mount::Fuse2(mount) => mount.umount_impl(),
-            #[cfg(fuser_mount_impl = "libfuse3")]
-            Mount::Fuse3(mount) => mount.umount_impl(),
-            // This branch is needed because Rust does not consider & empty enum non-empty.
-            #[cfg(fuser_mount_impl = "macos-no-mount")]
-            _ => Ok(()),
-        }
-    }
-
     pub(crate) fn umount(mut self) -> io::Result<()> {
-        self.umount_impl()
+        match self.0.take() {
+            Some(mut mount) => mount.umount_impl(),
+            None => Ok(()),
+        }
     }
 }
 
 impl Drop for Mount {
     fn drop(&mut self) {
-        if let Err(err) = self.umount_impl() {
-            // This is not necessarily an error: may happen if a user called 'umount'.
-            warn!("Unmount failed: {}", err);
+        if let Some(mut mount) = self.0.take() {
+            if let Err(err) = mount.umount_impl() {
+                // This is not necessarily an error: may happen if a user called 'umount'.
+                warn!("Unmount failed: {}", err);
+            }
         }
     }
 }
