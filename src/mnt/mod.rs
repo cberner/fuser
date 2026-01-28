@@ -189,6 +189,7 @@ impl Drop for Mount {
                         continue;
                     } else {
                         error!("Unmount failed: {}", err);
+                        break;
                     }
                 }
             }
