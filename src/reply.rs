@@ -443,9 +443,8 @@ impl ReplyCreate {
         attr: &FileAttr,
         generation: Generation,
         fh: ll::FileHandle,
-        flags: u32,
+        flags: FopenFlags,
     ) {
-        let flags = FopenFlags::from_bits_retain(flags);
         assert!(!flags.contains(FopenFlags::FOPEN_PASSTHROUGH));
         self.reply.send_ll(&ll::Response::new_create(
             ttl,
@@ -460,6 +459,35 @@ impl ReplyCreate {
     /// Reply to a request with the given error code
     pub fn error(self, err: Errno) {
         self.reply.error(err);
+    }
+
+    /// Registers a fd for passthrough, returning a `BackingId`.  Once you have the backing ID,
+    /// you can pass it as the 3rd parameter of `OpenReply::opened_passthrough()`.  This is done in
+    /// two separate steps because it may make sense to reuse backing IDs (to avoid having to
+    /// repeatedly reopen the underlying file or potentially keep thousands of fds open).
+    pub fn open_backing(&self, fd: impl std::os::fd::AsFd) -> std::io::Result<BackingId> {
+        self.reply.sender.as_ref().unwrap().open_backing(fd.as_fd())
+    }
+
+    /// Reply to a request with an opened backing id. Call `ReplyCreate::open_backing()` to get one of
+    /// these.
+    pub fn created_passthrough(
+        self,
+        ttl: &Duration,
+        attr: &FileAttr,
+        generation: Generation,
+        fh: ll::FileHandle,
+        flags: FopenFlags,
+        backing_id: &BackingId,
+    ) {
+        self.reply.send_ll(&ll::Response::new_create(
+            ttl,
+            &attr.into(),
+            generation,
+            fh,
+            flags | FopenFlags::FOPEN_PASSTHROUGH,
+            backing_id.backing_id,
+        ));
     }
 }
 
@@ -1075,7 +1103,7 @@ mod test {
             &attr,
             ll::Generation(0xaa),
             ll::FileHandle(0xbb),
-            0x0c,
+            FopenFlags::from_bits_retain(0x0c),
         );
     }
 
