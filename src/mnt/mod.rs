@@ -128,7 +128,7 @@ impl Mount {
             #[cfg(fuser_mount_impl = "libfuse3")]
             MountBacker::Fuse3(mount) => mount.umount_impl(flags),
             // This branch is needed because Rust does not consider & empty enum non-empty.
-            #[cfg(fuser_mount_impl = "internal-no-mount")]
+            #[cfg(fuser_mount_impl = "macos-no-mount")]
             _ => Ok(()),
         }?;
         self.unmounted = true;

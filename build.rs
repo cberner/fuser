@@ -24,23 +24,39 @@ fn main() {
             println!("cargo::rustc-cfg=fuser_mount_impl=\"libfuse2\"");
             println!("cargo::rustc-cfg=feature=\"macfuse-4-compat\"");
         }
+    } else if cfg!(feature = "libfuse2") {
+        configure_libfuse2().unwrap();
+    } else if cfg!(feature = "libfuse3") {
+        configure_libfuse3().unwrap();
     } else {
         // First try to link with libfuse3
-        if pkg_config::Config::new()
-            .atleast_version("3.0.0")
-            .probe("fuse3")
-            .map_err(|e| eprintln!("{e}"))
-            .is_ok()
-        {
-            println!("cargo::rustc-cfg=fuser_mount_impl=\"libfuse3\"");
-        } else {
-            // Fallback to libfuse
-            pkg_config::Config::new()
-                .atleast_version("2.6.0")
-                .probe("fuse")
-                .map_err(|e| eprintln!("{e}"))
-                .unwrap();
-            println!("cargo::rustc-cfg=fuser_mount_impl=\"libfuse2\"");
+        match configure_libfuse3() {
+            Ok(()) => {}
+            Err(e3) => {
+                // Fallback to libfuse
+                match configure_libfuse2() {
+                    Ok(()) => {}
+                    Err(e2) => {
+                        panic!("Failed to configure libfuse3 or libfuse2: {e3}; {e2}");
+                    }
+                }
+            }
         }
     }
+}
+
+fn configure_libfuse3() -> Result<(), pkg_config::Error> {
+    pkg_config::Config::new()
+        .atleast_version("3.0.0")
+        .probe("fuse3")?;
+    println!("cargo::rustc-cfg=fuser_mount_impl=\"libfuse3\"");
+    Ok(())
+}
+
+fn configure_libfuse2() -> Result<(), pkg_config::Error> {
+    pkg_config::Config::new()
+        .atleast_version("2.6.0")
+        .probe("fuse")?;
+    println!("cargo::rustc-cfg=fuser_mount_impl=\"libfuse2\"");
+    Ok(())
 }

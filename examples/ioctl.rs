@@ -25,6 +25,7 @@ use fuser::ReplyEntry;
 use fuser::ReplyIoctl;
 use fuser::Request;
 use log::debug;
+use parking_lot::Mutex;
 
 #[derive(Parser)]
 #[command(version, author = "Colin Marc")]
@@ -47,7 +48,7 @@ const FIOC_GET_SIZE: u64 = nix::request_code_read!('E', 0, size_of::<usize>());
 const FIOC_SET_SIZE: u64 = nix::request_code_write!('E', 1, size_of::<usize>());
 
 struct FiocFS {
-    content: std::sync::Mutex<Vec<u8>>,
+    content: Mutex<Vec<u8>>,
     root_attr: FileAttr,
     fioc_file_attr: FileAttr,
 }
@@ -94,7 +95,7 @@ impl FiocFS {
         };
 
         Self {
-            content: std::sync::Mutex::new(vec![]),
+            content: Mutex::new(vec![]),
             root_attr,
             fioc_file_attr,
         }
@@ -130,7 +131,7 @@ impl Filesystem for FiocFS {
         reply: ReplyData,
     ) {
         if ino == INodeNo(2) {
-            let content = self.content.lock().unwrap();
+            let content = self.content.lock();
             reply.data(&content[offset as usize..]);
         } else {
             reply.error(Errno::ENOENT);
@@ -183,13 +184,13 @@ impl Filesystem for FiocFS {
 
         match cmd.into() {
             FIOC_GET_SIZE => {
-                let content = self.content.lock().unwrap();
+                let content = self.content.lock();
                 let size_bytes = content.len().to_ne_bytes();
                 reply.ioctl(0, &size_bytes);
             }
             FIOC_SET_SIZE => {
                 let new_size = usize::from_ne_bytes(in_data.try_into().unwrap());
-                *self.content.lock().unwrap() = vec![0_u8; new_size];
+                *self.content.lock() = vec![0_u8; new_size];
                 reply.ioctl(0, &[]);
             }
             _ => {

@@ -14,7 +14,6 @@ use std::os::fd::OwnedFd;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::thread::JoinHandle;
 use std::thread::{self};
 
@@ -27,6 +26,7 @@ use log::error;
 use log::info;
 use nix::unistd::Uid;
 use nix::unistd::geteuid;
+use parking_lot::Mutex;
 
 use crate::Errno;
 use crate::Filesystem;
@@ -75,8 +75,8 @@ pub enum SessionACL {
 /// The session data structure
 #[derive(Debug)]
 pub struct Session<FS: Filesystem> {
-    /// Filesystem operation implementations
-    pub(crate) filesystem: FS,
+    /// Filesystem operation implementations. None after `destroy` called.
+    pub(crate) filesystem: Option<FS>,
     /// Communication channel to the kernel driver
     pub(crate) ch: Channel,
     /// Handle to the mount.  Dropping this unmounts.
@@ -89,8 +89,6 @@ pub struct Session<FS: Filesystem> {
     /// FUSE protocol version, as reported by the kernel.
     /// The field is set to `Some` when the init message is received.
     pub(crate) proto_version: Option<Version>,
-    /// True if the filesystem was destroyed (destroy operation done)
-    pub(crate) destroyed: bool,
 }
 
 impl<FS: Filesystem> AsFd for Session<FS> {
@@ -133,13 +131,12 @@ impl<FS: Filesystem> Session<FS> {
         };
 
         Ok(Session {
-            filesystem,
+            filesystem: Some(filesystem),
             ch,
             mount: Arc::new(Mutex::new(Some((mountpoint.to_owned(), mount)))),
             allowed,
             session_owner: geteuid(),
             proto_version: None,
-            destroyed: false,
         })
     }
 
@@ -148,14 +145,27 @@ impl<FS: Filesystem> Session<FS> {
     pub fn from_fd(filesystem: FS, fd: OwnedFd, acl: SessionACL) -> Self {
         let ch = Channel::new(Arc::new(DevFuse(File::from(fd))));
         Session {
-            filesystem,
+            filesystem: Some(filesystem),
             ch,
             mount: Arc::new(Mutex::new(None)),
             allowed: acl,
             session_owner: geteuid(),
             proto_version: None,
-            destroyed: false,
         }
+    }
+
+    /// Run the session loop in a background thread. If the returned handle is dropped,
+    /// the filesystem is unmounted and the given session ends.
+    pub fn spawn(self) -> io::Result<BackgroundSession> {
+        let sender = self.ch.sender();
+        // Take the fuse_session, so that we can unmount it
+        let mount = std::mem::take(&mut *self.mount.lock()).map(|(_, mount)| mount);
+        let guard = thread::spawn(move || self.run());
+        Ok(BackgroundSession {
+            guard,
+            sender,
+            mount,
+        })
     }
 
     /// Run the session loop that receives kernel requests and dispatches them to method
@@ -174,8 +184,9 @@ impl<FS: Filesystem> Session<FS> {
 
         let ret = self.event_loop(buf);
 
-        self.filesystem.destroy();
-        self.destroyed = true;
+        if let Some(mut filesystem) = self.filesystem.take() {
+            filesystem.destroy();
+        }
 
         match ret {
             Err(e) => Err(e),
@@ -309,10 +320,14 @@ impl<FS: Filesystem> Session<FS> {
             let mut config = KernelConfig::new(init.capabilities(), init.max_readahead(), v);
 
             // Call filesystem init method and give it a chance to return an error
-            if let Err(error) = self
-                .filesystem
-                .init(Request::ref_cast(request.header()), &mut config)
-            {
+            let Some(filesystem) = &mut self.filesystem else {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Bug: filesystem must be initialized during handshake",
+                ));
+            };
+            let res = filesystem.init(Request::ref_cast(request.header()), &mut config);
+            if let Err(error) = res {
                 let errno = Errno::from_i32(error.raw_os_error().unwrap_or(0));
                 let response = Response::new_error(errno);
                 <ReplyRaw as Reply>::new(request.unique(), ReplySender::Channel(self.ch.sender()))
@@ -370,7 +385,7 @@ impl<FS: Filesystem> Session<FS> {
 
     /// Unmount the filesystem
     pub fn unmount(&mut self, flags: &[UnmountOption]) -> io::Result<()> {
-        let mut guard = self.mount.lock().unwrap();
+        let mut guard = self.mount.lock();
         if let Some((path, mount)) = guard.take() {
             if let Err((salvaged, error)) = mount.umount(flags) {
                 if let Some(salvaged) = salvaged {
@@ -404,7 +419,7 @@ pub struct SessionUnmounter {
 impl SessionUnmounter {
     /// Unmount the filesystem
     pub fn unmount(&mut self, flags: &[UnmountOption]) -> io::Result<()> {
-        let mut guard = self.mount.lock().unwrap();
+        let mut guard = self.mount.lock();
         if let Some((path, mount)) = guard.take() {
             if let Err((salvaged, error)) = mount.umount(flags) {
                 if let Some(salvaged) = salvaged {
@@ -426,21 +441,13 @@ fn aligned_sub_buf(buf: &mut [u8], alignment: usize) -> &mut [u8] {
     }
 }
 
-impl<FS: 'static + Filesystem + Send> Session<FS> {
-    /// Run the session loop in a background thread
-    pub fn spawn(self) -> io::Result<BackgroundSession> {
-        BackgroundSession::new(self)
-    }
-}
-
 impl<FS: Filesystem> Drop for Session<FS> {
     fn drop(&mut self) {
-        if !self.destroyed {
-            self.filesystem.destroy();
-            self.destroyed = true;
+        if let Some(mut filesystem) = self.filesystem.take() {
+            filesystem.destroy();
         }
 
-        if let Some((mountpoint, _mount)) = std::mem::take(&mut *self.mount.lock().unwrap()) {
+        if let Some((mountpoint, _mount)) = std::mem::take(&mut *self.mount.lock()) {
             info!("unmounting session at {}", mountpoint.display());
         }
     }
@@ -458,21 +465,6 @@ pub struct BackgroundSession {
 }
 
 impl BackgroundSession {
-    /// Create a new background session for the given session by running its
-    /// session loop in a background thread. If the returned handle is dropped,
-    /// the filesystem is unmounted and the given session ends.
-    fn new<FS: Filesystem>(se: Session<FS>) -> io::Result<BackgroundSession> {
-        let sender = se.ch.sender();
-        // Take the fuse_session, so that we can unmount it
-        let mount = std::mem::take(&mut *se.mount.lock().unwrap()).map(|(_, mount)| mount);
-        let guard = thread::spawn(move || se.run());
-        Ok(BackgroundSession {
-            guard,
-            sender,
-            mount,
-        })
-    }
-
     /// Unmount the filesystem and join the background thread.
     ///
     /// # Returns

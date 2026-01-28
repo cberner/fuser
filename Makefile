@@ -24,13 +24,13 @@ xfstests:
 pjdfs_tests: pjdfs_tests_fuse2 pjdfs_tests_fuse3 pjdfs_tests_pure
 
 pjdfs_tests_fuse2:
-	docker build --build-arg BUILD_FEATURES='--features=libfuse' -t fuser:pjdfs-2 -f pjdfs.Dockerfile .
+	docker build --build-arg BUILD_FEATURES='--features=libfuse2' -t fuser:pjdfs-2 -f pjdfs.Dockerfile .
 	# Additional permissions are needed to be able to mount FUSE
 	docker run --rm -$(INTERACTIVE)t --cap-add SYS_ADMIN --device /dev/fuse --security-opt apparmor:unconfined \
 	 -v "$(shell pwd)/logs:/code/logs" fuser:pjdfs-2 bash -c "cd /code/fuser && ./pjdfs.sh"
 
 pjdfs_tests_fuse3:
-	docker build --build-arg BUILD_FEATURES='--features=abi-7-31,libfuse' -t fuser:pjdfs-3 -f pjdfs.Dockerfile .
+	docker build --build-arg BUILD_FEATURES='--features=libfuse3' -t fuser:pjdfs-3 -f pjdfs.Dockerfile .
 	# Additional permissions are needed to be able to mount FUSE
 	docker run --rm -$(INTERACTIVE)t --cap-add SYS_ADMIN --device /dev/fuse --security-opt apparmor:unconfined \
 	 -v "$(shell pwd)/logs:/code/logs" fuser:pjdfs-3 bash -c "cd /code/fuser && ./pjdfs.sh"
@@ -45,14 +45,14 @@ mount_tests:
 	docker build -t fuser:mount_tests -f mount_tests.Dockerfile .
 	# Additional permissions are needed to be able to mount FUSE
 	docker run --rm -$(INTERACTIVE)t --cap-add SYS_ADMIN --device /dev/fuse --security-opt apparmor:unconfined \
-	 fuser:mount_tests bash -c "cd /code/fuser && bash ./simplefs_tests.sh"
+	 fuser:mount_tests bash -c "cd /code/fuser && cargo run -p fuser-tests -- simple"
 	docker run --rm -$(INTERACTIVE)t --cap-add SYS_ADMIN --device /dev/fuse --security-opt apparmor:unconfined \
 	 fuser:mount_tests bash -c "cd /code/fuser && bash ./mount_tests.sh"
 	docker run --rm -$(INTERACTIVE)t --cap-add SYS_ADMIN --device /dev/fuse --security-opt apparmor:unconfined \
 	 fuser:mount_tests bash -c "cd /code/fuser && bash ./tests/experimental_mount_tests.sh"
 
 test_passthrough:
-	cargo build --example passthrough --features=abi-7-40
+	cargo build --example passthrough
 	sudo tests/test_passthrough.sh target/debug/examples/passthrough
 
 test: pre mount_tests pjdfs_tests xfstests
@@ -60,6 +60,6 @@ test: pre mount_tests pjdfs_tests xfstests
 
 test_macos: pre
 	cargo doc --all --no-deps
-	cargo test --all --all-targets --features=libfuse -- --skip=mnt::test::mount_unmount
+	cargo test --all --all-targets --features=libfuse2 -- --skip=mnt::test::mount_unmount
 	./osx_mount_tests.sh
 	./tests/macos_pjdfs.sh
