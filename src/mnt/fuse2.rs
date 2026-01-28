@@ -10,6 +10,7 @@ use super::MountOption;
 use super::fuse2_sys::*;
 use super::with_fuse_args;
 use crate::dev_fuse::DevFuse;
+use super::unmount_options::UnmountOption;
 
 /// Ensures that an os error is never 0/Success
 fn ensure_last_os_error() -> io::Error {
@@ -24,6 +25,7 @@ fn ensure_last_os_error() -> io::Error {
 pub(crate) struct MountImpl {
     mountpoint: CString,
 }
+
 impl MountImpl {
     pub(crate) fn new(
         mountpoint: &Path,
@@ -41,7 +43,7 @@ impl MountImpl {
         })
     }
 
-    pub(crate) fn umount_impl(&mut self) -> io::Result<()> {
+    pub(crate) fn umount_impl(&mut self, flags: &[UnmountOption]) -> io::Result<()> {
         use std::io::ErrorKind::PermissionDenied;
 
         // fuse_unmount_compat22 unfortunately doesn't return a status. Additionally,
@@ -50,7 +52,7 @@ impl MountImpl {
         // no indication of the error available to the caller. So we call unmount
         // directly, which is what osxfuse does anyway, since we already converted
         // to the real path when we first mounted.
-        if let Err(err) = super::libc_umount(&self.mountpoint) {
+        if let Err(err) = super::libc_umount(&self.mountpoint, flags) {
             // Linux always returns EPERM for non-root users.  We have to let the
             // library go through the setuid-root "fusermount -u" to unmount.
             if err.kind() == PermissionDenied {

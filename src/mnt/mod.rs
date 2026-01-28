@@ -14,6 +14,7 @@ mod fuse3_sys;
 #[cfg(fuser_mount_impl = "pure-rust")]
 mod fuse_pure;
 pub(crate) mod mount_options;
+pub(crate) mod unmount_options;
 
 use std::io;
 
@@ -21,6 +22,7 @@ use std::io;
 use fuse2_sys::fuse_args;
 use log::error;
 use mount_options::MountOption;
+use unmount_options::UnmountOption;
 
 use crate::dev_fuse::DevFuse;
 
@@ -52,13 +54,19 @@ use std::path::Path;
 use std::sync::Arc;
 
 #[derive(Debug)]
-pub(crate) enum Mount {
+pub(crate) enum MountBacker {
     #[cfg(fuser_mount_impl = "pure-rust")]
     Pure(fuse_pure::MountImpl),
     #[cfg(fuser_mount_impl = "libfuse2")]
     Fuse2(fuse2::MountImpl),
     #[cfg(fuser_mount_impl = "libfuse3")]
     Fuse3(fuse3::MountImpl),
+}
+
+#[derive(Debug)]
+pub(crate) struct Mount {
+    backing: MountBacker,
+    unmounted: bool,
 }
 
 impl Mount {
@@ -69,17 +77,35 @@ impl Mount {
         #[cfg(fuser_mount_impl = "pure-rust")]
         {
             let (dev_fuse, mount) = fuse_pure::MountImpl::new(mountpoint, options)?;
-            Ok((dev_fuse, Mount::Pure(mount)))
+            Ok((
+                dev_fuse,
+                Mount {
+                    backing: MountBacker::Pure(mount),
+                    unmounted: false,
+                },
+            ))
         }
         #[cfg(fuser_mount_impl = "libfuse2")]
         {
             let (dev_fuse, mount) = fuse2::MountImpl::new(mountpoint, options)?;
-            Ok((dev_fuse, Mount::Fuse2(mount)))
+            Ok((
+                dev_fuse,
+                Mount {
+                    backing: MountBacker::Fuse2(mount),
+                    unmounted: false,
+                },
+            ))
         }
         #[cfg(fuser_mount_impl = "libfuse3")]
         {
             let (dev_fuse, mount) = fuse3::MountImpl::new(mountpoint, options)?;
-            Ok((dev_fuse, Mount::Fuse3(mount)))
+            Ok((
+                dev_fuse,
+                Mount {
+                    backing: MountBacker::Fuse3(mount),
+                    unmounted: false,
+                },
+            ))
         }
         #[cfg(fuser_mount_impl = "macos-no-mount")]
         {
@@ -90,35 +116,91 @@ impl Mount {
         }
     }
 
-    fn umount_impl(&mut self) -> io::Result<()> {
-        match self {
+    fn umount_impl(&mut self, flags: &[UnmountOption]) -> io::Result<()> {
+        if self.unmounted {
+            return Ok(());
+        }
+        match &mut self.backing {
             #[cfg(fuser_mount_impl = "pure-rust")]
-            Mount::Pure(mount) => mount.umount_impl(),
+            MountBacker::Pure(mount) => mount.umount_impl(flags),
             #[cfg(fuser_mount_impl = "libfuse2")]
-            Mount::Fuse2(mount) => mount.umount_impl(),
+            MountBacker::Fuse2(mount) => mount.umount_impl(flags),
             #[cfg(fuser_mount_impl = "libfuse3")]
-            Mount::Fuse3(mount) => mount.umount_impl(),
+            MountBacker::Fuse3(mount) => mount.umount_impl(flags),
             // This branch is needed because Rust does not consider & empty enum non-empty.
             #[cfg(fuser_mount_impl = "macos-no-mount")]
             _ => Ok(()),
-        }
+        }?;
+        self.unmounted = true;
+        Ok(())
     }
 
-    pub(crate) fn umount(mut self) -> io::Result<()> {
-        self.umount_impl()
+    pub(crate) fn umount(
+        mut self,
+        flags: &[UnmountOption],
+    ) -> Result<(), (Option<Self>, io::Error)> {
+        match unmount_options::check_option_conflicts(flags) {
+            Ok(()) => (),
+            Err(err) => return Err((Some(self), err)),
+        };
+        if let Err(err) = self.umount_impl(flags) {
+            let salvaged = match err.raw_os_error() {
+                Some(libc::EBUSY) => true,
+                Some(libc::EAGAIN) => true,
+                Some(libc::EFAULT) => false,
+                Some(libc::EINVAL) => false,
+                Some(libc::ENAMETOOLONG) => false,
+                Some(libc::ENOENT) => false,
+                Some(libc::ENOMEM) => true,
+                Some(libc::EPERM) => true,
+                _ => true,
+            };
+            return Err((salvaged.then_some(self), err));
+        }
+        Ok(())
     }
 }
 
 impl Drop for Mount {
     fn drop(&mut self) {
-        if let Err(err) = self.umount_impl() {
-            error!("Unmount failed: {}", err);
+        let drop_flags = {
+            // Detached unmounts allows the mount to be removed immediately while still allowing the filesystems'
+            // event loops to eventually terminate once the filesystem's reference count reaches zero.
+            #[cfg(target_os = "linux")]
+            {
+                &[UnmountOption::Detach]
+            }
+            #[cfg(target_os = "macos")]
+            {
+                &[UnmountOption::Force]
+            }
+            #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+            {
+                &[]
+            }
+        };
+        loop {
+            match self.umount_impl(drop_flags) {
+                Ok(()) => break,
+                Err(err) => {
+                    if err.raw_os_error() == Some(libc::EBUSY) {
+                        log::warn!("Unmount failed due to EBUSY, retrying...");
+                        std::thread::sleep(std::time::Duration::from_secs(1));
+                        continue;
+                    } else {
+                        error!("Unmount failed: {}", err);
+                        break;
+                    }
+                }
+            }
         }
     }
 }
 
 #[cfg_attr(fuser_mount_impl = "macos-no-mount", expect(dead_code))]
-fn libc_umount(mnt: &CStr) -> io::Result<()> {
+fn libc_umount(mnt: &CStr, flags: &[UnmountOption]) -> io::Result<()> {
+    let nix_flags =
+        nix::mount::MntFlags::from_bits_retain(unmount_options::to_unmount_syscall(flags));
     #[cfg(any(
         target_os = "macos",
         target_os = "freebsd",
@@ -127,7 +209,7 @@ fn libc_umount(mnt: &CStr) -> io::Result<()> {
         target_os = "netbsd"
     ))]
     {
-        nix::mount::unmount(mnt, nix::mount::MntFlags::empty())?;
+        nix::mount::unmount(mnt, nix_flags)?;
         Ok(())
     }
 
@@ -139,7 +221,7 @@ fn libc_umount(mnt: &CStr) -> io::Result<()> {
         target_os = "netbsd"
     )))]
     {
-        nix::mount::umount(mnt)?;
+        nix::mount::umount2(mnt, nix_flags)?;
         Ok(())
     }
 }

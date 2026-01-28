@@ -16,23 +16,16 @@ use super::fuse3_sys::fuse_session_fd;
 use super::fuse3_sys::fuse_session_mount;
 use super::fuse3_sys::fuse_session_new;
 use super::fuse3_sys::fuse_session_unmount;
+use super::unmount_options::UnmountOption;
 use super::with_fuse_args;
 use crate::dev_fuse::DevFuse;
-
-/// Ensures that an os error is never 0/Success
-fn ensure_last_os_error() -> io::Error {
-    let err = io::Error::last_os_error();
-    match err.raw_os_error() {
-        Some(0) => io::Error::new(io::ErrorKind::Other, "Unspecified Error"),
-        _ => err,
-    }
-}
 
 #[derive(Debug)]
 pub(crate) struct MountImpl {
     fuse_session: *mut c_void,
     mountpoint: CString,
 }
+
 impl MountImpl {
     pub(crate) fn new(
         mnt: &Path,
@@ -74,10 +67,10 @@ impl MountImpl {
         })
     }
 
-    pub(crate) fn umount_impl(&mut self) -> io::Result<()> {
+    pub(crate) fn umount_impl(&mut self, flags: &[UnmountOption]) -> io::Result<()> {
         use std::io::ErrorKind::PermissionDenied;
 
-        if let Err(err) = super::libc_umount(&self.mountpoint) {
+        if let Err(err) = super::libc_umount(&self.mountpoint, flags) {
             // Linux always returns EPERM for non-root users.  We have to let the
             // library go through the setuid-root "fusermount -u" to unmount.
             if err.kind() == PermissionDenied {
@@ -93,4 +86,5 @@ impl MountImpl {
         Ok(())
     }
 }
+
 unsafe impl Send for MountImpl {}

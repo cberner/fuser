@@ -3,6 +3,17 @@
 //! This is a small set of bindings that are required to mount/unmount FUSE filesystems and
 //! open/close a fd to the FUSE kernel driver.
 
+use log::debug;
+use log::error;
+use log::warn;
+use nix::fcntl::FcntlArg;
+use nix::fcntl::FdFlag;
+use nix::fcntl::OFlag;
+use nix::fcntl::fcntl;
+use nix::sys::socket::ControlMessageOwned;
+use nix::sys::socket::MsgFlags;
+use nix::sys::socket::SockaddrStorage;
+use nix::sys::socket::recvmsg;
 use std::ffi::CStr;
 use std::ffi::CString;
 use std::ffi::OsStr;
@@ -26,21 +37,12 @@ use std::process::Command;
 use std::process::Stdio;
 use std::sync::Arc;
 
-use log::debug;
-use log::error;
-use nix::fcntl::FcntlArg;
-use nix::fcntl::FdFlag;
-use nix::fcntl::OFlag;
-use nix::fcntl::fcntl;
-use nix::sys::socket::ControlMessageOwned;
-use nix::sys::socket::MsgFlags;
-use nix::sys::socket::SockaddrStorage;
-use nix::sys::socket::recvmsg;
-
 use super::is_mounted;
 use super::mount_options::MountOption;
 use super::mount_options::option_to_string;
+use super::unmount_options;
 use crate::dev_fuse::DevFuse;
+use crate::mnt::unmount_options::UnmountOption;
 
 const FUSERMOUNT_BIN: &str = "fusermount";
 const FUSERMOUNT3_BIN: &str = "fusermount3";
@@ -53,6 +55,7 @@ pub(crate) struct MountImpl {
     auto_unmount_socket: Option<UnixStream>,
     fuse_device: Arc<DevFuse>,
 }
+
 impl MountImpl {
     pub(crate) fn new(
         mountpoint: &Path,
@@ -71,24 +74,24 @@ impl MountImpl {
         ))
     }
 
-    pub(crate) fn umount_impl(&mut self) -> io::Result<()> {
+    pub(crate) fn umount_impl(&mut self, flags: &[UnmountOption]) -> io::Result<()> {
         if !is_mounted(&self.fuse_device) {
             // If the filesystem has already been unmounted, avoid unmounting it again.
             // Unmounting it a second time could cause a race with a newly mounted filesystem
             // living at the same mountpoint
             return Ok(());
         }
-        if let Some(sock) = mem::take(&mut self.auto_unmount_socket) {
-            drop(sock);
-            // fusermount in auto-unmount mode, no more work to do.
-            return Ok(());
-        }
-        if let Err(err) = super::libc_umount(&self.mountpoint) {
+        // FIXME: removing unmount socket affects the unmounting process.
+        // if let Some(sock) = mem::take(&mut self.auto_unmount_socket) {
+        //     drop(sock);
+        //     // fusermount in auto-unmount mode, no more work to do.
+        //     return Ok(());
+        // }
+        if let Err(err) = super::libc_umount(&self.mountpoint, flags) {
             if err.kind() == ErrorKind::PermissionDenied {
                 // Linux always returns EPERM for non-root users.  We have to let the
                 // library go through the setuid-root "fusermount -u" to unmount.
-                fuse_unmount_pure(&self.mountpoint);
-                return Ok(());
+                fuse_unmount_pure(&self.mountpoint, flags)?;
             } else {
                 return Err(err);
             }
@@ -122,32 +125,50 @@ fn fuse_mount_pure(
     fuse_mount_fusermount(mountpoint, options)
 }
 
-fn fuse_unmount_pure(mountpoint: &CStr) {
+fn fuse_unmount_pure(mountpoint: &CStr, flags: &[UnmountOption]) -> Result<(), io::Error> {
+    let nix_flags =
+        nix::mount::MntFlags::from_bits_retain(unmount_options::to_unmount_syscall(flags));
     #[cfg(target_os = "linux")]
-    {
-        if nix::mount::umount2(mountpoint, nix::mount::MntFlags::MNT_DETACH).is_ok() {
-            return;
-        }
+    match nix::mount::umount2(mountpoint, nix_flags) {
+        Ok(()) => return Ok(()),
+        Err(e) if e == nix::errno::Errno::EPERM => {}
+        Err(e) => return Err(e.into()),
     }
     #[cfg(target_os = "macos")]
-    {
-        if nix::mount::unmount(mountpoint, nix::mount::MntFlags::MNT_FORCE).is_ok() {
-            return;
-        }
+    match nix::mount::unmount(mountpoint, nix_flags) {
+        Ok(()) => return Ok(()),
+        Err(e) if e == nix::errno::Errno::EPERM => {}
+        Err(e) => return Err(e.into()),
     }
-
     let mut builder = Command::new(detect_fusermount_bin());
     builder.stdout(Stdio::piped()).stderr(Stdio::piped());
+    builder.arg("-u").arg("-q");
+    for flag in flags {
+        if let Some(cmd_arg) = unmount_options::to_fusermount_option(flag) {
+            builder.arg(cmd_arg);
+        }
+    }
     builder
-        .arg("-u")
-        .arg("-q")
-        .arg("-z")
         .arg("--")
         .arg(OsStr::new(&mountpoint.to_string_lossy().into_owned()));
-
-    if let Ok(output) = builder.output() {
-        debug!("fusermount: {}", String::from_utf8_lossy(&output.stdout));
-        debug!("fusermount: {}", String::from_utf8_lossy(&output.stderr));
+    match builder.output() {
+        Ok(output) => {
+            debug!("fusermount: {}", String::from_utf8_lossy(&output.stdout));
+            debug!("fusermount: {}", String::from_utf8_lossy(&output.stderr));
+            if output.status.success() {
+                return Ok(());
+            } else {
+                warn!(
+                    "fusermount failed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                // FIXME: fusermount does not return the actual unmount error code in the process
+                // (e.g. should the `umount2` call in `fusermount` return `EBUSY`, we should
+                // return `EBUSY` here)
+                Err(io::Error::from_raw_os_error(libc::EIO))
+            }
+        }
+        Err(e) => Err(e),
     }
 }
 

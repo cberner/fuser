@@ -1,9 +1,8 @@
 fn main() {
     // Register rustc cfg for switching between mount implementations.
     println!(
-        "cargo::rustc-check-cfg=cfg(fuser_mount_impl, values(\"pure-rust\", \"libfuse2\", \"libfuse3\", \"macos-no-mount\"))"
+        "cargo::rustc-check-cfg=cfg(fuser_mount_impl, values(\"pure-rust\", \"libfuse2\", \"libfuse3\", \"macos-no-mount\", \"internal-no-mount\"))"
     );
-
     let target_os =
         std::env::var("CARGO_CFG_TARGET_OS").expect("CARGO_CFG_TARGET_OS should be set");
 

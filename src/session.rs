@@ -34,6 +34,7 @@ use crate::KernelConfig;
 use crate::MountOption;
 use crate::ReplyEmpty;
 use crate::Request;
+use crate::UnmountOption;
 use crate::channel::Channel;
 use crate::channel::ChannelSender;
 use crate::dev_fuse::DevFuse;
@@ -383,9 +384,15 @@ impl<FS: Filesystem> Session<FS> {
     }
 
     /// Unmount the filesystem
-    pub fn unmount(&mut self) -> io::Result<()> {
-        if let Some((_path, mount)) = std::mem::take(&mut *self.mount.lock()) {
-            mount.umount()?;
+    pub fn unmount(&mut self, flags: &[UnmountOption]) -> io::Result<()> {
+        let mut guard = self.mount.lock();
+        if let Some((path, mount)) = guard.take() {
+            if let Err((salvaged, error)) = mount.umount(flags) {
+                if let Some(salvaged) = salvaged {
+                    *guard = Some((path, salvaged));
+                }
+                return Err(error);
+            }
         }
         Ok(())
     }
@@ -411,9 +418,15 @@ pub struct SessionUnmounter {
 
 impl SessionUnmounter {
     /// Unmount the filesystem
-    pub fn unmount(&mut self) -> io::Result<()> {
-        if let Some((_path, mount)) = std::mem::take(&mut *self.mount.lock()) {
-            mount.umount()?;
+    pub fn unmount(&mut self, flags: &[UnmountOption]) -> io::Result<()> {
+        let mut guard = self.mount.lock();
+        if let Some((path, mount)) = guard.take() {
+            if let Err((salvaged, error)) = mount.umount(flags) {
+                if let Some(salvaged) = salvaged {
+                    *guard = Some((path, salvaged));
+                }
+                return Err(error);
+            }
         }
         Ok(())
     }
@@ -453,23 +466,45 @@ pub struct BackgroundSession {
 
 impl BackgroundSession {
     /// Unmount the filesystem and join the background thread.
-    pub fn umount_and_join(self) -> io::Result<()> {
-        let Self {
-            guard,
-            sender: _,
-            mount,
-        } = self;
-        if let Some(mount) = mount {
-            mount.umount()?;
+    ///
+    /// # Returns
+    /// - `Ok(())` if the background thread joined successfully
+    /// - `Err(Some<Self>, io::Error)` if the unmount operation failed. The session is salvaged and returned to the caller
+    /// - `Err(None, io::Error)` if the background thread returns an error for any reason.
+    ///
+    /// # Panics
+    /// Panics if the background thread can't be recovered (e.g., because it panicked).
+    pub fn umount_and_join(
+        mut self,
+        flags: &[UnmountOption],
+    ) -> Result<(), (Option<Self>, io::Error)> {
+        if let Some(mount) = self.mount.take() {
+            if let Err((mount, e)) = mount.umount(flags) {
+                // Return the mount and error to the object and to retry unmounting at another time if it exists
+                self.mount = mount;
+                match &self.mount {
+                    Some(_) => {
+                        return Err((Some(self), e));
+                    }
+                    None => {
+                        return Err((None, e));
+                    }
+                }
+            }
         }
-        guard
+        self.guard
             .join()
             .map_err(|_panic: Box<dyn std::any::Any + Send>| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    "filesystem background thread panicked",
+                (
+                    None,
+                    io::Error::new(
+                        io::ErrorKind::Other,
+                        "filesystem background thread panicked",
+                    ),
                 )
             })?
+            .map_err(|e| (None, e))?;
+        Ok(())
     }
 
     /// Returns an object that can be used to send notifications to the kernel
