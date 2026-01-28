@@ -54,7 +54,7 @@ mount_tests:
 	 -v "$(shell pwd)/docker-cargo-caches/target:/code/fuser/target" \
 	 -v "$(shell pwd)/docker-cargo-caches/git:/root/.cargo/git" \
 	 -v "$(shell pwd)/docker-cargo-caches/registry:/root/.cargo/registry" \
-	 fuser:mount_tests bash -c "cd /code/fuser && bash ./mount_tests.sh"
+	 fuser:mount_tests bash -c "cd /code/fuser && cargo run -p fuser-tests -- mount"
 	docker run --rm -$(INTERACTIVE)t --cap-add SYS_ADMIN --device /dev/fuse --security-opt apparmor:unconfined \
 	 -v "$(shell pwd)/docker-cargo-caches/target:/code/fuser/target" \
 	 -v "$(shell pwd)/docker-cargo-caches/git:/root/.cargo/git" \
