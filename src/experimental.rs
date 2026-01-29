@@ -185,7 +185,9 @@ impl<T: AsyncFilesystem + Send + Sync + 'static> Filesystem for TokioAdapter<T> 
         self.runtime.spawn(async move {
             let mut buf = vec![];
             match inner
-                .read(&context, ino, fh, offset, size, read_flags, flags, lock_owner, &mut buf)
+                .read(
+                    &context, ino, fh, offset, size, read_flags, flags, lock_owner, &mut buf,
+                )
                 .await
             {
                 Ok(()) => reply.data(&buf),
