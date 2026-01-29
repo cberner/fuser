@@ -12,7 +12,6 @@ use std::os::fd::AsFd;
 use std::os::fd::BorrowedFd;
 use std::os::fd::OwnedFd;
 use std::path::Path;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::thread::{self};
@@ -24,6 +23,7 @@ use libc::ENOENT;
 use log::debug;
 use log::error;
 use log::info;
+use log::warn;
 use nix::unistd::Uid;
 use nix::unistd::geteuid;
 use parking_lot::Mutex;
@@ -79,7 +79,7 @@ pub struct Session<FS: Filesystem> {
     /// Communication channel to the kernel driver
     pub(crate) ch: Channel,
     /// Handle to the mount.  Dropping this unmounts.
-    mount: Arc<Mutex<Option<(PathBuf, Mount)>>>,
+    mount: Arc<Mutex<Option<Mount>>>,
     /// Whether to restrict access to owner, root + owner, or unrestricted
     /// Used to implement `allow_root` and `auto_unmount`
     pub(crate) allowed: SessionACL,
@@ -132,7 +132,7 @@ impl<FS: Filesystem> Session<FS> {
         Ok(Session {
             filesystem: Some(filesystem),
             ch,
-            mount: Arc::new(Mutex::new(Some((mountpoint.to_owned(), mount)))),
+            mount: Arc::new(Mutex::new(Some(mount))),
             allowed,
             session_owner: geteuid(),
             proto_version: None,
@@ -158,7 +158,7 @@ impl<FS: Filesystem> Session<FS> {
     pub fn spawn(self) -> io::Result<BackgroundSession> {
         let sender = self.ch.sender();
         // Take the fuse_session, so that we can unmount it
-        let mount = std::mem::take(&mut *self.mount.lock()).map(|(_, mount)| mount);
+        let mount = std::mem::take(&mut *self.mount.lock());
         let guard = thread::spawn(move || self.run());
         Ok(BackgroundSession {
             guard,
@@ -384,7 +384,7 @@ impl<FS: Filesystem> Session<FS> {
 
     /// Unmount the filesystem
     pub fn unmount(&mut self) -> io::Result<()> {
-        if let Some((_path, mount)) = std::mem::take(&mut *self.mount.lock()) {
+        if let Some(mount) = std::mem::take(&mut *self.mount.lock()) {
             mount.umount()?;
         }
         Ok(())
@@ -406,13 +406,13 @@ impl<FS: Filesystem> Session<FS> {
 #[derive(Debug)]
 /// A thread-safe object that can be used to unmount a Filesystem
 pub struct SessionUnmounter {
-    mount: Arc<Mutex<Option<(PathBuf, Mount)>>>,
+    mount: Arc<Mutex<Option<Mount>>>,
 }
 
 impl SessionUnmounter {
     /// Unmount the filesystem
     pub fn unmount(&mut self) -> io::Result<()> {
-        if let Some((_path, mount)) = std::mem::take(&mut *self.mount.lock()) {
+        if let Some(mount) = std::mem::take(&mut *self.mount.lock()) {
             mount.umount()?;
         }
         Ok(())
@@ -434,8 +434,10 @@ impl<FS: Filesystem> Drop for Session<FS> {
             filesystem.destroy();
         }
 
-        if let Some((mountpoint, _mount)) = std::mem::take(&mut *self.mount.lock()) {
-            info!("unmounting session at {}", mountpoint.display());
+        if let Some(mount) = std::mem::take(&mut *self.mount.lock()) {
+            if let Err(e) = mount.umount() {
+                warn!("Unmount failed: {e}");
+            }
         }
     }
 }

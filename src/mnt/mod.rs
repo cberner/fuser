@@ -19,6 +19,7 @@ use std::io;
 
 #[cfg(any(test, fuser_mount_impl = "libfuse2", fuser_mount_impl = "libfuse3"))]
 use fuse2_sys::fuse_args;
+use log::info;
 use log::warn;
 use mount_options::MountOption;
 
@@ -49,6 +50,7 @@ fn with_fuse_args<T, F: FnOnce(&fuse_args) -> T>(options: &[MountOption], f: F) 
 
 use std::ffi::CStr;
 use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 #[derive(Debug)]
@@ -78,7 +80,10 @@ impl MountImpl {
 }
 
 #[derive(Debug)]
-pub(crate) struct Mount(Option<MountImpl>);
+pub(crate) struct Mount {
+    mount_impl: Option<MountImpl>,
+    mount_point: PathBuf,
+}
 
 impl Mount {
     pub(crate) fn new(
@@ -88,17 +93,35 @@ impl Mount {
         #[cfg(fuser_mount_impl = "pure-rust")]
         {
             let (dev_fuse, mount) = fuse_pure::MountImpl::new(mountpoint, options)?;
-            Ok((dev_fuse, Mount(Some(MountImpl::Pure(mount)))))
+            Ok((
+                dev_fuse,
+                Mount {
+                    mount_impl: Some(MountImpl::Pure(mount)),
+                    mount_point: mountpoint.to_path_buf(),
+                },
+            ))
         }
         #[cfg(fuser_mount_impl = "libfuse2")]
         {
             let (dev_fuse, mount) = fuse2::MountImpl::new(mountpoint, options)?;
-            Ok((dev_fuse, Mount(Some(MountImpl::Fuse2(mount)))))
+            Ok((
+                dev_fuse,
+                Mount {
+                    mount_impl: Some(MountImpl::Fuse2(mount)),
+                    mount_point: mountpoint.to_path_buf(),
+                },
+            ))
         }
         #[cfg(fuser_mount_impl = "libfuse3")]
         {
             let (dev_fuse, mount) = fuse3::MountImpl::new(mountpoint, options)?;
-            Ok((dev_fuse, Mount(Some(MountImpl::Fuse3(mount)))))
+            Ok((
+                dev_fuse,
+                Mount {
+                    mount_impl: Some(MountImpl::Fuse3(mount)),
+                    mount_point: mountpoint.to_path_buf(),
+                },
+            ))
         }
         #[cfg(fuser_mount_impl = "macos-no-mount")]
         {
@@ -110,8 +133,11 @@ impl Mount {
     }
 
     pub(crate) fn umount(mut self) -> io::Result<()> {
-        match self.0.take() {
-            Some(mut mount) => mount.umount_impl(),
+        match self.mount_impl.take() {
+            Some(mut mount) => {
+                info!("Unmounting {}", self.mount_point.display());
+                mount.umount_impl()
+            }
             None => Ok(()),
         }
     }
@@ -119,7 +145,7 @@ impl Mount {
 
 impl Drop for Mount {
     fn drop(&mut self) {
-        if let Some(mut mount) = self.0.take() {
+        if let Some(mut mount) = self.mount_impl.take() {
             if let Err(err) = mount.umount_impl() {
                 // This is not necessarily an error: may happen if a user called 'umount'.
                 warn!("Unmount failed: {}", err);
