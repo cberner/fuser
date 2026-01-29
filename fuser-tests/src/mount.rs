@@ -44,15 +44,15 @@ pub(crate) async fn run_mount_tests() -> anyhow::Result<()> {
     apt_install(&["libfuse-dev", "pkg-config", "fuse"]).await?;
     write_user_allow_other().await?;
 
-    run_test("libfuse", "with libfuse", Unmount::Manual).await?;
-    run_test("libfuse", "with libfuse", Unmount::Auto).await?;
+    run_test("libfuse2", "with libfuse", Unmount::Manual).await?;
+    run_test("libfuse2", "with libfuse", Unmount::Auto).await?;
 
     apt_remove(&["libfuse-dev", "fuse"]).await?;
     apt_install(&["libfuse3-dev", "fuse3"]).await?;
     write_user_allow_other().await?;
 
-    run_test("libfuse,abi-7-30", "with libfuse3", Unmount::Manual).await?;
-    run_test("libfuse,abi-7-30", "with libfuse3", Unmount::Auto).await?;
+    run_test("libfuse3", "with libfuse3", Unmount::Manual).await?;
+    run_test("libfuse3", "with libfuse3", Unmount::Auto).await?;
 
     run_allow_root_test().await?;
 
@@ -273,15 +273,14 @@ async fn run_allow_root_test() -> anyhow::Result<()> {
     let mount_dir = run_as_user("fusertest1", "mktemp --directory").await?;
     eprintln!("Mount dir: {}", mount_dir);
 
-    // Build the hello example with libfuse and abi-7-30
-    eprintln!("Building hello example with libfuse,abi-7-30...");
+    eprintln!("Building hello example with libfuse3...");
     command_success([
         "cargo",
         "build",
         "--example",
         "hello",
         "--features",
-        "libfuse,abi-7-30",
+        "libfuse3",
     ])
     .await?;
 
