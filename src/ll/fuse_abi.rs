@@ -628,10 +628,8 @@ pub(crate) struct fuse_notify_poll_wakeup_out {
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
 pub(crate) struct fuse_fallocate_in {
     pub(crate) fh: u64,
-    // NOTE: this field is defined as u64 in fuse_kernel.h in libfuse. However, it is treated as signed
-    pub(crate) offset: i64,
-    // NOTE: this field is defined as u64 in fuse_kernel.h in libfuse. However, it is treated as signed
-    pub(crate) length: i64,
+    pub(crate) offset: u64,
+    pub(crate) length: u64,
     // NOTE: this field is defined as u32 in fuse_kernel.h in libfuse. However, it is treated as signed
     pub(crate) mode: i32,
     pub(crate) padding: u32,

@@ -465,8 +465,8 @@ impl<'a> RequestWithSender<'a> {
                     self.request_header(),
                     self.request.nodeid(),
                     x.file_handle(),
-                    x.offset(),
-                    x.len(),
+                    x.offset()?,
+                    x.len()?,
                     x.mode(),
                     self.reply(),
                 );
