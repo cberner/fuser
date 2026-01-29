@@ -3,8 +3,12 @@
 mod ansi;
 mod apt;
 mod command_utils;
+mod experimental;
+mod fuse_conf;
 mod mount;
 mod simple;
+mod unmount;
+mod users;
 
 use anyhow::bail;
 use clap::Parser;
@@ -19,6 +23,8 @@ struct FuserTests {
 
 #[derive(Subcommand)]
 enum FuserCommand {
+    /// Run experimental mount tests.
+    Experimental,
     /// Run mount tests.
     Mount,
     /// Run simple filesystem tests.
@@ -40,6 +46,7 @@ async fn main() -> anyhow::Result<()> {
 async fn main_inner() -> anyhow::Result<()> {
     let FuserTests { command } = FuserTests::parse();
     match command {
+        FuserCommand::Experimental => experimental::run_experimental_tests().await?,
         FuserCommand::Mount => mount::run_mount_tests().await?,
         FuserCommand::Simple => simple::run_simple_tests().await?,
     }
