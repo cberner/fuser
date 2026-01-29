@@ -264,11 +264,25 @@ impl<'a> Response<'a> {
 pub(crate) fn time_from_system_time(system_time: &SystemTime) -> (i64, u32) {
     // Convert to signed 64-bit time with epoch at 0
     match system_time.duration_since(UNIX_EPOCH) {
-        Ok(duration) => (duration.as_secs() as i64, duration.subsec_nanos()),
-        Err(before_epoch_error) => (
-            -(before_epoch_error.duration().as_secs() as i64),
-            before_epoch_error.duration().subsec_nanos(),
-        ),
+        Ok(duration) => match i64::try_from(duration.as_secs()) {
+            Ok(secs) => (secs, duration.subsec_nanos()),
+            Err(_) => (i64::MAX, 999_999_999),
+        },
+        Err(before_epoch_error) => {
+            let d = before_epoch_error.duration();
+            let secs = d.as_secs();
+            let nanos = d.subsec_nanos();
+
+            // Minus min representable value.
+            if (secs, nanos) >= (i64::MAX as u64 + 1, 0) {
+                // Saturate.
+                (i64::MIN, 0)
+            } else if nanos == 0 {
+                (-(secs as i64), 0)
+            } else {
+                (-(secs as i64) - 1, 1_000_000_000 - nanos)
+            }
+        }
     }
 }
 // Some platforms like Linux x86_64 have mode_t = u32, and lint warns of a trivial_numeric_casts.
@@ -883,5 +897,28 @@ mod test {
             r.with_iovec(RequestId(0xdeadbeef), ioslice_to_vec),
             expected
         );
+    }
+
+    #[test]
+    fn test_time_from_system_time_negative() {
+        let before_epoch = UNIX_EPOCH - Duration::new(1, 200_000_000);
+        let (secs, nanos) = time_from_system_time(&before_epoch);
+        assert_eq!((-2, 800_000_000), (secs, nanos));
+    }
+
+    #[test]
+    fn test_time_from_system_time_i64_min_boundary() {
+        // timespec { tv_sec: i64::MIN, tv_nsec: 0 }
+        let min_system_time = UNIX_EPOCH - Duration::new(i64::MAX as u64 + 1, 0);
+        let (secs, nanos) = time_from_system_time(&min_system_time);
+        assert_eq!((i64::MIN, 0), (secs, nanos));
+
+        let min_system_time_plus_eps = UNIX_EPOCH - Duration::new(i64::MAX as u64, 800_000_000);
+        let (secs, nanos) = time_from_system_time(&min_system_time_plus_eps);
+        assert_eq!((i64::MIN, 200_000_000), (secs, nanos));
+
+        let min_system_time_plus_one = UNIX_EPOCH - Duration::new(i64::MAX as u64, 0);
+        let (secs, nanos) = time_from_system_time(&min_system_time_plus_one);
+        assert_eq!((i64::MIN + 1, 0), (secs, nanos));
     }
 }
