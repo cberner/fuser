@@ -955,8 +955,8 @@ pub trait Filesystem: Send + Sync + 'static {
         _req: &Request,
         ino: INodeNo,
         fh: FileHandle,
-        offset: i64,
-        length: i64,
+        offset: u64,
+        length: u64,
         mode: i32,
         reply: ReplyEmpty,
     ) {
