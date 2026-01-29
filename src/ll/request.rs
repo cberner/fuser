@@ -10,6 +10,7 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::path::Path;
 
+use log::warn;
 use nix::unistd::Gid;
 use nix::unistd::Pid;
 use nix::unistd::Uid;
@@ -18,6 +19,7 @@ use serde::Deserialize;
 #[cfg(feature = "serializable")]
 use serde::Serialize;
 
+use crate::Errno;
 use crate::ll::argument::ArgumentIterator;
 use crate::ll::fuse_abi as abi;
 use crate::ll::fuse_abi::fuse_in_header;
@@ -222,6 +224,16 @@ impl fmt::Display for RequestError {
 
 impl error::Error for RequestError {}
 
+fn validate_off_t(name: &'static str, value: u64) -> Result<(), Errno> {
+    // Value is unsigned, and libfuse silently casts it to signed `off_t`.
+    // The value is supposed to be in range `0..=i64::MAX`, so validate.
+    if value > i64::MAX as u64 {
+        warn!("{name}={value} is out of range");
+        return Err(Errno::EINVAL);
+    }
+    Ok(())
+}
+
 mod op {
     use std::cmp;
     use std::convert::TryInto;
@@ -233,7 +245,6 @@ mod op {
     use std::time::Duration;
     use std::time::SystemTime;
 
-    use log::warn;
     use zerocopy::FromZeros;
     use zerocopy::IntoBytes;
 
@@ -264,6 +275,7 @@ mod op {
     use crate::ll::request::Operation;
     use crate::ll::request::RequestId;
     use crate::ll::request::abi::*;
+    use crate::ll::request::validate_off_t;
 
     /// Look up a directory entry by name and get its attributes.
     ///
@@ -671,15 +683,7 @@ mod op {
             FileHandle(self.arg.fh)
         }
         pub(crate) fn offset(&self) -> Result<u64, Errno> {
-            // `offset` is unsigned, and libfuse silently casts it to signed `off_t`.
-            // The value is supposed to be in range `0..=i64::MAX`, so validate.
-            if self.arg.offset > i64::MAX as u64 {
-                warn!(
-                    "fuse_read_in.arg.offset {} is out of range",
-                    self.arg.offset
-                );
-                return Err(Errno::EINVAL);
-            }
+            validate_off_t("fuse_read_in.arg.offset", self.arg.offset)?;
             Ok(self.arg.offset)
         }
         pub(crate) fn size(&self) -> u32 {
@@ -1416,11 +1420,13 @@ mod op {
         pub(crate) fn file_handle(&self) -> FileHandle {
             FileHandle(self.arg.fh)
         }
-        pub(crate) fn offset(&self) -> i64 {
-            self.arg.offset
+        pub(crate) fn offset(&self) -> Result<u64, Errno> {
+            validate_off_t("fuse_allocate_in.arg.offset", self.arg.offset)?;
+            Ok(self.arg.offset)
         }
-        pub(crate) fn len(&self) -> i64 {
-            self.arg.length
+        pub(crate) fn len(&self) -> Result<u64, Errno> {
+            validate_off_t("fuse_allocate_in.arg.length", self.arg.length)?;
+            Ok(self.arg.length)
         }
         /// `mode` as passed to fallocate.  See `man 2 fallocate`
         pub(crate) fn mode(&self) -> i32 {

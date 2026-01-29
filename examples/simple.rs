@@ -1900,8 +1900,8 @@ impl Filesystem for SimpleFS {
         _req: &Request,
         ino: INodeNo,
         _fh: FileHandle,
-        offset: i64,
-        length: i64,
+        offset: u64,
+        length: u64,
         mode: i32,
         reply: ReplyEmpty,
     ) {
@@ -1909,13 +1909,13 @@ impl Filesystem for SimpleFS {
         match OpenOptions::new().write(true).open(path) {
             Ok(file) => {
                 unsafe {
-                    libc::fallocate64(file.into_raw_fd(), mode, offset, length);
+                    libc::fallocate64(file.into_raw_fd(), mode, offset as i64, length as i64);
                 }
                 if mode & libc::FALLOC_FL_KEEP_SIZE == 0 {
                     let mut attrs = self.get_inode(ino).unwrap();
                     attrs.last_metadata_changed = time_now();
                     attrs.last_modified = time_now();
-                    if (offset + length) as u64 > attrs.size {
+                    if offset + length > attrs.size {
                         attrs.size = (offset + length) as u64;
                     }
                     self.write_inode(&attrs);
