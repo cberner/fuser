@@ -59,7 +59,7 @@ mount_tests:
 	 -v "$(shell pwd)/docker-cargo-caches/target:/code/fuser/target" \
 	 -v "$(shell pwd)/docker-cargo-caches/git:/root/.cargo/git" \
 	 -v "$(shell pwd)/docker-cargo-caches/registry:/root/.cargo/registry" \
-	 fuser:mount_tests bash -c "cd /code/fuser && bash ./tests/experimental_mount_tests.sh"
+	 fuser:mount_tests bash -c "cd /code/fuser && cargo run -p fuser-tests -- experimental"
 
 test_passthrough:
 	cargo build --example passthrough

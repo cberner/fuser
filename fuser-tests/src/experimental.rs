@@ -1,4 +1,4 @@
-//! Main mount tests
+//! Experimental mount tests
 
 use std::time::Duration;
 use std::time::Instant;
@@ -21,40 +21,60 @@ use crate::users::run_as_user;
 use crate::users::run_as_user_status;
 use crate::users::useradd;
 
-pub(crate) async fn run_mount_tests() -> anyhow::Result<()> {
+pub(crate) async fn run_experimental_tests() -> anyhow::Result<()> {
     apt_update().await?;
     apt_install(&["fuse"]).await?;
     fuse_conf_write_user_allow_other().await?;
 
-    run_test("", "without libfuse, with fusermount", Unmount::Manual).await?;
-    run_test("", "without libfuse, with fusermount", Unmount::Auto).await?;
+    run_test(
+        "experimental",
+        "without libfuse, with fusermount",
+        Unmount::Manual,
+    )
+    .await?;
+    run_test(
+        "experimental",
+        "without libfuse, with fusermount",
+        Unmount::Auto,
+    )
+    .await?;
     test_no_user_allow_other("", "without libfuse, with fusermount").await?;
 
     apt_remove(&["fuse"]).await?;
     apt_install(&["fuse3"]).await?;
     fuse_conf_write_user_allow_other().await?;
 
-    run_test("", "without libfuse, with fusermount3", Unmount::Manual).await?;
-    run_test("", "without libfuse, with fusermount3", Unmount::Auto).await?;
+    run_test(
+        "experimental",
+        "without libfuse, with fusermount3",
+        Unmount::Manual,
+    )
+    .await?;
+    run_test(
+        "experimental",
+        "without libfuse, with fusermount3",
+        Unmount::Auto,
+    )
+    .await?;
     test_no_user_allow_other("", "without libfuse, with fusermount3").await?;
 
     apt_remove(&["fuse3"]).await?;
     apt_install(&["libfuse-dev", "pkg-config", "fuse"]).await?;
     fuse_conf_write_user_allow_other().await?;
 
-    run_test("libfuse", "with libfuse", Unmount::Manual).await?;
-    run_test("libfuse", "with libfuse", Unmount::Auto).await?;
+    run_test("libfuse2,experimental", "with libfuse", Unmount::Manual).await?;
+    run_test("libfuse2,experimental", "with libfuse", Unmount::Auto).await?;
 
     apt_remove(&["libfuse-dev", "fuse"]).await?;
     apt_install(&["libfuse3-dev", "fuse3"]).await?;
     fuse_conf_write_user_allow_other().await?;
 
-    run_test("libfuse,abi-7-30", "with libfuse3", Unmount::Manual).await?;
-    run_test("libfuse,abi-7-30", "with libfuse3", Unmount::Auto).await?;
+    run_test("libfuse3,experimental", "with libfuse3", Unmount::Manual).await?;
+    run_test("libfuse3,experimental", "with libfuse3", Unmount::Auto).await?;
 
     run_allow_root_test().await?;
 
-    green!("All mount tests passed!");
+    green!("All experimental mount tests passed!");
     Ok(())
 }
 
@@ -70,18 +90,18 @@ async fn run_test(features: &str, description: &str, unmount: Unmount) -> anyhow
 
     eprintln!("Mount dir: {}", mount_path);
 
-    // Build the hello example
-    eprintln!("Building hello example...");
-    let mut build_args = vec!["cargo", "build", "--example", "hello"];
+    // Build the async_hello example
+    eprintln!("Building async_hello example...");
+    let mut build_args = vec!["cargo", "build", "--example", "async_hello"];
     if !features.is_empty() {
         build_args.push("--features");
         build_args.push(features);
     }
     command_success(build_args).await?;
 
-    // Run the hello example
-    eprintln!("Starting hello filesystem...");
-    let mut run_args = vec!["run", "--example", "hello"];
+    // Run the async_hello example
+    eprintln!("Starting async_hello filesystem...");
+    let mut run_args = vec!["run", "--example", "async_hello"];
     if !features.is_empty() {
         run_args.push("--features");
         run_args.push(features);
@@ -96,7 +116,7 @@ async fn run_test(features: &str, description: &str, unmount: Unmount) -> anyhow
         .args(&run_args)
         .kill_on_drop(true)
         .spawn()
-        .context("Failed to start hello example")?;
+        .context("Failed to start async_hello example")?;
 
     // Wait for mount to be ready
     eprintln!("Waiting for mount...");
@@ -225,25 +245,28 @@ async fn run_allow_root_test() -> anyhow::Result<()> {
     let mount_dir = run_as_user("fusertest1", "mktemp --directory").await?;
     eprintln!("Mount dir: {}", mount_dir);
 
-    // Build the hello example with libfuse and abi-7-30
-    eprintln!("Building hello example with libfuse,abi-7-30...");
+    // Build the async_hello example with libfuse3 and experimental
+    eprintln!("Building async_hello example with libfuse3,experimental...");
     command_success([
         "cargo",
         "build",
         "--example",
-        "hello",
+        "async_hello",
         "--features",
-        "libfuse,abi-7-30",
+        "libfuse3,experimental",
     ])
     .await?;
 
-    // Run the hello example as fusertest1 with --allow-root
-    let run_command = format!("target/debug/examples/hello {} --allow-root", mount_dir);
+    // Run the async_hello example as fusertest1 with --allow-root
+    let run_command = format!(
+        "target/debug/examples/async_hello {} --allow-root",
+        mount_dir
+    );
     let mut fuse_process = Command::new("su")
         .args(["fusertest1", "-c", &run_command])
         .kill_on_drop(true)
         .spawn()
-        .context("Failed to start hello example")?;
+        .context("Failed to start async_hello example")?;
 
     // Wait for mount to be ready
     eprintln!("Waiting for mount...");
