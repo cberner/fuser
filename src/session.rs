@@ -171,14 +171,9 @@ impl<FS: Filesystem> Session<FS> {
     /// # Errors
     /// Returns any final error when the session comes to an end.
     pub(crate) fn run(mut self) -> io::Result<()> {
-        // Buffer for receiving requests from the kernel. Only one is allocated and
-        // it is reused immediately after dispatching to conserve memory and allocations.
-        let mut buf = FuseReadBuf::new();
-        let buf = buf.as_mut();
+        self.handshake()?;
 
-        self.handshake(buf)?;
-
-        let ret = self.event_loop(buf);
+        let ret = self.event_loop();
 
         if let Some(mut filesystem) = self.filesystem.take() {
             filesystem.destroy();
@@ -195,7 +190,12 @@ impl<FS: Filesystem> Session<FS> {
     }
 
     /// Return `Some` if reply to `FUSE_DESTROY` needs to be sent.
-    fn event_loop(&self, buf: &mut [u8]) -> io::Result<Option<ReplyEmpty>> {
+    fn event_loop(&self) -> io::Result<Option<ReplyEmpty>> {
+        // Buffer for receiving requests from the kernel. Only one is allocated and
+        // it is reused immediately after dispatching to conserve memory and allocations.
+        let mut buf = FuseReadBuf::new();
+        let buf = buf.as_mut();
+
         loop {
             // Read the next request from the given channel to kernel driver
             // The kernel driver makes sure that we get exactly one request per read
@@ -231,7 +231,10 @@ impl<FS: Filesystem> Session<FS> {
         }
     }
 
-    fn handshake(&mut self, buf: &mut [u8]) -> io::Result<()> {
+    fn handshake(&mut self) -> io::Result<()> {
+        let mut buf = FuseReadBuf::new();
+        let buf = buf.as_mut();
+
         loop {
             // Read the init request from the kernel
             let size = match self.ch.receive(buf) {
