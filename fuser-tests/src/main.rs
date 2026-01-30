@@ -4,6 +4,7 @@ mod ansi;
 mod apt;
 mod command_utils;
 mod experimental;
+mod features;
 mod fuse_conf;
 mod mount;
 mod simple;
