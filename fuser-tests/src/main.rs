@@ -7,6 +7,7 @@ mod command_utils;
 mod experimental;
 mod features;
 mod fuse_conf;
+mod fusermount;
 mod mount;
 mod simple;
 mod unmount;

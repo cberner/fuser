@@ -18,6 +18,7 @@ use crate::command_utils::command_success;
 use crate::features::Feature;
 use crate::fuse_conf::fuse_conf_remove_user_allow_other;
 use crate::fuse_conf::fuse_conf_write_user_allow_other;
+use crate::fusermount::Fusermount;
 use crate::unmount::Unmount;
 use crate::users::run_as_user;
 use crate::users::run_as_user_status;
@@ -31,12 +32,14 @@ pub(crate) async fn run_experimental_tests() -> anyhow::Result<()> {
         &[Feature::Experimental],
         "without libfuse, with fusermount",
         Unmount::Manual,
+        Fusermount::False,
     )
     .await?;
     run_test(
         &[Feature::Experimental],
         "without libfuse, with fusermount",
         Unmount::Auto,
+        Fusermount::Fusermount,
     )
     .await?;
     test_no_user_allow_other(&[], "without libfuse, with fusermount").await?;
@@ -49,12 +52,14 @@ pub(crate) async fn run_experimental_tests() -> anyhow::Result<()> {
         &[Feature::Experimental],
         "without libfuse, with fusermount3",
         Unmount::Manual,
+        Fusermount::False,
     )
     .await?;
     run_test(
         &[Feature::Experimental],
         "without libfuse, with fusermount3",
         Unmount::Auto,
+        Fusermount::Fusermount3,
     )
     .await?;
     test_no_user_allow_other(&[], "without libfuse, with fusermount3").await?;
@@ -67,12 +72,14 @@ pub(crate) async fn run_experimental_tests() -> anyhow::Result<()> {
         &[Feature::Libfuse2, Feature::Experimental],
         "with libfuse",
         Unmount::Manual,
+        Fusermount::False,
     )
     .await?;
     run_test(
         &[Feature::Libfuse2, Feature::Experimental],
         "with libfuse",
         Unmount::Auto,
+        Fusermount::Fusermount,
     )
     .await?;
 
@@ -84,12 +91,14 @@ pub(crate) async fn run_experimental_tests() -> anyhow::Result<()> {
         &[Feature::Libfuse3, Feature::Experimental],
         "with libfuse3",
         Unmount::Manual,
+        Fusermount::False,
     )
     .await?;
     run_test(
         &[Feature::Libfuse3, Feature::Experimental],
         "with libfuse3",
         Unmount::Auto,
+        Fusermount::Fusermount3,
     )
     .await?;
 
@@ -99,7 +108,12 @@ pub(crate) async fn run_experimental_tests() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn run_test(features: &[Feature], description: &str, unmount: Unmount) -> anyhow::Result<()> {
+async fn run_test(
+    features: &[Feature],
+    description: &str,
+    unmount: Unmount,
+    fusermount: Fusermount,
+) -> anyhow::Result<()> {
     let unmount_desc = match unmount {
         Unmount::Auto => "--auto-unmount",
         Unmount::Manual => "",
@@ -122,6 +136,7 @@ async fn run_test(features: &[Feature], description: &str, unmount: Unmount) -> 
 
     let mut fuse_process = Command::new(&async_hello_exe)
         .args(&run_args)
+        .env(Fusermount::ENV_VAR, fusermount.as_path())
         .kill_on_drop(true)
         .spawn()
         .context("Failed to start async_hello example")?;

@@ -3,6 +3,7 @@
 //! This is a small set of bindings that are required to mount/unmount FUSE filesystems and
 //! open/close a fd to the FUSE kernel driver.
 
+use std::env;
 use std::ffi::CStr;
 use std::ffi::CString;
 use std::ffi::OsStr;
@@ -152,6 +153,13 @@ fn fuse_unmount_pure(mountpoint: &CStr) {
 }
 
 fn detect_fusermount_bin() -> String {
+    if let Some(fusermount) = env::var_os("FUSER_TESTS_FUSERMOUNT") {
+        return fusermount
+            .to_str()
+            .expect("FUSER_TESTS_FUSERMOUNT is not UTF-8")
+            .to_owned();
+    }
+
     for name in [
         FUSERMOUNT3_BIN.to_string(),
         FUSERMOUNT_BIN.to_string(),

@@ -18,6 +18,7 @@ use crate::command_utils::command_success;
 use crate::features::Feature;
 use crate::fuse_conf::fuse_conf_remove_user_allow_other;
 use crate::fuse_conf::fuse_conf_write_user_allow_other;
+use crate::fusermount::Fusermount;
 use crate::unmount::Unmount;
 use crate::users::run_as_user;
 use crate::users::run_as_user_status;
@@ -27,31 +28,79 @@ pub(crate) async fn run_mount_tests() -> anyhow::Result<()> {
     apt_install(&["fuse"]).await?;
     fuse_conf_write_user_allow_other().await?;
 
-    run_test(&[], "without libfuse, with fusermount", Unmount::Manual).await?;
-    run_test(&[], "without libfuse, with fusermount", Unmount::Auto).await?;
+    run_test(
+        &[],
+        "without libfuse, with fusermount",
+        Unmount::Manual,
+        Fusermount::False,
+    )
+    .await?;
+    run_test(
+        &[],
+        "without libfuse, with fusermount",
+        Unmount::Auto,
+        Fusermount::Fusermount,
+    )
+    .await?;
     test_no_user_allow_other(&[], "without libfuse, with fusermount").await?;
 
     apt_remove(&["fuse"]).await?;
     apt_install(&["fuse3"]).await?;
     fuse_conf_write_user_allow_other().await?;
 
-    run_test(&[], "without libfuse, with fusermount3", Unmount::Manual).await?;
-    run_test(&[], "without libfuse, with fusermount3", Unmount::Auto).await?;
+    run_test(
+        &[],
+        "without libfuse, with fusermount3",
+        Unmount::Manual,
+        Fusermount::False,
+    )
+    .await?;
+    run_test(
+        &[],
+        "without libfuse, with fusermount3",
+        Unmount::Auto,
+        Fusermount::Fusermount3,
+    )
+    .await?;
     test_no_user_allow_other(&[], "without libfuse, with fusermount3").await?;
 
     apt_remove(&["fuse3"]).await?;
     apt_install(&["libfuse-dev", "pkg-config", "fuse"]).await?;
     fuse_conf_write_user_allow_other().await?;
 
-    run_test(&[Feature::Libfuse2], "with libfuse", Unmount::Manual).await?;
-    run_test(&[Feature::Libfuse2], "with libfuse", Unmount::Auto).await?;
+    run_test(
+        &[Feature::Libfuse2],
+        "with libfuse",
+        Unmount::Manual,
+        Fusermount::False,
+    )
+    .await?;
+    run_test(
+        &[Feature::Libfuse2],
+        "with libfuse",
+        Unmount::Auto,
+        Fusermount::Fusermount,
+    )
+    .await?;
 
     apt_remove(&["libfuse-dev", "fuse"]).await?;
     apt_install(&["libfuse3-dev", "fuse3"]).await?;
     fuse_conf_write_user_allow_other().await?;
 
-    run_test(&[Feature::Libfuse3], "with libfuse3", Unmount::Manual).await?;
-    run_test(&[Feature::Libfuse3], "with libfuse3", Unmount::Auto).await?;
+    run_test(
+        &[Feature::Libfuse3],
+        "with libfuse3",
+        Unmount::Manual,
+        Fusermount::False,
+    )
+    .await?;
+    run_test(
+        &[Feature::Libfuse3],
+        "with libfuse3",
+        Unmount::Auto,
+        Fusermount::Fusermount3,
+    )
+    .await?;
 
     run_allow_root_test().await?;
 
@@ -59,7 +108,12 @@ pub(crate) async fn run_mount_tests() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn run_test(features: &[Feature], description: &str, unmount: Unmount) -> anyhow::Result<()> {
+async fn run_test(
+    features: &[Feature],
+    description: &str,
+    unmount: Unmount,
+    fusermount: Fusermount,
+) -> anyhow::Result<()> {
     let unmount_desc = match unmount {
         Unmount::Auto => "--auto-unmount",
         Unmount::Manual => "",
@@ -82,6 +136,7 @@ async fn run_test(features: &[Feature], description: &str, unmount: Unmount) -> 
 
     let mut fuse_process = Command::new(&hello_exe)
         .args(&run_args)
+        .env(Fusermount::ENV_VAR, fusermount.as_path())
         .kill_on_drop(true)
         .spawn()
         .context("Failed to start hello example")?;

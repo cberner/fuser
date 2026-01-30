@@ -12,6 +12,7 @@ use crate::ansi::green;
 use crate::cargo::cargo_build_example;
 use crate::command_utils::command_output;
 use crate::command_utils::command_success;
+use crate::fusermount::Fusermount;
 
 pub(crate) async fn run_simple_tests() -> anyhow::Result<()> {
     // Create temp directories
@@ -33,6 +34,7 @@ pub(crate) async fn run_simple_tests() -> anyhow::Result<()> {
             "--mount-point",
             mount_dir.path().to_str().unwrap(),
         ])
+        .env(Fusermount::ENV_VAR, Fusermount::False.as_path())
         .kill_on_drop(true)
         .spawn()
         .context("Failed to start simple example")?;
