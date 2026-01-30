@@ -45,6 +45,7 @@ use crate::ll::flags::init_flags::InitFlags;
 use crate::ll::fuse_abi as abi;
 use crate::mnt::Mount;
 use crate::notify::Notifier;
+use crate::read_buf::FuseReadBuf;
 use crate::reply::Reply;
 use crate::reply::ReplyRaw;
 use crate::reply::ReplySender;
@@ -54,10 +55,6 @@ use crate::request::RequestWithSender;
 /// FUSE recommends at least 128k, max 16M. The FUSE default is 16M on macOS
 /// and 128k on other systems.
 pub(crate) const MAX_WRITE_SIZE: usize = 16 * 1024 * 1024;
-
-/// Size of the buffer for reading a request from the kernel. Since the kernel may send
-/// up to `MAX_WRITE_SIZE` bytes in a write request, we use that value plus some extra space.
-const BUFFER_SIZE: usize = MAX_WRITE_SIZE + 4096;
 
 #[derive(Default, Debug, Eq, PartialEq)]
 /// How requests should be filtered based on the calling UID.
@@ -176,8 +173,8 @@ impl<FS: Filesystem> Session<FS> {
     pub(crate) fn run(mut self) -> io::Result<()> {
         // Buffer for receiving requests from the kernel. Only one is allocated and
         // it is reused immediately after dispatching to conserve memory and allocations.
-        let mut buffer = vec![0; BUFFER_SIZE];
-        let buf = aligned_sub_buf(&mut buffer, align_of::<abi::fuse_in_header>());
+        let mut buf = FuseReadBuf::new();
+        let buf = buf.as_mut();
 
         self.handshake(buf)?;
 
@@ -416,15 +413,6 @@ impl SessionUnmounter {
             mount.umount()?;
         }
         Ok(())
-    }
-}
-
-fn aligned_sub_buf(buf: &mut [u8], alignment: usize) -> &mut [u8] {
-    let off = alignment - (buf.as_ptr() as usize) % alignment;
-    if off == alignment {
-        buf
-    } else {
-        &mut buf[off..]
     }
 }
 
