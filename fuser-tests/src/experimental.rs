@@ -11,7 +11,6 @@ use tokio::process::Command;
 use crate::ansi::green;
 use crate::apt::apt_install;
 use crate::apt::apt_remove;
-use crate::apt::apt_update;
 use crate::command_utils::command_output;
 use crate::command_utils::command_success;
 use crate::fuse_conf::fuse_conf_remove_user_allow_other;
@@ -22,7 +21,6 @@ use crate::users::run_as_user_status;
 use crate::users::useradd;
 
 pub(crate) async fn run_experimental_tests() -> anyhow::Result<()> {
-    apt_update().await?;
     apt_install(&["fuse"]).await?;
     fuse_conf_write_user_allow_other().await?;
 

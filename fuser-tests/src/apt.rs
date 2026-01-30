@@ -2,10 +2,6 @@
 
 use crate::command_utils::command_success;
 
-pub(crate) async fn apt_update() -> anyhow::Result<()> {
-    command_success(["apt", "update"]).await
-}
-
 pub(crate) async fn apt_install(packages: &[&str]) -> anyhow::Result<()> {
     command_success(
         ["apt", "install", "-y"]
