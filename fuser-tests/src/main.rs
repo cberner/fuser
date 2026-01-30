@@ -44,6 +44,14 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn main_inner() -> anyhow::Result<()> {
+    // Validate that we're running inside Docker
+    if std::env::var("FUSER_TESTS_IN_DOCKER").as_deref() != Ok("true") {
+        bail!(
+            "FUSER_TESTS_IN_DOCKER environment variable is not set to 'true'. \
+            Tests must be run inside Docker."
+        );
+    }
+
     let FuserTests { command } = FuserTests::parse();
     match command {
         FuserCommand::Experimental => experimental::run_experimental_tests().await?,
