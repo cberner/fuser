@@ -103,6 +103,7 @@ mod reply;
 mod request;
 mod request_param;
 mod session;
+mod time;
 
 /// We generally support async reads
 #[cfg(not(target_os = "macos"))]
