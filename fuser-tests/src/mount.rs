@@ -12,10 +12,10 @@ use crate::ansi::green;
 use crate::apt::apt_install;
 use crate::apt::apt_remove;
 use crate::apt::apt_update;
+use crate::cargo::cargo_build_example;
 use crate::command_utils::command_output;
 use crate::command_utils::command_success;
 use crate::features::Feature;
-use crate::features::features_to_flags;
 use crate::fuse_conf::fuse_conf_remove_user_allow_other;
 use crate::fuse_conf::fuse_conf_write_user_allow_other;
 use crate::unmount::Unmount;
@@ -29,7 +29,7 @@ pub(crate) async fn run_mount_tests() -> anyhow::Result<()> {
 
     run_test(&[], "without libfuse, with fusermount", Unmount::Manual).await?;
     run_test(&[], "without libfuse, with fusermount", Unmount::Auto).await?;
-    test_no_user_allow_other("", "without libfuse, with fusermount").await?;
+    test_no_user_allow_other(&[], "without libfuse, with fusermount").await?;
 
     apt_remove(&["fuse"]).await?;
     apt_install(&["fuse3"]).await?;
@@ -37,7 +37,7 @@ pub(crate) async fn run_mount_tests() -> anyhow::Result<()> {
 
     run_test(&[], "without libfuse, with fusermount3", Unmount::Manual).await?;
     run_test(&[], "without libfuse, with fusermount3", Unmount::Auto).await?;
-    test_no_user_allow_other("", "without libfuse, with fusermount3").await?;
+    test_no_user_allow_other(&[], "without libfuse, with fusermount3").await?;
 
     apt_remove(&["fuse3"]).await?;
     apt_install(&["libfuse-dev", "pkg-config", "fuse"]).await?;
@@ -71,25 +71,16 @@ async fn run_test(features: &[Feature], description: &str, unmount: Unmount) -> 
 
     eprintln!("Mount dir: {}", mount_path);
 
-    let features_flag = features_to_flags(features);
-
-    // Build the hello example
-    eprintln!("Building hello example...");
-    let mut build_args = vec!["cargo", "build", "--example", "hello"];
-    build_args.extend(features_flag.as_deref());
-    command_success(build_args).await?;
+    let hello_exe = cargo_build_example("hello", features).await?;
 
     // Run the hello example
     eprintln!("Starting hello filesystem...");
-    let mut run_args = vec!["run", "--example", "hello"];
-    run_args.extend(features_flag.as_deref());
-    run_args.push("--");
-    run_args.push(mount_path);
+    let mut run_args = vec![mount_path];
     if matches!(unmount, Unmount::Auto) {
         run_args.push("--auto-unmount");
     }
 
-    let mut fuse_process = Command::new("cargo")
+    let mut fuse_process = Command::new(&hello_exe)
         .args(&run_args)
         .kill_on_drop(true)
         .spawn()
@@ -159,7 +150,7 @@ async fn run_test(features: &[Feature], description: &str, unmount: Unmount) -> 
     Ok(())
 }
 
-async fn test_no_user_allow_other(features: &str, description: &str) -> anyhow::Result<()> {
+async fn test_no_user_allow_other(features: &[Feature], description: &str) -> anyhow::Result<()> {
     eprintln!(
         "\n=== Running test_no_user_allow_other: {} ===",
         description
@@ -173,19 +164,14 @@ async fn test_no_user_allow_other(features: &str, description: &str) -> anyhow::
     eprintln!("Mount dir: {}", mount_dir);
     eprintln!("Data dir: {}", data_dir);
 
-    // Build the simple example
-    eprintln!("Building simple example...");
-    let mut build_args = vec!["cargo", "build", "--example", "simple"];
-    if !features.is_empty() {
-        build_args.push("--features");
-        build_args.push(features);
-    }
-    command_success(build_args).await?;
+    let simple_exe = cargo_build_example("simple", features).await?;
 
     // Run the simple example as fusertestnoallow
     let run_command = format!(
-        "target/debug/examples/simple --auto-unmount -vvv --data-dir {} --mount-point {}",
-        data_dir, mount_dir
+        "{} --auto-unmount -vvv --data-dir {} --mount-point {}",
+        simple_exe.display(),
+        data_dir,
+        mount_dir
     );
 
     let exit_code = run_as_user_status("fusertestnoallow", &run_command).await?;
@@ -217,19 +203,10 @@ async fn run_allow_root_test() -> anyhow::Result<()> {
     let mount_dir = run_as_user("fusertest1", "mktemp --directory").await?;
     eprintln!("Mount dir: {}", mount_dir);
 
-    eprintln!("Building hello example with libfuse3...");
-    command_success([
-        "cargo",
-        "build",
-        "--example",
-        "hello",
-        "--features",
-        "libfuse3",
-    ])
-    .await?;
+    let hello_exe = cargo_build_example("hello", &[Feature::Libfuse3]).await?;
 
     // Run the hello example as fusertest1 with --allow-root
-    let run_command = format!("target/debug/examples/hello {} --allow-root", mount_dir);
+    let run_command = format!("{} {} --allow-root", hello_exe.display(), mount_dir);
     let mut fuse_process = Command::new("su")
         .args(["fusertest1", "-c", &run_command])
         .kill_on_drop(true)
