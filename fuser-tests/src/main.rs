@@ -2,6 +2,7 @@
 
 mod ansi;
 mod apt;
+mod cargo;
 mod command_utils;
 mod experimental;
 mod features;

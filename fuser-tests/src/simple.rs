@@ -9,6 +9,7 @@ use tokio::fs::File;
 use tokio::process::Command;
 
 use crate::ansi::green;
+use crate::cargo::cargo_build_example;
 use crate::command_utils::command_output;
 use crate::command_utils::command_success;
 
@@ -20,18 +21,12 @@ pub(crate) async fn run_simple_tests() -> anyhow::Result<()> {
     eprintln!("Data dir: {:?}", data_dir.path());
     eprintln!("Mount dir: {:?}", mount_dir.path());
 
-    // Build the simple example
-    eprintln!("Building simple example...");
-    command_success(["cargo", "build", "--example", "simple"]).await?;
+    let simple_exe = cargo_build_example("simple", &[]).await?;
 
     // Run the simple example
     eprintln!("Starting simple filesystem...");
-    let mut fuse_process = Command::new("cargo")
+    let mut fuse_process = Command::new(&simple_exe)
         .args([
-            "run",
-            "--example",
-            "simple",
-            "--",
             "-vvv",
             "--data-dir",
             data_dir.path().to_str().unwrap(),
