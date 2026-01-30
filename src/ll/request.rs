@@ -242,7 +242,6 @@ mod op {
     use std::mem::offset_of;
     use std::num::NonZeroU32;
     use std::path::Path;
-    use std::time::Duration;
     use std::time::SystemTime;
 
     use zerocopy::FromZeros;
@@ -276,6 +275,7 @@ mod op {
     use crate::ll::request::RequestId;
     use crate::ll::request::abi::*;
     use crate::ll::request::validate_off_t;
+    use crate::time::system_time_from_time;
 
     /// Look up a directory entry by name and get its attributes.
     ///
@@ -437,7 +437,7 @@ mod op {
                 } else {
                     Some(
                         SystemTime::UNIX_EPOCH
-                            + Duration::new(self.arg.crtime, self.arg.crtimensec),
+                            + std::time::Duration::new(self.arg.crtime, self.arg.crtimensec),
                     )
                 }
             } else {
@@ -449,7 +449,10 @@ mod op {
         pub(crate) fn chgtime(&self) -> Option<SystemTime> {
             #[cfg(target_os = "macos")]
             if self.valid().contains(FattrFlags::FATTR_CHGTIME) {
-                Some(SystemTime::UNIX_EPOCH + Duration::new(self.arg.chgtime, self.arg.chgtimensec))
+                Some(
+                    SystemTime::UNIX_EPOCH
+                        + std::time::Duration::new(self.arg.chgtime, self.arg.chgtimensec),
+                )
             } else {
                 None
             }
@@ -461,7 +464,7 @@ mod op {
             if self.valid().contains(FattrFlags::FATTR_BKUPTIME) {
                 Some(
                     SystemTime::UNIX_EPOCH
-                        + Duration::new(self.arg.bkuptime, self.arg.bkuptimensec),
+                        + std::time::Duration::new(self.arg.bkuptime, self.arg.bkuptimensec),
                 )
             } else {
                 None
@@ -1622,13 +1625,6 @@ mod op {
         arg: &'a fuse_init_in,
     }
 
-    fn system_time_from_time(secs: i64, nsecs: u32) -> SystemTime {
-        if secs >= 0 {
-            SystemTime::UNIX_EPOCH + Duration::new(secs as u64, nsecs)
-        } else {
-            SystemTime::UNIX_EPOCH - Duration::new((-secs) as u64, nsecs)
-        }
-    }
     pub(crate) fn parse<'a>(
         header: &'a fuse_in_header,
         opcode: &fuse_opcode,
