@@ -19,7 +19,8 @@ use crate::channel::ChannelSender;
 use crate::forget_one::ForgetOne;
 use crate::ll;
 use crate::ll::Errno;
-use crate::ll::Response;
+use crate::ll::ResponseData;
+use crate::ll::ResponseErrno;
 use crate::reply::Reply;
 use crate::reply::ReplyDirectory;
 use crate::reply::ReplyDirectoryPlus;
@@ -56,18 +57,17 @@ impl<'a> RequestWithSender<'a> {
     /// request and sends back the returned reply to the kernel
     pub(crate) fn dispatch<FS: Filesystem>(&self, se: &Session<FS>) {
         debug!("{}", self.request);
-        let res = match self.dispatch_req(se) {
-            Ok(Some(resp)) => resp,
-            Ok(None) => return,
-            Err(errno) => Response::new_error(errno),
-        };
-        self.reply::<ReplyRaw>().send_ll(&res);
+        match self.dispatch_req(se) {
+            Ok(Some(resp)) => self.reply::<ReplyRaw>().send_ll(&resp),
+            Ok(None) => {}
+            Err(errno) => self.reply::<ReplyRaw>().send_ll(&ResponseErrno(errno)),
+        }
     }
 
     fn dispatch_req<FS: Filesystem>(
         &self,
         se: &Session<FS>,
-    ) -> Result<Option<Response<'_>>, Errno> {
+    ) -> Result<Option<ResponseData>, Errno> {
         let op = self.request.operation().map_err(|_| Errno::ENOSYS)?;
         // Implement allow_root & access check for auto_unmount
         if (se.allowed == SessionACL::RootAndOwner

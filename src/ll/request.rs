@@ -257,7 +257,7 @@ mod op {
     use crate::PollHandle;
     use crate::WriteFlags;
     use crate::bsd_file_flags::BsdFileFlags;
-    use crate::ll::Response;
+    use crate::ll::ResponseData;
     use crate::ll::TimeOrNow;
     use crate::ll::argument::ArgumentIterator;
     use crate::ll::flags::fattr_flags::FattrFlags;
@@ -973,7 +973,7 @@ mod op {
         /// because we memcopy prefix into it instead of casting.
         arg: Box<fuse_init_in>,
     }
-    impl<'a> Init<'a> {
+    impl Init<'_> {
         pub(crate) fn capabilities(&self) -> InitFlags {
             let flags = InitFlags::from_bits_retain(u64::from(self.arg.flags));
             if flags.contains(InitFlags::FUSE_INIT_EXT) {
@@ -990,7 +990,7 @@ mod op {
             super::Version(self.arg.major, self.arg.minor)
         }
 
-        pub(crate) fn reply(&self, config: &crate::KernelConfig) -> Response<'a> {
+        pub(crate) fn reply(&self, config: &crate::KernelConfig) -> ResponseData {
             let flags = config.requested | InitFlags::FUSE_INIT_EXT;
             // use requested features and reported as capable
             let flags = flags & self.capabilities();
@@ -1023,12 +1023,12 @@ mod op {
             } else {
                 init
             };
-            Response::new_data(init)
+            ResponseData::new_data(init)
         }
 
         /// Reply with only our version, used when kernel major version > our major version.
         /// The kernel will then send a second INIT request with a compatible version.
-        pub(crate) fn reply_version_only(&self) -> Response<'a> {
+        pub(crate) fn reply_version_only(&self) -> ResponseData {
             let init = fuse_init_out {
                 major: FUSE_KERNEL_VERSION,
                 minor: FUSE_KERNEL_MINOR_VERSION,
@@ -1044,7 +1044,7 @@ mod op {
                 max_stack_depth: 0,
                 reserved: [0; 6],
             };
-            Response::new_data(init.as_bytes())
+            ResponseData::new_data(init.as_bytes())
         }
     }
 

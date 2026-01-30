@@ -35,7 +35,7 @@ use crate::channel::ChannelSender;
 use crate::dev_fuse::DevFuse;
 use crate::ll;
 use crate::ll::Operation;
-use crate::ll::Response;
+use crate::ll::ResponseErrno;
 use crate::ll::Version;
 use crate::ll::flags::init_flags::InitFlags;
 use crate::ll::fuse_abi as abi;
@@ -261,12 +261,11 @@ impl<FS: Filesystem> Session<FS> {
                 _ => {
                     error!("Received non-init FUSE operation before init: {}", request);
                     // Send error response and return error - non-init during handshake is invalid
-                    let response = Response::new_error(ll::Errno::EIO);
                     <ReplyRaw as Reply>::new(
                         request.unique(),
                         ReplySender::Channel(self.ch.sender()),
                     )
-                    .send_ll(&response);
+                    .send_ll(&ResponseErrno(ll::Errno::EIO));
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
                         "Received non-init FUSE operation during handshake",
@@ -292,9 +291,8 @@ impl<FS: Filesystem> Session<FS> {
             // We don't support ABI versions before 7.6
             if v < Version(7, 6) {
                 error!("Unsupported FUSE ABI version {v}");
-                let response = Response::new_error(ll::Errno::EPROTO);
                 <ReplyRaw as Reply>::new(request.unique(), ReplySender::Channel(self.ch.sender()))
-                    .send_ll(&response);
+                    .send_ll(&ResponseErrno(ll::Errno::EPROTO));
                 return Err(io::Error::new(
                     io::ErrorKind::Unsupported,
                     format!("Unsupported FUSE ABI version {v}"),
@@ -313,9 +311,8 @@ impl<FS: Filesystem> Session<FS> {
             let res = filesystem.init(Request::ref_cast(request.header()), &mut config);
             if let Err(error) = res {
                 let errno = Errno::from_i32(error.raw_os_error().unwrap_or(0));
-                let response = Response::new_error(errno);
                 <ReplyRaw as Reply>::new(request.unique(), ReplySender::Channel(self.ch.sender()))
-                    .send_ll(&response);
+                    .send_ll(&ResponseErrno(errno));
                 return Err(error);
             }
 
