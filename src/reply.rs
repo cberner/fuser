@@ -30,6 +30,7 @@ use crate::ll::reply::DirEntOffset;
 use crate::ll::reply::DirEntPlusList;
 use crate::ll::reply::DirEntry;
 use crate::ll::reply::DirEntryPlus;
+use crate::ll::reply::Response;
 use crate::ll::{self};
 use crate::passthrough::BackingId;
 
@@ -117,7 +118,7 @@ impl Reply for ReplyRaw {
 impl ReplyRaw {
     /// Reply to a request with the given error code and data. Must be called
     /// only once (the `ok` and `error` methods ensure this by consuming `self`)
-    pub(crate) fn send_ll_mut(&mut self, response: &ll::Response<'_>) {
+    pub(crate) fn send_ll_mut(&mut self, response: &impl Response) {
         assert!(self.sender.is_some());
         let sender = self.sender.take().unwrap();
         let res = response.with_iovec(self.unique, |iov| sender.send(iov));
@@ -125,13 +126,13 @@ impl ReplyRaw {
             error!("Failed to send FUSE reply: {err}");
         }
     }
-    pub(crate) fn send_ll(mut self, response: &ll::Response<'_>) {
+    pub(crate) fn send_ll(mut self, response: &impl Response) {
         self.send_ll_mut(response);
     }
 
     /// Reply to a request with the given error code
     pub(crate) fn error(self, err: ll::Errno) {
-        self.send_ll(&ll::Response::new_error(err));
+        self.send_ll(&ll::ResponseErrno(err));
     }
 }
 
@@ -142,7 +143,7 @@ impl Drop for ReplyRaw {
                 "Reply not sent for operation {}, replying with I/O error",
                 self.unique.0
             );
-            self.send_ll_mut(&ll::Response::new_error(ll::Errno::EIO));
+            self.send_ll_mut(&ll::ResponseErrno(ll::Errno::EIO));
         }
     }
 }
@@ -166,7 +167,7 @@ impl Reply for ReplyEmpty {
 impl ReplyEmpty {
     /// Reply to a request with nothing
     pub fn ok(self) {
-        self.reply.send_ll(&ll::Response::new_empty());
+        self.reply.send_ll(&ll::ResponseEmpty);
     }
 
     /// Reply to a request with the given error code
@@ -194,7 +195,7 @@ impl Reply for ReplyData {
 impl ReplyData {
     /// Reply to a request with the given data
     pub fn data(self, data: &[u8]) {
-        self.reply.send_ll(&ll::Response::new_slice(data));
+        self.reply.send_ll(&ll::ResponseSlice(data));
     }
 
     /// Reply to a request with the given error code
@@ -222,7 +223,7 @@ impl Reply for ReplyEntry {
 impl ReplyEntry {
     /// Reply to a request with the given entry
     pub fn entry(self, ttl: &Duration, attr: &FileAttr, generation: Generation) {
-        self.reply.send_ll(&ll::Response::new_entry(
+        self.reply.send_ll(&ll::ResponseStruct::new_entry(
             attr.ino,
             generation,
             &attr.into(),
@@ -257,7 +258,7 @@ impl ReplyAttr {
     /// Reply to a request with the given attribute
     pub fn attr(self, ttl: &Duration, attr: &FileAttr) {
         self.reply
-            .send_ll(&ll::Response::new_attr(ttl, &attr.into()));
+            .send_ll(&ll::ResponseStruct::new_attr(ttl, &attr.into()));
     }
 
     /// Reply to a request with the given error code
@@ -289,7 +290,7 @@ impl ReplyXTimes {
     /// Reply to a request with the given xtimes
     pub fn xtimes(self, bkuptime: SystemTime, crtime: SystemTime) {
         self.reply
-            .send_ll(&ll::Response::new_xtimes(bkuptime, crtime))
+            .send_ll(&ll::ResponseStruct::new_xtimes(bkuptime, crtime))
     }
 
     /// Reply to a request with the given error code
@@ -321,7 +322,8 @@ impl ReplyOpen {
     /// Use [`opened_passthrough()`](Self::opened_passthrough) instead.
     pub fn opened(self, fh: ll::FileHandle, flags: FopenFlags) {
         assert!(!flags.contains(FopenFlags::FOPEN_PASSTHROUGH));
-        self.reply.send_ll(&ll::Response::new_open(fh, flags, 0));
+        self.reply
+            .send_ll(&ll::ResponseStruct::new_open(fh, flags, 0));
     }
 
     /// Registers a fd for passthrough, returning a `BackingId`.  Once you have the backing ID,
@@ -338,8 +340,11 @@ impl ReplyOpen {
     pub fn opened_passthrough(self, fh: ll::FileHandle, flags: FopenFlags, backing_id: &BackingId) {
         // TODO: assert passthrough capability is enabled.
         let flags = flags | FopenFlags::FOPEN_PASSTHROUGH;
-        self.reply
-            .send_ll(&ll::Response::new_open(fh, flags, backing_id.backing_id));
+        self.reply.send_ll(&ll::ResponseStruct::new_open(
+            fh,
+            flags,
+            backing_id.backing_id,
+        ));
     }
 
     /// Reply to a request with the given error code
@@ -367,7 +372,7 @@ impl Reply for ReplyWrite {
 impl ReplyWrite {
     /// Reply to a request with the number of bytes written
     pub fn written(self, size: u32) {
-        self.reply.send_ll(&ll::Response::new_write(size));
+        self.reply.send_ll(&ll::ResponseStruct::new_write(size));
     }
 
     /// Reply to a request with the given error code
@@ -406,7 +411,7 @@ impl ReplyStatfs {
         namelen: u32,
         frsize: u32,
     ) {
-        self.reply.send_ll(&ll::Response::new_statfs(
+        self.reply.send_ll(&ll::ResponseStruct::new_statfs(
             blocks, bfree, bavail, files, ffree, bsize, namelen, frsize,
         ));
     }
@@ -446,7 +451,7 @@ impl ReplyCreate {
         flags: FopenFlags,
     ) {
         assert!(!flags.contains(FopenFlags::FOPEN_PASSTHROUGH));
-        self.reply.send_ll(&ll::Response::new_create(
+        self.reply.send_ll(&ll::ResponseStruct::new_create(
             ttl,
             &attr.into(),
             generation,
@@ -480,7 +485,7 @@ impl ReplyCreate {
         flags: FopenFlags,
         backing_id: &BackingId,
     ) {
-        self.reply.send_ll(&ll::Response::new_create(
+        self.reply.send_ll(&ll::ResponseStruct::new_create(
             ttl,
             &attr.into(),
             generation,
@@ -510,7 +515,7 @@ impl Reply for ReplyLock {
 impl ReplyLock {
     /// Reply to a request with a file lock
     pub fn locked(self, start: u64, end: u64, typ: i32, pid: u32) {
-        self.reply.send_ll(&ll::Response::new_lock(&ll::Lock {
+        self.reply.send_ll(&ll::ResponseStruct::new_lock(&ll::Lock {
             range: (start, end),
             typ,
             pid,
@@ -542,7 +547,7 @@ impl Reply for ReplyBmap {
 impl ReplyBmap {
     /// Reply to a request with a bmap
     pub fn bmap(self, block: u64) {
-        self.reply.send_ll(&ll::Response::new_bmap(block));
+        self.reply.send_ll(&ll::ResponseStruct::new_bmap(block));
     }
 
     /// Reply to a request with the given error code
@@ -571,7 +576,7 @@ impl ReplyIoctl {
     /// Reply to a request with an ioctl
     pub fn ioctl(self, result: i32, data: &[u8]) {
         self.reply
-            .send_ll(&ll::Response::new_ioctl(result, &[IoSlice::new(data)]));
+            .send_ll(&ll::ResponseIoctl::new_ioctl(result, &[IoSlice::new(data)]));
     }
 
     /// Reply to a request with the given error code
@@ -599,7 +604,7 @@ impl Reply for ReplyPoll {
 impl ReplyPoll {
     /// Reply to a request with ready poll events
     pub fn poll(self, revents: PollEvents) {
-        self.reply.send_ll(&ll::Response::new_poll(revents));
+        self.reply.send_ll(&ll::ResponseStruct::new_poll(revents));
     }
 
     /// Reply to a request with the given error code
@@ -644,7 +649,8 @@ impl ReplyDirectory {
 
     /// Reply to a request with the filled directory buffer
     pub fn ok(self) {
-        self.reply.send_ll(&self.data.into());
+        let response: ll::ResponseData = self.data.into();
+        self.reply.send_ll(&response);
     }
 
     /// Reply to a request with the given error code
@@ -701,7 +707,8 @@ impl ReplyDirectoryPlus {
 
     /// Reply to a request with the filled directory buffer
     pub fn ok(self) {
-        self.reply.send_ll(&self.buf.into());
+        let response: ll::ResponseData = self.buf.into();
+        self.reply.send_ll(&response);
     }
 
     /// Reply to a request with the given error code
@@ -729,12 +736,13 @@ impl Reply for ReplyXattr {
 impl ReplyXattr {
     /// Reply to a request with the size of an extended attribute
     pub fn size(self, size: u32) {
-        self.reply.send_ll(&ll::Response::new_xattr_size(size));
+        self.reply
+            .send_ll(&ll::ResponseStruct::new_xattr_size(size));
     }
 
     /// Reply to a request with the data of an extended attribute
     pub fn data(self, data: &[u8]) {
-        self.reply.send_ll(&ll::Response::new_slice(data));
+        self.reply.send_ll(&ll::ResponseSlice(data));
     }
 
     /// Reply to a request with the given error code.
@@ -762,7 +770,7 @@ impl Reply for ReplyLseek {
 impl ReplyLseek {
     /// Reply to a request with seeked offset
     pub fn offset(self, offset: i64) {
-        self.reply.send_ll(&ll::Response::new_lseek(offset));
+        self.reply.send_ll(&ll::ResponseStruct::new_lseek(offset));
     }
 
     /// Reply to a request with the given error code
@@ -828,7 +836,7 @@ mod test {
             ],
         });
         let reply: ReplyRaw = Reply::new(ll::RequestId(0xdeadbeef), sender);
-        reply.send_ll(&ll::Response::new_data(data.as_bytes()));
+        reply.send_ll(&ll::ResponseData::new_data(data.as_bytes()));
     }
 
     #[test]
