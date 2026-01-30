@@ -25,10 +25,10 @@ fn main() {
             println!("cargo::rustc-cfg=fuser_mount_impl=\"libfuse2\"");
             println!("cargo::rustc-cfg=feature=\"macfuse-4-compat\"");
         }
-    } else if cfg!(feature = "libfuse2") {
-        configure_libfuse2().unwrap();
     } else if cfg!(feature = "libfuse3") {
         configure_libfuse3().unwrap();
+    } else if cfg!(feature = "libfuse2") {
+        configure_libfuse2().unwrap();
     } else {
         // First try to link with libfuse3
         match configure_libfuse3() {
