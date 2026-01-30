@@ -3,6 +3,8 @@ use std::os::fd::AsFd;
 use std::os::fd::BorrowedFd;
 use std::sync::Arc;
 
+use nix::errno::Errno;
+
 use crate::dev_fuse::DevFuse;
 use crate::passthrough::BackingId;
 
@@ -25,8 +27,24 @@ impl Channel {
     }
 
     /// Receives data up to the capacity of the given buffer (can block).
-    pub(crate) fn receive(&self, buffer: &mut [u8]) -> io::Result<usize> {
-        Ok(nix::unistd::read(&self.0, buffer)?)
+    fn receive(&self, buffer: &mut [u8]) -> nix::Result<usize> {
+        nix::unistd::read(&self.0, buffer)
+    }
+
+    /// Receives data up to the capacity of the given buffer (can block),
+    /// retrying on errors that are safe to retry (ENOENT, EINTR, EAGAIN).
+    ///
+    /// - ENOENT: Operation interrupted. According to FUSE, this is safe to retry.
+    /// - EINTR: Interrupted system call, retry.
+    /// - EAGAIN: Explicitly instructed to try again.
+    pub(crate) fn receive_retrying(&self, buffer: &mut [u8]) -> nix::Result<usize> {
+        loop {
+            match self.receive(buffer) {
+                Ok(size) => return Ok(size),
+                Err(Errno::ENOENT | Errno::EINTR | Errno::EAGAIN) => continue,
+                Err(err) => return Err(err),
+            }
+        }
     }
 
     /// Returns a sender object for this channel. The sender object can be

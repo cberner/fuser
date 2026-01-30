@@ -16,10 +16,6 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::thread::{self};
 
-use libc::EAGAIN;
-use libc::EINTR;
-use libc::ENODEV;
-use libc::ENOENT;
 use log::debug;
 use log::error;
 use log::info;
@@ -199,7 +195,7 @@ impl<FS: Filesystem> Session<FS> {
         loop {
             // Read the next request from the given channel to kernel driver
             // The kernel driver makes sure that we get exactly one request per read
-            match self.ch.receive(buf) {
+            match self.ch.receive_retrying(buf) {
                 Ok(size) => match RequestWithSender::new(self.ch.sender(), &buf[..size]) {
                     // Dispatch request
                     Some(req) => {
@@ -217,16 +213,8 @@ impl<FS: Filesystem> Session<FS> {
                         ));
                     }
                 },
-                Err(err) => match err.raw_os_error() {
-                    Some(
-                          ENOENT // Operation interrupted. Accordingly to FUSE, this is safe to retry
-                        | EINTR // Interrupted system call, retry
-                        | EAGAIN // Explicitly instructed to try again
-                    ) => continue,
-                    Some(ENODEV) => return Ok(None),
-                    // Unhandled error
-                    _ => return Err(err),
-                },
+                Err(nix::errno::Errno::ENODEV) => return Ok(None),
+                Err(err) => return Err(err.into()),
             }
         }
     }
@@ -234,18 +222,15 @@ impl<FS: Filesystem> Session<FS> {
     fn handshake(&mut self, buf: &mut [u8]) -> io::Result<()> {
         loop {
             // Read the init request from the kernel
-            let size = match self.ch.receive(buf) {
+            let size = match self.ch.receive_retrying(buf) {
                 Ok(size) => size,
-                Err(err) => match err.raw_os_error() {
-                    Some(ENOENT | EINTR | EAGAIN) => continue,
-                    Some(ENODEV) => {
-                        return Err(io::Error::new(
-                            io::ErrorKind::NotConnected,
-                            "FUSE device disconnected during handshake",
-                        ));
-                    }
-                    _ => return Err(err),
-                },
+                Err(nix::errno::Errno::ENODEV) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::NotConnected,
+                        "FUSE device disconnected during handshake",
+                    ));
+                }
+                Err(err) => return Err(err.into()),
             };
 
             // Parse the request
