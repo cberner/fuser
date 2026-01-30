@@ -3,24 +3,6 @@
 use anyhow::Context;
 use tokio::process::Command;
 
-pub(crate) async fn useradd(username: &str) -> anyhow::Result<()> {
-    eprintln!("Creating user: {}", username);
-    let status = Command::new("useradd")
-        .arg(username)
-        .status()
-        .await
-        .context(format!("Failed to create user {}", username))?;
-
-    // Ignore failure if user already exists
-    if !status.success() {
-        eprintln!(
-            "Warning: useradd {} may have failed (user might already exist)",
-            username
-        );
-    }
-    Ok(())
-}
-
 pub(crate) async fn run_as_user(username: &str, command: &str) -> anyhow::Result<String> {
     let output = Command::new("su")
         .args([username, "-c", command])

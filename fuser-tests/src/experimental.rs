@@ -19,7 +19,6 @@ use crate::fuse_conf::fuse_conf_write_user_allow_other;
 use crate::unmount::Unmount;
 use crate::users::run_as_user;
 use crate::users::run_as_user_status;
-use crate::users::useradd;
 
 pub(crate) async fn run_experimental_tests() -> anyhow::Result<()> {
     apt_update().await?;
@@ -190,8 +189,6 @@ async fn test_no_user_allow_other(features: &str, description: &str) -> anyhow::
 
     fuse_conf_remove_user_allow_other().await?;
 
-    useradd("fusertestnoallow").await?;
-
     let mount_dir = run_as_user("fusertestnoallow", "mktemp --directory").await?;
     let data_dir = run_as_user("fusertestnoallow", "mktemp --directory").await?;
 
@@ -238,9 +235,6 @@ async fn test_no_user_allow_other(features: &str, description: &str) -> anyhow::
 
 async fn run_allow_root_test() -> anyhow::Result<()> {
     eprintln!("\n=== Running run_allow_root_test ===");
-
-    useradd("fusertest1").await?;
-    useradd("fusertest2").await?;
 
     let mount_dir = run_as_user("fusertest1", "mktemp --directory").await?;
     eprintln!("Mount dir: {}", mount_dir);
