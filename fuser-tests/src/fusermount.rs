@@ -7,7 +7,7 @@ pub(crate) enum Fusermount {
 }
 
 impl Fusermount {
-    pub(crate) const ENV_VAR: &str = "FUSER_TESTS_FUSERMOUNT";
+    pub(crate) const ENV_VAR: &str = "FUSERMOUNT_PATH";
 
     pub(crate) fn as_path(&self) -> &'static str {
         match self {
