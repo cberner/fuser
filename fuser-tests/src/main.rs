@@ -9,6 +9,7 @@ mod features;
 mod fuse_conf;
 mod fusermount;
 mod mount;
+mod mount_util;
 mod simple;
 mod unmount;
 mod users;
