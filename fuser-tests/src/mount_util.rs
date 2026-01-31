@@ -17,6 +17,13 @@ pub(crate) struct MountEntry {
     pub(crate) fstype: String,
 }
 
+impl MountEntry {
+    /// Returns true if this is a FUSE mount with the specified device name.
+    pub(crate) fn is_fuse_mount_on_dev(&self, device: &str) -> bool {
+        self.fstype == "fuse" && self.device == device
+    }
+}
+
 impl fmt::Display for MountEntry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let MountEntry {
@@ -29,7 +36,7 @@ impl fmt::Display for MountEntry {
 }
 
 /// Reads mount output and returns a list of all mount entries.
-async fn read_mounts() -> anyhow::Result<Vec<MountEntry>> {
+pub(crate) async fn read_mounts() -> anyhow::Result<Vec<MountEntry>> {
     let content = command_output(["mount"]).await?;
 
     if !cfg!(target_os = "linux") {
@@ -47,10 +54,7 @@ pub(crate) async fn wait_for_fuse_mount(device: &str) -> anyhow::Result<()> {
 
     loop {
         let entries = read_mounts().await?;
-        if entries
-            .iter()
-            .any(|e| e.fstype == "fuse" && e.device == device)
-        {
+        if entries.iter().any(|e| e.is_fuse_mount_on_dev(device)) {
             return Ok(());
         }
 
@@ -78,10 +82,7 @@ pub(crate) async fn wait_for_fuse_umount(device: &str) -> anyhow::Result<()> {
 
     loop {
         let entries = read_mounts().await?;
-        if !entries
-            .iter()
-            .any(|e| e.fstype == "fuse" && e.device == device)
-        {
+        if !entries.iter().any(|e| e.is_fuse_mount_on_dev(device)) {
             return Ok(());
         }
 

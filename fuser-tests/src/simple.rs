@@ -11,8 +11,9 @@ use tokio::process::Command;
 use crate::ansi::green;
 use crate::cargo::cargo_build_example;
 use crate::command_utils::command_output;
-use crate::command_utils::command_success;
 use crate::fusermount::Fusermount;
+use crate::unmount::Unmount;
+use crate::unmount::kill_and_unmount;
 
 pub(crate) async fn run_simple_tests() -> anyhow::Result<()> {
     // Create temp directories
@@ -26,7 +27,7 @@ pub(crate) async fn run_simple_tests() -> anyhow::Result<()> {
 
     // Run the simple example
     eprintln!("Starting simple filesystem...");
-    let mut fuse_process = Command::new(&simple_exe)
+    let fuse_process = Command::new(&simple_exe)
         .args([
             "-vvv",
             "--data-dir",
@@ -63,13 +64,14 @@ pub(crate) async fn run_simple_tests() -> anyhow::Result<()> {
         .context("Failed to touch file 'b'")?;
     green!("OK touch file");
 
-    eprintln!("Unmounting...");
-    command_success(["umount", mount_dir.path().to_str().unwrap()]).await?;
-
-    fuse_process
-        .kill()
-        .await
-        .context("Failed to kill FUSE process")?;
+    kill_and_unmount(
+        fuse_process,
+        Unmount::Manual,
+        "fuser",
+        mount_dir.path().to_str().unwrap(),
+        "simple",
+    )
+    .await?;
 
     green!("All simple tests passed!");
     Ok(())
