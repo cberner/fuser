@@ -6,6 +6,7 @@
 * Add `FileType` conversion from std `FileType`
 * Rename `BackgroundSession::join` to `umount_and_join`
   and change it to return `io::Result<()>` instead of panicking
+* The path to the `fusermount` binary can be specified with the `FUSERMOUNT_PATH` environment variable
 * `allow_root` or `allow_other` must be specified when using `auto_unmount`
 * feature flags `abi-7-xx` are ignored and will be removed in 0.18.
 

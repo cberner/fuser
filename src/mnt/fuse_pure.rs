@@ -153,10 +153,10 @@ fn fuse_unmount_pure(mountpoint: &CStr) {
 }
 
 fn detect_fusermount_bin() -> String {
-    if let Some(fusermount) = env::var_os("FUSER_TESTS_FUSERMOUNT") {
+    if let Some(fusermount) = env::var_os("FUSERMOUNT_PATH") {
         return fusermount
             .to_str()
-            .expect("FUSER_TESTS_FUSERMOUNT is not UTF-8")
+            .expect("FUSERMOUNT_PATH is not UTF-8")
             .to_owned();
     }
 
