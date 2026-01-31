@@ -11,14 +11,13 @@ use crate::apt::apt_remove;
 use crate::apt::apt_update;
 use crate::cargo::cargo_build_example;
 use crate::command_utils::command_output;
-use crate::command_utils::command_success;
 use crate::features::Feature;
 use crate::fuse_conf::fuse_conf_remove_user_allow_other;
 use crate::fuse_conf::fuse_conf_write_user_allow_other;
 use crate::fusermount::Fusermount;
 use crate::mount_util::wait_for_fuse_mount;
-use crate::mount_util::wait_for_fuse_umount;
 use crate::unmount::Unmount;
+use crate::unmount::kill_and_unmount;
 use crate::users::run_as_user;
 use crate::users::run_as_user_status;
 
@@ -133,7 +132,7 @@ async fn run_test(
         run_args.push("--auto-unmount");
     }
 
-    let mut fuse_process = Command::new(&async_hello_exe)
+    let fuse_process = Command::new(&async_hello_exe)
         .args(&run_args)
         .env(Fusermount::ENV_VAR, fusermount.as_path())
         .kill_on_drop(true)
@@ -157,22 +156,7 @@ async fn run_test(
         );
     }
 
-    // Kill the FUSE process
-    fuse_process
-        .kill()
-        .await
-        .context("Failed to kill FUSE process")?;
-
-    match unmount {
-        Unmount::Auto => {
-            wait_for_fuse_umount("hello").await?;
-            green!("OK Mount cleaned up: {} {}", description, unmount_desc);
-        }
-        Unmount::Manual => {
-            // Unmount manually
-            command_success(["umount", mount_path]).await?;
-        }
-    }
+    kill_and_unmount(fuse_process, unmount, "hello", mount_path, description).await?;
 
     Ok(())
 }
