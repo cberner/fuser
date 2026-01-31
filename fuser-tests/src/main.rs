@@ -2,6 +2,7 @@
 
 mod ansi;
 mod apt;
+mod bsd_mount;
 mod cargo;
 mod command_utils;
 mod experimental;
@@ -29,6 +30,8 @@ struct FuserTests {
 enum FuserCommand {
     /// Run experimental mount tests.
     Experimental,
+    /// Run BSD mount tests.
+    BsdMount,
     /// Run mount tests.
     Mount,
     /// Run simple filesystem tests.
@@ -48,8 +51,9 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn main_inner() -> anyhow::Result<()> {
-    // Validate that we're running inside Docker
-    if std::env::var("FUSER_TESTS_IN_DOCKER").as_deref() != Ok("true") {
+    // Validate that we're running inside Docker on Linux.
+    if cfg!(target_os = "linux") && std::env::var("FUSER_TESTS_IN_DOCKER").as_deref() != Ok("true")
+    {
         bail!(
             "FUSER_TESTS_IN_DOCKER environment variable is not set to 'true'. \
             Tests must be run inside Docker."
@@ -59,6 +63,7 @@ async fn main_inner() -> anyhow::Result<()> {
     let FuserTests { command } = FuserTests::parse();
     match command {
         FuserCommand::Experimental => experimental::run_experimental_tests().await?,
+        FuserCommand::BsdMount => bsd_mount::run_bsd_mount_tests().await?,
         FuserCommand::Mount => mount::run_mount_tests().await?,
         FuserCommand::Simple => simple::run_simple_tests().await?,
     }
