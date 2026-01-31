@@ -1,8 +1,5 @@
 //! Experimental mount tests
 
-use std::time::Duration;
-use std::time::Instant;
-
 use anyhow::Context;
 use anyhow::bail;
 use tempfile::TempDir;
@@ -19,6 +16,8 @@ use crate::features::Feature;
 use crate::fuse_conf::fuse_conf_remove_user_allow_other;
 use crate::fuse_conf::fuse_conf_write_user_allow_other;
 use crate::fusermount::Fusermount;
+use crate::mount_util::wait_for_fuse_mount;
+use crate::mount_util::wait_for_fuse_umount;
 use crate::unmount::Unmount;
 use crate::users::run_as_user;
 use crate::users::run_as_user_status;
@@ -141,17 +140,7 @@ async fn run_test(
         .spawn()
         .context("Failed to start async_hello example")?;
 
-    // Wait for mount to be ready
-    eprintln!("Waiting for mount...");
-    tokio::time::sleep(Duration::from_secs(2)).await;
-
-    eprintln!("mounting at {}", mount_path);
-
-    // Check if FUSE was successfully mounted
-    let mount_info = command_output(["mount"]).await?;
-    if !mount_info.contains("hello") {
-        bail!("FUSE mount not found in mount output");
-    }
+    wait_for_fuse_mount("hello").await?;
 
     // Read hello.txt
     let hello_path = mount_dir.path().join("hello.txt");
@@ -176,25 +165,8 @@ async fn run_test(
 
     match unmount {
         Unmount::Auto => {
-            let start = Instant::now();
-            loop {
-                // Make sure the FUSE mount automatically unmounted
-                let mount_info = command_output(["mount"]).await?;
-                if mount_info.contains("hello") {
-                    if start.elapsed() > Duration::from_secs(3) {
-                        bail!(
-                            "Mount not cleaned up after auto-unmount: {} {}",
-                            description,
-                            unmount_desc
-                        );
-                    }
-                    eprintln!("Mount not cleared yet, waiting...");
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                } else {
-                    green!("OK Mount cleaned up: {} {}", description, unmount_desc);
-                    break;
-                }
-            }
+            wait_for_fuse_umount("hello").await?;
+            green!("OK Mount cleaned up: {} {}", description, unmount_desc);
         }
         Unmount::Manual => {
             // Unmount manually
@@ -269,17 +241,7 @@ async fn run_allow_root_test() -> anyhow::Result<()> {
         .spawn()
         .context("Failed to start async_hello example")?;
 
-    // Wait for mount to be ready
-    eprintln!("Waiting for mount...");
-    tokio::time::sleep(Duration::from_secs(2)).await;
-
-    eprintln!("mounting at {}", mount_dir);
-
-    // Check if FUSE was successfully mounted
-    let mount_info = command_output(["mount"]).await?;
-    if !mount_info.contains("hello") {
-        bail!("FUSE mount not found in mount output");
-    }
+    wait_for_fuse_mount("hello").await?;
 
     // Test: root can read
     let hello_path = format!("{}/hello.txt", mount_dir);
