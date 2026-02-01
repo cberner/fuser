@@ -408,10 +408,6 @@ pub trait Filesystem: Send + Sync + 'static {
         Ok(())
     }
 
-    /// Clean up filesystem.
-    /// Called on filesystem exit.
-    fn destroy(&mut self) {}
-
     /// Look up a directory entry by name and get its attributes.
     fn lookup(&self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
         warn!("[Not Implemented] lookup(parent: {parent:#x?}, name {name:?})");
