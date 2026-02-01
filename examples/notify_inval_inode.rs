@@ -17,6 +17,7 @@ use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
 use clap::Parser;
+use fuser::Config;
 use fuser::Errno;
 use fuser::FileAttr;
 use fuser::FileHandle;
@@ -203,7 +204,8 @@ struct Options {
 
 fn main() {
     let opts = Options::parse();
-    let options = vec![MountOption::RO, MountOption::FSName("clock".to_string())];
+    let mut cfg = Config::default();
+    cfg.mount_options = vec![MountOption::RO, MountOption::FSName("clock".to_string())];
     let fdata = Arc::new(Mutex::new(now_string()));
     let lookup_cnt = Box::leak(Box::new(AtomicU64::new(0)));
     let fs = ClockFS {
@@ -211,7 +213,7 @@ fn main() {
         lookup_cnt,
     };
 
-    let session = fuser::Session::new(fs, opts.mount_point, &options).unwrap();
+    let session = fuser::Session::new(fs, opts.mount_point, &cfg).unwrap();
     let notifier = session.notifier();
     let _bg = session.spawn().unwrap();
 

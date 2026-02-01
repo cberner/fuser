@@ -40,6 +40,7 @@ use crate::ll::Version;
 use crate::ll::flags::init_flags::InitFlags;
 use crate::ll::fuse_abi as abi;
 use crate::mnt::Mount;
+use crate::mnt::mount_options::Config;
 use crate::notify::Notifier;
 use crate::read_buf::FuseReadBuf;
 use crate::reply::Reply;
@@ -96,27 +97,27 @@ impl<FS: Filesystem> Session<FS> {
     pub fn new<P: AsRef<Path>>(
         filesystem: FS,
         mountpoint: P,
-        options: &[MountOption],
+        options: &Config,
     ) -> io::Result<Session<FS>> {
         let mountpoint = mountpoint.as_ref();
         info!("Mounting {}", mountpoint.display());
         // If AutoUnmount is requested, but not AllowRoot or AllowOther, return an error
         // because fusermount needs allow_root or allow_other to handle the auto_unmount option
-        if options.contains(&MountOption::AutoUnmount)
-            && !(options.contains(&MountOption::AllowRoot)
-                || options.contains(&MountOption::AllowOther))
+        if options.mount_options.contains(&MountOption::AutoUnmount)
+            && !(options.mount_options.contains(&MountOption::AllowRoot)
+                || options.mount_options.contains(&MountOption::AllowOther))
         {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "auto_unmount requires allow_root or allow_other",
             ));
         }
-        let (file, mount) = Mount::new(mountpoint, options)?;
+        let (file, mount) = Mount::new(mountpoint, &options.mount_options)?;
 
         let ch = Channel::new(file);
-        let allowed = if options.contains(&MountOption::AllowRoot) {
+        let allowed = if options.mount_options.contains(&MountOption::AllowRoot) {
             SessionACL::RootAndOwner
-        } else if options.contains(&MountOption::AllowOther) {
+        } else if options.mount_options.contains(&MountOption::AllowOther) {
             SessionACL::All
         } else {
             SessionACL::Owner

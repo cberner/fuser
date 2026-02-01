@@ -30,6 +30,7 @@ use std::time::UNIX_EPOCH;
 use clap::Parser;
 use fuser::AccessFlags;
 use fuser::BsdFileFlags;
+use fuser::Config;
 use fuser::Errno;
 use fuser::FileHandle;
 use fuser::Filesystem;
@@ -2176,10 +2177,13 @@ fn main() {
         options.push(MountOption::AllowOther);
     }
 
+    let mut cfg = Config::default();
+    cfg.mount_options = options;
+
     let result = fuser::mount2(
         SimpleFS::new(args.data_dir, args.direct_io, args.suid),
         &args.mount_point,
-        &options,
+        &cfg,
     );
     if let Err(e) = result {
         // Return a special error code for permission denied, which usually indicates that

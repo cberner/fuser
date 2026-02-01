@@ -19,6 +19,7 @@ use std::time::Duration;
 use std::time::UNIX_EPOCH;
 
 use clap::Parser;
+use fuser::Config;
 use fuser::Errno;
 use parking_lot::Mutex;
 use parking_lot::MutexGuard;
@@ -360,7 +361,8 @@ fn producer(data: &Mutex<FSelData>, notifier: &fuser::Notifier) {
 fn main() {
     let args = Args::parse();
 
-    let options = vec![MountOption::RO, MountOption::FSName("fsel".to_string())];
+    let mut cfg = Config::default();
+    cfg.mount_options = vec![MountOption::RO, MountOption::FSName("fsel".to_string())];
     let data = Arc::new(Mutex::new(FSelData {
         bytecnt: [0; NUMFILES as usize],
         open_mask: 0,
@@ -368,7 +370,7 @@ fn main() {
     }));
     let fs = FSelFS { data: data.clone() };
 
-    let session = fuser::Session::new(fs, &args.mount_point, &options).unwrap();
+    let session = fuser::Session::new(fs, &args.mount_point, &cfg).unwrap();
     let bg = session.spawn().unwrap();
 
     producer(&data, &bg.notifier());
