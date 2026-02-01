@@ -428,16 +428,21 @@ pub struct BackgroundSession {
 
 impl BackgroundSession {
     /// Unmount the filesystem and join the background thread.
-    pub fn umount_and_join(self) -> io::Result<()> {
-        let Self {
-            guard,
-            sender: _,
-            mount,
-        } = self;
-        if let Some(mount) = mount {
+    pub fn umount_and_join(mut self) -> io::Result<()> {
+        if let Some(mount) = self.mount.take() {
             mount.umount()?;
         }
-        guard
+        self.join()
+    }
+
+    /// Returns an object that can be used to send notifications to the kernel
+    pub fn notifier(&self) -> Notifier {
+        Notifier::new(self.sender.clone())
+    }
+
+    /// Join the filesystem thread.
+    pub fn join(self) -> io::Result<()> {
+        self.guard
             .join()
             .map_err(|_panic: Box<dyn std::any::Any + Send>| {
                 io::Error::new(
@@ -445,10 +450,5 @@ impl BackgroundSession {
                     "filesystem background thread panicked",
                 )
             })?
-    }
-
-    /// Returns an object that can be used to send notifications to the kernel
-    pub fn notifier(&self) -> Notifier {
-        Notifier::new(self.sender.clone())
     }
 }
