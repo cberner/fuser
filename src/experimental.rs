@@ -12,7 +12,7 @@ use crate::Filesystem;
 use crate::Generation;
 use crate::INodeNo;
 use crate::LockOwner;
-use crate::ReadFlags;
+use crate::OpenFlags;
 use crate::ReplyAttr;
 use crate::ReplyData;
 use crate::ReplyDirectory;
@@ -175,7 +175,7 @@ impl<T: AsyncFilesystem + Send + Sync + 'static> Filesystem for TokioAdapter<T> 
         fh: FileHandle,
         offset: u64,
         size: u32,
-        flags: ReadFlags,
+        flags: OpenFlags,
         lock_owner: Option<LockOwner>,
         reply: ReplyData,
     ) {
@@ -239,7 +239,7 @@ pub trait AsyncFilesystem: Send + Sync + 'static {
         file_handle: FileHandle,
         offset: u64,
         size: u32,
-        flags: ReadFlags,
+        flags: OpenFlags,
         lock: Option<LockOwner>,
         out_data: &mut Vec<u8>,
     ) -> Result<()>;

@@ -28,7 +28,6 @@ use fuser::LockOwner;
 use fuser::MountOption;
 use fuser::OpenAccMode;
 use fuser::OpenFlags;
-use fuser::ReadFlags;
 use fuser::ReplyAttr;
 use fuser::ReplyData;
 use fuser::ReplyDirectory;
@@ -156,7 +155,7 @@ impl Filesystem for ClockFS {
         _fh: FileHandle,
         offset: u64,
         size: u32,
-        _flags: ReadFlags,
+        _flags: OpenFlags,
         _lock_owner: Option<LockOwner>,
         reply: ReplyData,
     ) {

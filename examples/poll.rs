@@ -42,7 +42,6 @@ use fuser::PollEvents;
 use fuser::PollFlags;
 use fuser::PollHandle;
 use fuser::PollNotifier;
-use fuser::ReadFlags;
 use fuser::ReplyAttr;
 use fuser::ReplyData;
 use fuser::ReplyDirectory;
@@ -252,7 +251,7 @@ impl fuser::Filesystem for FSelFS {
         fh: FileHandle,
         _offset: u64,
         size: u32,
-        _flags: ReadFlags,
+        _flags: OpenFlags,
         _lock_owner: Option<LockOwner>,
         reply: ReplyData,
     ) {
