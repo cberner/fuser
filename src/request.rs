@@ -97,7 +97,7 @@ impl<'a> RequestWithSender<'a> {
             }
         }
 
-        let Some(filesystem) = &se.filesystem else {
+        let Some(filesystem) = &se.filesystem.fs else {
             // This is handled before dispatch call.
             error!("bug: filesystem must be initialized in dispatch_req");
             return Err(Errno::EIO);

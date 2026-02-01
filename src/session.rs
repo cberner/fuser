@@ -65,15 +65,57 @@ pub enum SessionACL {
     Owner,
 }
 
+/// Calls `destroy` on drop.
+#[derive(Debug)]
+pub(crate) struct FilesystemHolder<FS: Filesystem> {
+    pub(crate) fs: Option<FS>,
+}
+
+impl<FS: Filesystem> FilesystemHolder<FS> {
+    fn destroy(&mut self) {
+        if let Some(mut fs) = self.fs.take() {
+            fs.destroy();
+        }
+    }
+}
+
+impl<FS: Filesystem> Drop for FilesystemHolder<FS> {
+    fn drop(&mut self) {
+        self.destroy();
+    }
+}
+
+#[derive(Debug)]
+struct UmountOnDrop {
+    mount: Arc<Mutex<Option<Mount>>>,
+}
+
+impl UmountOnDrop {
+    fn umount(&self) -> io::Result<()> {
+        if let Some(mount) = self.mount.lock().take() {
+            mount.umount()?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for UmountOnDrop {
+    fn drop(&mut self) {
+        if let Err(e) = self.umount() {
+            warn!("Failed to umount filesystem: {}", e);
+        }
+    }
+}
+
 /// The session data structure
 #[derive(Debug)]
 pub struct Session<FS: Filesystem> {
     /// Filesystem operation implementations. None after `destroy` called.
-    pub(crate) filesystem: Option<FS>,
+    pub(crate) filesystem: FilesystemHolder<FS>,
     /// Communication channel to the kernel driver
     pub(crate) ch: Channel,
     /// Handle to the mount.  Dropping this unmounts.
-    mount: Arc<Mutex<Option<Mount>>>,
+    mount: UmountOnDrop,
     /// Whether to restrict access to owner, root + owner, or unrestricted
     /// Used to implement `allow_root` and `auto_unmount`
     pub(crate) allowed: SessionACL,
@@ -124,9 +166,13 @@ impl<FS: Filesystem> Session<FS> {
         };
 
         Ok(Session {
-            filesystem: Some(filesystem),
+            filesystem: FilesystemHolder {
+                fs: Some(filesystem),
+            },
             ch,
-            mount: Arc::new(Mutex::new(Some(mount))),
+            mount: UmountOnDrop {
+                mount: Arc::new(Mutex::new(Some(mount))),
+            },
             allowed,
             session_owner: geteuid(),
             proto_version: None,
@@ -138,9 +184,13 @@ impl<FS: Filesystem> Session<FS> {
     pub fn from_fd(filesystem: FS, fd: OwnedFd, acl: SessionACL) -> Self {
         let ch = Channel::new(Arc::new(DevFuse(File::from(fd))));
         Session {
-            filesystem: Some(filesystem),
+            filesystem: FilesystemHolder {
+                fs: Some(filesystem),
+            },
             ch,
-            mount: Arc::new(Mutex::new(None)),
+            mount: UmountOnDrop {
+                mount: Arc::new(Mutex::new(None)),
+            },
             allowed: acl,
             session_owner: geteuid(),
             proto_version: None,
@@ -152,7 +202,7 @@ impl<FS: Filesystem> Session<FS> {
     pub fn spawn(self) -> io::Result<BackgroundSession> {
         let sender = self.ch.sender();
         // Take the fuse_session, so that we can unmount it
-        let mount = std::mem::take(&mut *self.mount.lock());
+        let mount = std::mem::take(&mut *self.mount.mount.lock());
         let guard = thread::spawn(move || self.run());
         Ok(BackgroundSession {
             guard,
@@ -172,9 +222,7 @@ impl<FS: Filesystem> Session<FS> {
 
         let ret = self.event_loop();
 
-        if let Some(mut filesystem) = self.filesystem.take() {
-            filesystem.destroy();
-        }
+        self.filesystem.destroy();
 
         match ret {
             Err(e) => Err(e),
@@ -303,7 +351,7 @@ impl<FS: Filesystem> Session<FS> {
             let mut config = KernelConfig::new(init.capabilities(), init.max_readahead(), v);
 
             // Call filesystem init method and give it a chance to return an error
-            let Some(filesystem) = &mut self.filesystem else {
+            let Some(filesystem) = &mut self.filesystem.fs else {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
                     "Bug: filesystem must be initialized during handshake",
@@ -367,16 +415,13 @@ impl<FS: Filesystem> Session<FS> {
 
     /// Unmount the filesystem
     pub fn unmount(&mut self) -> io::Result<()> {
-        if let Some(mount) = std::mem::take(&mut *self.mount.lock()) {
-            mount.umount()?;
-        }
-        Ok(())
+        self.mount.umount()
     }
 
     /// Returns a thread-safe object that can be used to unmount the Filesystem
     pub fn unmount_callable(&mut self) -> SessionUnmounter {
         SessionUnmounter {
-            mount: self.mount.clone(),
+            mount: self.mount.mount.clone(),
         }
     }
 
@@ -399,20 +444,6 @@ impl SessionUnmounter {
             mount.umount()?;
         }
         Ok(())
-    }
-}
-
-impl<FS: Filesystem> Drop for Session<FS> {
-    fn drop(&mut self) {
-        if let Some(mut filesystem) = self.filesystem.take() {
-            filesystem.destroy();
-        }
-
-        if let Some(mount) = std::mem::take(&mut *self.mount.lock()) {
-            if let Err(e) = mount.umount() {
-                warn!("Unmount failed: {e}");
-            }
-        }
     }
 }
 
