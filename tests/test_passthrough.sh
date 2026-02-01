@@ -2,7 +2,7 @@
 
 # Run like:
 #
-#   cargo build --example passthrough
+#   cargo build -p fuser-examples --example passthrough
 #   sudo tests/test_passthrough.sh target/debug/examples/passthrough
 
 set -eux

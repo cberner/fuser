@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "fuser-tests"]
+members = [".", "fuser-tests", "fuser-examples"]
 
 [workspace.package]
 edition = "2024"
@@ -79,24 +79,3 @@ abi-7-40 = []
 # cargo check --target x86_64-apple-darwin --features=macos-no-mount
 macos-no-mount = []
 
-[[example]]
-name = "async_hello"
-required-features = ["experimental"]
-
-[[example]]
-name = "poll"
-
-[[example]]
-name = "poll_client"
-
-[[example]]
-name = "notify_inval_entry"
-
-[[example]]
-name = "notify_inval_inode"
-
-[[example]]
-name = "ioctl"
-
-[[example]]
-name = "passthrough"

@@ -3,7 +3,7 @@ INTERACTIVE ?= i
 
 
 build: pre
-	cargo build --examples --features=experimental
+	cargo check --all --all-targets --features=experimental
 
 format:
 	cargo +nightly fmt --all
@@ -63,7 +63,7 @@ mount_tests:
 	 fuser:mount_tests_libfuse3 bash -c "cd /code/fuser && cargo run -p fuser-tests -- linux-mount-libfuse3"
 
 test_passthrough:
-	cargo build --example passthrough
+	cargo build -p fuser-examples --example passthrough
 	sudo tests/test_passthrough.sh target/debug/examples/passthrough
 
 test: pre mount_tests pjdfs_tests xfstests

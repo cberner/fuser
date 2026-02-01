@@ -2,6 +2,7 @@
 !src/
 !examples/
 !tests/
+!fuser-examples/
 !fuser-tests/
 !./Cargo.*
 !./rust-toolchain

@@ -21,4 +21,4 @@ ARG BUILD_FEATURES
 
 ADD . /code/fuser/
 
-RUN cd /code/fuser && cargo build --release --examples $BUILD_FEATURES && cp target/release/examples/simple /bin/fuser
+RUN cd /code/fuser && cargo build --release -p fuser-examples --examples $BUILD_FEATURES && cp target/release/examples/simple /bin/fuser

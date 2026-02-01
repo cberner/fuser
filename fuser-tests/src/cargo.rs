@@ -14,7 +14,14 @@ pub(crate) async fn cargo_build_example(
 ) -> anyhow::Result<PathBuf> {
     let features_flag = features_to_flags(features);
 
-    let mut build_args = vec!["cargo", "build", "--example", example];
+    let mut build_args = vec![
+        "cargo",
+        "build",
+        "-p",
+        "fuser-examples",
+        "--example",
+        example,
+    ];
     build_args.extend(features_flag.as_deref());
     command_success(build_args).await?;
 
