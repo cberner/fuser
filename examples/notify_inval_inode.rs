@@ -156,7 +156,8 @@ impl Filesystem for ClockFS {
         _fh: FileHandle,
         offset: u64,
         size: u32,
-        _flags: ReadFlags,
+        _read_flags: ReadFlags,
+        _flags: OpenFlags,
         _lock_owner: Option<LockOwner>,
         reply: ReplyData,
     ) {

@@ -116,7 +116,8 @@ impl AsyncFilesystem for HelloFS {
         _file_handle: FileHandle,
         offset: u64,
         _size: u32,
-        _flags: ReadFlags,
+        _read_flags: ReadFlags,
+        _flags: u32,
         _lock: Option<LockOwner>,
         out_data: &mut Vec<u8>,
     ) -> experimental::Result<()> {
