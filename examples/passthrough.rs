@@ -30,6 +30,7 @@ use fuser::ReplyEmpty;
 use fuser::ReplyEntry;
 use fuser::ReplyOpen;
 use fuser::Request;
+use fuser::SessionACL;
 
 #[derive(Parser)]
 #[command(version, author = "Allison Karlitskaya")]
@@ -270,12 +271,11 @@ fn main() {
         cfg.mount_options.push(MountOption::AutoUnmount);
     }
     if args.allow_root {
-        cfg.mount_options.push(MountOption::AllowRoot);
+        cfg.acl = SessionACL::RootAndOwner;
     }
-    if cfg.mount_options.contains(&MountOption::AutoUnmount)
-        && !cfg.mount_options.contains(&MountOption::AllowRoot)
+    if cfg.mount_options.contains(&MountOption::AutoUnmount) && cfg.acl != SessionACL::RootAndOwner
     {
-        cfg.mount_options.push(MountOption::AllowOther);
+        cfg.acl = SessionACL::All;
     }
 
     let fs = PassthroughFs::new();

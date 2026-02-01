@@ -6,6 +6,7 @@ use std::os::unix::prelude::OsStrExt;
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::SessionACL;
 use crate::dev_fuse::DevFuse;
 use crate::mnt::MountOption;
 use crate::mnt::fuse2_sys::*;
@@ -28,9 +29,10 @@ impl MountImpl {
     pub(crate) fn new(
         mountpoint: &Path,
         options: &[MountOption],
+        acl: SessionACL,
     ) -> io::Result<(Arc<DevFuse>, MountImpl)> {
         let mountpoint = CString::new(mountpoint.as_os_str().as_bytes()).unwrap();
-        with_fuse_args(options, |args| {
+        with_fuse_args(options, acl, |args| {
             let fd = unsafe { fuse_mount_compat25(mountpoint.as_ptr(), args) };
             if fd < 0 {
                 Err(ensure_last_os_error())

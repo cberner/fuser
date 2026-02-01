@@ -53,7 +53,7 @@ use crate::request::RequestWithSender;
 /// and 128k on other systems.
 pub(crate) const MAX_WRITE_SIZE: usize = 16 * 1024 * 1024;
 
-#[derive(Default, Debug, Eq, PartialEq)]
+#[derive(Default, Debug, Eq, PartialEq, Clone, Copy)]
 /// How requests should be filtered based on the calling UID.
 pub enum SessionACL {
     /// Allow requests from any user. Corresponds to the `allow_other` mount option.
@@ -63,6 +63,18 @@ pub enum SessionACL {
     /// Allow requests from the owning UID. This is FUSE's default mode of operation.
     #[default]
     Owner,
+}
+
+impl SessionACL {
+    /// Returns the mount option string for kernel/fusermount/libfuse paths.
+    /// Both `All` and `RootAndOwner` map to `allow_other` - the kernel only
+    /// understands `allow_other`, and fuser enforces the root-only restriction internally.
+    pub(crate) fn to_mount_option(self) -> Option<&'static str> {
+        match self {
+            SessionACL::All | SessionACL::RootAndOwner => Some("allow_other"),
+            SessionACL::Owner => None,
+        }
+    }
 }
 
 /// Calls `destroy` on drop.
@@ -146,24 +158,16 @@ impl<FS: Filesystem> Session<FS> {
         // If AutoUnmount is requested, but not AllowRoot or AllowOther, return an error
         // because fusermount needs allow_root or allow_other to handle the auto_unmount option
         if options.mount_options.contains(&MountOption::AutoUnmount)
-            && !(options.mount_options.contains(&MountOption::AllowRoot)
-                || options.mount_options.contains(&MountOption::AllowOther))
+            && options.acl == SessionACL::Owner
         {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "auto_unmount requires allow_root or allow_other",
+                format!("auto_unmount requires acl != Owner, got: {:?}", options.acl),
             ));
         }
-        let (file, mount) = Mount::new(mountpoint, &options.mount_options)?;
+        let (file, mount) = Mount::new(mountpoint, &options.mount_options, options.acl)?;
 
         let ch = Channel::new(file);
-        let allowed = if options.mount_options.contains(&MountOption::AllowRoot) {
-            SessionACL::RootAndOwner
-        } else if options.mount_options.contains(&MountOption::AllowOther) {
-            SessionACL::All
-        } else {
-            SessionACL::Owner
-        };
 
         Ok(Session {
             filesystem: FilesystemHolder {
@@ -173,7 +177,7 @@ impl<FS: Filesystem> Session<FS> {
             mount: UmountOnDrop {
                 mount: Arc::new(Mutex::new(Some(mount))),
             },
-            allowed,
+            allowed: options.acl,
             session_owner: geteuid(),
             proto_version: None,
         })

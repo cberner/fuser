@@ -3,12 +3,16 @@ use std::ffi::OsStr;
 use std::io;
 use std::io::ErrorKind;
 
+use crate::SessionACL;
+
 /// Fuser session configuration, including mount options.
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 #[non_exhaustive]
 pub struct Config {
     /// Mount options.
     pub mount_options: Vec<MountOption>,
+    /// Who can access the filesystem.
+    pub acl: SessionACL,
 }
 
 /// Mount options accepted by the FUSE filesystem type
@@ -25,11 +29,6 @@ pub enum MountOption {
     CUSTOM(String),
 
     /* Parameterless options */
-    /// Allow all users to access files on this filesystem. By default access is restricted to the
-    /// user who mounted it
-    AllowOther,
-    /// Allow the root user to access this filesystem, in addition to the user who mounted it
-    AllowRoot,
     /// Automatically unmount when the mounting process exits
     ///
     /// `AutoUnmount` requires `AllowOther` or `AllowRoot`. If `AutoUnmount` is set and neither `Allow...` is set, the FUSE configuration must permit `allow_other`, otherwise mounting will fail.
@@ -72,8 +71,6 @@ impl MountOption {
     pub(crate) fn from_str(s: &str) -> MountOption {
         match s {
             "auto_unmount" => MountOption::AutoUnmount,
-            "allow_other" => MountOption::AllowOther,
-            "allow_root" => MountOption::AllowRoot,
             "default_permissions" => MountOption::DefaultPermissions,
             "dev" => MountOption::Dev,
             "nodev" => MountOption::NoDev,
@@ -122,8 +119,6 @@ fn conflicts_with(option: &MountOption) -> Vec<MountOption> {
         | MountOption::DirSync
         | MountOption::AutoUnmount
         | MountOption::DefaultPermissions => vec![],
-        MountOption::AllowOther => vec![MountOption::AllowRoot],
-        MountOption::AllowRoot => vec![MountOption::AllowOther],
         MountOption::Dev => vec![MountOption::NoDev],
         MountOption::NoDev => vec![MountOption::Dev],
         MountOption::Suid => vec![MountOption::NoSuid],
@@ -147,10 +142,6 @@ pub(crate) fn option_to_string(option: &MountOption) -> String {
         MountOption::Subtype(subtype) => format!("subtype={subtype}"),
         MountOption::CUSTOM(value) => value.to_string(),
         MountOption::AutoUnmount => "auto_unmount".to_string(),
-        MountOption::AllowRoot |
-        // AllowRoot is implemented by allowing everyone access and then restricting to
-        // root + owner within fuser
-        MountOption::AllowOther => "allow_other".to_string(),
         MountOption::DefaultPermissions => "default_permissions".to_string(),
         MountOption::Dev => "dev".to_string(),
         MountOption::NoDev => "nodev".to_string(),
@@ -178,6 +169,7 @@ pub(crate) fn parse_options_from_args(args: &[&OsStr]) -> io::Result<Config> {
     let args = args.ok_or_else(|| err("Error parsing args: Invalid UTF-8".to_owned()))?;
     let mut it = args.iter();
     let mut out = vec![];
+    let mut acl = None;
     loop {
         let opt = match it.next() {
             None => break,
@@ -188,10 +180,34 @@ pub(crate) fn parse_options_from_args(args: &[&OsStr]) -> io::Result<Config> {
             Some(x) => return Err(err(format!("Error parsing args: expected -o, got {x}"))),
         };
         for x in opt.split(',') {
-            out.push(MountOption::from_str(x));
+            match x {
+                "allow_root" => {
+                    if acl.is_some() {
+                        return Err(err(
+                            "allow_root option conflicts with previous ACL".to_owned()
+                        ));
+                    }
+                    acl = Some(SessionACL::RootAndOwner);
+                }
+                "allow_other" => {
+                    if acl.is_some() {
+                        return Err(err(
+                            "allow_other option conflicts with previous ACL".to_owned()
+                        ));
+                    }
+                    acl = Some(SessionACL::All);
+                }
+                x => {
+                    out.push(MountOption::from_str(x));
+                }
+            }
         }
     }
-    Ok(Config { mount_options: out })
+    let acl = acl.unwrap_or(SessionACL::default());
+    Ok(Config {
+        mount_options: out,
+        acl,
+    })
 }
 
 #[cfg(test)]
@@ -204,13 +220,15 @@ mod test {
     fn option_checking() {
         assert!(
             check_option_conflicts(&Config {
-                mount_options: vec![MountOption::Suid, MountOption::NoSuid]
+                mount_options: vec![MountOption::Suid, MountOption::NoSuid],
+                ..Config::default()
             })
             .is_err()
         );
         assert!(
             check_option_conflicts(&Config {
-                mount_options: vec![MountOption::Suid, MountOption::NoExec]
+                mount_options: vec![MountOption::Suid, MountOption::NoExec],
+                ..Config::default()
             })
             .is_ok()
         );
@@ -222,7 +240,6 @@ mod test {
             FSName("Blah".to_owned()),
             Subtype("Bloo".to_owned()),
             CUSTOM("bongos".to_owned()),
-            AllowOther,
             AutoUnmount,
             DefaultPermissions,
             Dev,
@@ -257,7 +274,8 @@ mod test {
         assert_eq!(
             out,
             Config {
-                mount_options: vec![Suid, RO, NoDev, NoExec, Sync]
+                mount_options: vec![Suid, RO, NoDev, NoExec, Sync],
+                ..Config::default()
             }
         );
 

@@ -213,7 +213,7 @@ fn main() {
         cfg.mount_options.push(MountOption::AutoUnmount);
     }
     if args.allow_root {
-        cfg.mount_options.push(MountOption::AllowRoot);
+        cfg.acl = fuser::SessionACL::RootAndOwner;
     }
 
     let fs = FiocFS::new();
