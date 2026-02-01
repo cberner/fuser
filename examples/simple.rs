@@ -54,6 +54,7 @@ use fuser::ReplyStatfs;
 use fuser::ReplyWrite;
 use fuser::ReplyXattr;
 use fuser::Request;
+use fuser::SessionACL;
 use fuser::TimeOrNow;
 use fuser::TimeOrNow::Now;
 use fuser::WriteFlags;
@@ -2157,28 +2158,27 @@ fn main() {
         .filter_level(log_level)
         .init();
 
-    let mut options = vec![MountOption::FSName("fuser".to_string())];
+    let mut cfg = Config::default();
+    cfg.mount_options = vec![MountOption::FSName("fuser".to_string())];
 
     if args.suid {
         info!("setuid bit support enabled");
-        options.push(MountOption::Suid);
+        cfg.mount_options.push(MountOption::Suid);
     }
     if args.auto_unmount {
-        options.push(MountOption::AutoUnmount);
+        cfg.mount_options.push(MountOption::AutoUnmount);
     }
     if let Ok(enabled) = fuse_allow_other_enabled() {
         if enabled {
-            options.push(MountOption::AllowOther);
+            cfg.acl = SessionACL::All;
         }
     } else {
         eprintln!("Unable to read /etc/fuse.conf");
     }
-    if options.contains(&MountOption::AutoUnmount) && !options.contains(&MountOption::AllowRoot) {
-        options.push(MountOption::AllowOther);
+    if cfg.mount_options.contains(&MountOption::AutoUnmount) && cfg.acl != SessionACL::RootAndOwner
+    {
+        cfg.acl = SessionACL::All;
     }
-
-    let mut cfg = Config::default();
-    cfg.mount_options = options;
 
     let result = fuser::mount2(
         SimpleFS::new(args.data_dir, args.direct_io, args.suid),

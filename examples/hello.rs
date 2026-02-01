@@ -19,6 +19,7 @@ use fuser::ReplyData;
 use fuser::ReplyDirectory;
 use fuser::ReplyEntry;
 use fuser::Request;
+use fuser::SessionACL;
 
 #[derive(Parser)]
 #[command(version, author = "Christopher Berner")]
@@ -151,12 +152,11 @@ fn main() {
         cfg.mount_options.push(MountOption::AutoUnmount);
     }
     if args.allow_root {
-        cfg.mount_options.push(MountOption::AllowRoot);
+        cfg.acl = SessionACL::RootAndOwner;
     }
-    if cfg.mount_options.contains(&MountOption::AutoUnmount)
-        && !cfg.mount_options.contains(&MountOption::AllowRoot)
+    if cfg.mount_options.contains(&MountOption::AutoUnmount) && cfg.acl != SessionACL::RootAndOwner
     {
-        cfg.mount_options.push(MountOption::AllowOther);
+        cfg.acl = SessionACL::All;
     }
     fuser::mount2(HelloFS, &args.mount_point, &cfg).unwrap();
 }

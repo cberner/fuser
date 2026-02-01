@@ -9,6 +9,7 @@ use std::path::Path;
 use std::ptr;
 use std::sync::Arc;
 
+use crate::SessionACL;
 use crate::dev_fuse::DevFuse;
 use crate::mnt::MountOption;
 use crate::mnt::fuse3_sys::fuse_lowlevel_ops;
@@ -37,9 +38,10 @@ impl MountImpl {
     pub(crate) fn new(
         mnt: &Path,
         options: &[MountOption],
+        acl: SessionACL,
     ) -> io::Result<(Arc<DevFuse>, MountImpl)> {
         let mnt = CString::new(mnt.as_os_str().as_bytes()).unwrap();
-        with_fuse_args(options, |args| {
+        with_fuse_args(options, acl, |args| {
             let ops = fuse_lowlevel_ops::default();
 
             let fuse_session = unsafe {

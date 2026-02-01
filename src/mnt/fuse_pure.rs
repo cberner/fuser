@@ -38,6 +38,7 @@ use nix::sys::socket::MsgFlags;
 use nix::sys::socket::SockaddrStorage;
 use nix::sys::socket::recvmsg;
 
+use crate::SessionACL;
 use crate::dev_fuse::DevFuse;
 use crate::mnt::is_mounted;
 use crate::mnt::mount_options::MountOption;
@@ -58,9 +59,10 @@ impl MountImpl {
     pub(crate) fn new(
         mountpoint: &Path,
         options: &[MountOption],
+        acl: SessionACL,
     ) -> io::Result<(Arc<DevFuse>, MountImpl)> {
         let mountpoint = mountpoint.canonicalize()?;
-        let (file, sock) = fuse_mount_pure(mountpoint.as_os_str(), options)?;
+        let (file, sock) = fuse_mount_pure(mountpoint.as_os_str(), options, acl)?;
         let file = Arc::new(file);
         Ok((
             file.clone(),
@@ -101,17 +103,18 @@ impl MountImpl {
 fn fuse_mount_pure(
     mountpoint: &OsStr,
     options: &[MountOption],
+    acl: SessionACL,
 ) -> Result<(DevFuse, Option<UnixStream>), io::Error> {
     if options.contains(&MountOption::AutoUnmount) {
         // Auto unmount is only supported via fusermount
-        return fuse_mount_fusermount(mountpoint, options);
+        return fuse_mount_fusermount(mountpoint, options, acl);
     }
 
     // The direct mount path is currently implemented only for Linux and macOS.
     // Other supported Unix targets (such as the BSDs) rely on the setuid
     // mount helper, which mirrors libfuse's approach.
     if cfg!(target_os = "linux") || cfg!(target_os = "macos") {
-        let res = fuse_mount_sys(mountpoint, options)?;
+        let res = fuse_mount_sys(mountpoint, options, acl)?;
         match res {
             Some(file) => return Ok((file, None)),
             None => {
@@ -120,7 +123,7 @@ fn fuse_mount_pure(
         }
     }
 
-    fuse_mount_fusermount(mountpoint, options)
+    fuse_mount_fusermount(mountpoint, options, acl)
 }
 
 fn fuse_unmount_pure(mountpoint: &CStr) {
@@ -254,6 +257,7 @@ unsafe fn clear_cloexec_in_pre_exec(command: &mut Command, fd: BorrowedFd<'_>) {
 fn fuse_mount_fusermount(
     mountpoint: &OsStr,
     options: &[MountOption],
+    acl: SessionACL,
 ) -> Result<(DevFuse, Option<UnixStream>), Error> {
     let fusermount_bin = detect_fusermount_bin();
 
@@ -265,9 +269,10 @@ fn fuse_mount_fusermount(
 
     let mut builder = Command::new(&fusermount_bin);
     builder.stdout(Stdio::piped()).stderr(Stdio::piped());
-    if !options.is_empty() {
+    let mut options_strs: Vec<String> = options.iter().map(option_to_string).collect();
+    options_strs.extend(acl.to_mount_option().map(|s| s.to_owned()));
+    if !options_strs.is_empty() {
         builder.arg("-o");
-        let options_strs: Vec<String> = options.iter().map(option_to_string).collect();
         builder.arg(options_strs.join(","));
     }
     builder
@@ -371,7 +376,11 @@ fn fuse_mount_mount_fusefs(
 
 // If returned option is none. Then fusermount binary should be tried
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-fn fuse_mount_sys(mountpoint: &OsStr, options: &[MountOption]) -> Result<Option<DevFuse>, Error> {
+fn fuse_mount_sys(
+    mountpoint: &OsStr,
+    options: &[MountOption],
+    acl: SessionACL,
+) -> Result<Option<DevFuse>, Error> {
     use std::os::unix::fs::PermissionsExt;
 
     let mountpoint_mode = File::open(mountpoint)?.metadata()?.permissions().mode();
@@ -408,6 +417,10 @@ fn fuse_mount_sys(mountpoint: &OsStr, options: &[MountOption]) -> Result<Option<
     {
         mount_options.push(',');
         mount_options.push_str(&option_to_string(option));
+    }
+    if let Some(acl_option) = acl.to_mount_option() {
+        mount_options.push(',');
+        mount_options.push_str(acl_option);
     }
 
     #[cfg(target_os = "linux")]
@@ -483,7 +496,11 @@ fn fuse_mount_sys(mountpoint: &OsStr, options: &[MountOption]) -> Result<Option<
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-fn fuse_mount_sys(_mountpoint: &OsStr, _options: &[MountOption]) -> Result<Option<DevFuse>, Error> {
+fn fuse_mount_sys(
+    _mountpoint: &OsStr,
+    _options: &[MountOption],
+    _acl: SessionACL,
+) -> Result<Option<DevFuse>, Error> {
     Ok(None)
 }
 
@@ -502,7 +519,6 @@ pub(crate) fn option_group(option: &MountOption) -> MountOptionGroup {
         MountOption::Subtype(_) => MountOptionGroup::Fusermount,
         MountOption::CUSTOM(_) => MountOptionGroup::KernelOption,
         MountOption::AutoUnmount => MountOptionGroup::Fusermount,
-        MountOption::AllowOther => MountOptionGroup::KernelOption,
         MountOption::Dev => MountOptionGroup::KernelFlag,
         MountOption::NoDev => MountOptionGroup::KernelFlag,
         MountOption::Suid => MountOptionGroup::KernelFlag,
@@ -516,7 +532,6 @@ pub(crate) fn option_group(option: &MountOption) -> MountOptionGroup {
         MountOption::DirSync => MountOptionGroup::KernelFlag,
         MountOption::Sync => MountOptionGroup::KernelFlag,
         MountOption::Async => MountOptionGroup::KernelFlag,
-        MountOption::AllowRoot => MountOptionGroup::KernelOption,
         MountOption::DefaultPermissions => MountOptionGroup::KernelOption,
     }
 }

@@ -28,7 +28,11 @@ use crate::dev_fuse::DevFuse;
 /// Helper function to provide options as a `fuse_args` struct
 /// (which contains an argc count and an argv pointer)
 #[cfg(any(test, fuser_mount_impl = "libfuse2", fuser_mount_impl = "libfuse3"))]
-fn with_fuse_args<T, F: FnOnce(&fuse_args) -> T>(options: &[MountOption], f: F) -> T {
+fn with_fuse_args<T, F: FnOnce(&fuse_args) -> T>(
+    options: &[MountOption],
+    acl: SessionACL,
+    f: F,
+) -> T {
     use std::ffi::CString;
 
     use mount_options::option_to_string;
@@ -39,6 +43,10 @@ fn with_fuse_args<T, F: FnOnce(&fuse_args) -> T>(options: &[MountOption], f: F) 
             CString::new("-o").unwrap(),
             CString::new(option_to_string(x)).unwrap(),
         ]);
+    }
+    if let Some(acl) = acl.to_mount_option() {
+        args.push(CString::new("-o").unwrap());
+        args.push(CString::new(acl).unwrap());
     }
     let argptrs: Vec<_> = args.iter().map(|s| s.as_ptr()).collect();
     f(&fuse_args {
@@ -52,6 +60,8 @@ use std::ffi::CStr;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
+
+use crate::SessionACL;
 
 #[derive(Debug)]
 enum MountImpl {
@@ -89,10 +99,11 @@ impl Mount {
     pub(crate) fn new(
         mountpoint: &Path,
         options: &[MountOption],
+        acl: SessionACL,
     ) -> io::Result<(Arc<DevFuse>, Mount)> {
         #[cfg(fuser_mount_impl = "pure-rust")]
         {
-            let (dev_fuse, mount) = fuse_pure::MountImpl::new(mountpoint, options)?;
+            let (dev_fuse, mount) = fuse_pure::MountImpl::new(mountpoint, options, acl)?;
             Ok((
                 dev_fuse,
                 Mount {
@@ -103,7 +114,7 @@ impl Mount {
         }
         #[cfg(fuser_mount_impl = "libfuse2")]
         {
-            let (dev_fuse, mount) = fuse2::MountImpl::new(mountpoint, options)?;
+            let (dev_fuse, mount) = fuse2::MountImpl::new(mountpoint, options, acl)?;
             Ok((
                 dev_fuse,
                 Mount {
@@ -114,7 +125,7 @@ impl Mount {
         }
         #[cfg(fuser_mount_impl = "libfuse3")]
         {
-            let (dev_fuse, mount) = fuse3::MountImpl::new(mountpoint, options)?;
+            let (dev_fuse, mount) = fuse3::MountImpl::new(mountpoint, options, acl)?;
             Ok((
                 dev_fuse,
                 Mount {
@@ -226,6 +237,7 @@ mod test {
                 MountOption::CUSTOM("foo".into()),
                 MountOption::CUSTOM("bar".into()),
             ],
+            SessionACL::RootAndOwner,
             |args| {
                 let v: Vec<_> = (0..args.argc)
                     .map(|n| unsafe {
@@ -234,7 +246,10 @@ mod test {
                             .unwrap()
                     })
                     .collect();
-                assert_eq!(*v, ["rust-fuse", "-o", "foo", "-o", "bar"]);
+                assert_eq!(
+                    *v,
+                    ["rust-fuse", "-o", "foo", "-o", "bar", "-o", "allow_other"]
+                );
             },
         );
     }
@@ -261,7 +276,7 @@ mod test {
         // want to try and clean up the directory if it's a mountpoint otherwise we'll
         // deadlock.
         let tmp = ManuallyDrop::new(tempfile::tempdir().unwrap());
-        let (file, mount) = Mount::new(tmp.path(), &[]).unwrap();
+        let (file, mount) = Mount::new(tmp.path(), &[], SessionACL::default()).unwrap();
         let mnt = cmd_mount();
         eprintln!("Our mountpoint: {:?}\nfuse mounts:\n{}", tmp.path(), mnt,);
         assert!(mnt.contains(&*tmp.path().to_string_lossy()));
