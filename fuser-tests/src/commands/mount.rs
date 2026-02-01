@@ -20,7 +20,9 @@ use crate::libfuse::Libfuse;
 use crate::mount_util::wait_for_fuse_mount;
 use crate::unmount::Unmount;
 use crate::unmount::kill_and_unmount;
-use crate::users::run_as_user;
+use crate::users::assert_can_read_as_user;
+use crate::users::assert_cannot_read_as_user;
+use crate::users::mktempdir_as_user;
 use crate::users::run_as_user_status;
 
 pub(crate) async fn run_mount_tests(libfuse: Libfuse) -> anyhow::Result<()> {
@@ -147,8 +149,8 @@ async fn test_no_user_allow_other(features: &[Feature], libfuse: &Libfuse) -> an
 
     fuse_conf_remove_user_allow_other().await?;
 
-    let mount_dir = run_as_user("fusertestnoallow", "mktemp --directory").await?;
-    let data_dir = run_as_user("fusertestnoallow", "mktemp --directory").await?;
+    let mount_dir = mktempdir_as_user("fusertestnoallow").await?;
+    let data_dir = mktempdir_as_user("fusertestnoallow").await?;
 
     eprintln!("Mount dir: {}", mount_dir);
     eprintln!("Data dir: {}", data_dir);
@@ -189,7 +191,7 @@ async fn test_no_user_allow_other(features: &[Feature], libfuse: &Libfuse) -> an
 async fn run_allow_root_test() -> anyhow::Result<()> {
     eprintln!("\n=== Running run_allow_root_test ===");
 
-    let mount_dir = run_as_user("fusertest1", "mktemp --directory").await?;
+    let mount_dir = mktempdir_as_user("fusertest1").await?;
     eprintln!("Mount dir: {}", mount_dir);
 
     let hello_exe = cargo_build_example("hello", &[Feature::Libfuse3]).await?;
@@ -206,28 +208,16 @@ async fn run_allow_root_test() -> anyhow::Result<()> {
 
     // Test: root can read
     let hello_path = format!("{}/hello.txt", mount_dir);
-    let root_content = run_as_user("root", &format!("cat {}", hello_path)).await?;
-    if root_content == "Hello World!" {
-        green!("OK root can read");
-    } else {
-        bail!("root can't read hello.txt");
-    }
+    assert_can_read_as_user("root", &hello_path, "Hello World!\n").await?;
+    green!("OK root can read");
 
     // Test: owner can read
-    let owner_content = run_as_user("fusertest1", &format!("cat {}", hello_path)).await?;
-    if owner_content == "Hello World!" {
-        green!("OK owner can read");
-    } else {
-        bail!("owner can't read hello.txt");
-    }
+    assert_can_read_as_user("fusertest1", &hello_path, "Hello World!\n").await?;
+    green!("OK owner can read");
 
     // Test: other user can't read
-    let other_content = run_as_user("fusertest2", &format!("cat {}", hello_path)).await?;
-    if other_content == "Hello World!" {
-        bail!("other user should not be able to read hello.txt");
-    } else {
-        green!("OK other user can't read");
-    }
+    assert_cannot_read_as_user("fusertest2", &hello_path).await?;
+    green!("OK other user can't read");
 
     kill_and_unmount(fuse_process, Unmount::Manual, "hello", &mount_dir).await?;
 
