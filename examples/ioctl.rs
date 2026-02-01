@@ -17,7 +17,7 @@ use fuser::INodeNo;
 use fuser::IoctlFlags;
 use fuser::LockOwner;
 use fuser::MountOption;
-use fuser::ReadFlags;
+use fuser::OpenFlags;
 use fuser::ReplyAttr;
 use fuser::ReplyData;
 use fuser::ReplyDirectory;
@@ -126,7 +126,7 @@ impl Filesystem for FiocFS {
         _fh: FileHandle,
         offset: u64,
         _size: u32,
-        _flags: ReadFlags,
+        _flags: OpenFlags,
         _lock_owner: Option<LockOwner>,
         reply: ReplyData,
     ) {

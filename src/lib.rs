@@ -42,7 +42,6 @@ pub use crate::ll::flags::fopen_flags::FopenFlags;
 pub use crate::ll::flags::init_flags::InitFlags;
 pub use crate::ll::flags::ioctl_flags::IoctlFlags;
 pub use crate::ll::flags::poll_flags::PollFlags;
-pub use crate::ll::flags::read_flags::ReadFlags;
 pub use crate::ll::flags::write_flags::WriteFlags;
 pub use crate::ll::fuse_abi::consts;
 pub use crate::ll::request::FileHandle;
@@ -597,7 +596,7 @@ pub trait Filesystem: Send + Sync + 'static {
         fh: FileHandle,
         offset: u64,
         size: u32,
-        flags: ReadFlags,
+        flags: OpenFlags,
         lock_owner: Option<LockOwner>,
         reply: ReplyData,
     ) {

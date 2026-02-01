@@ -403,7 +403,9 @@ pub(crate) struct fuse_read_in {
     pub(crate) size: u32,
     pub(crate) read_flags: u32,
     pub(crate) lock_owner: u64,
-    pub(crate) flags: u32,
+    // NOTE: this field is defined as u32 in fuse_kernel.h in libfuse. However, it is then cast
+    // to an i32 when invoking the filesystem's read method
+    pub(crate) flags: i32,
     pub(crate) padding: u32,
 }
 
