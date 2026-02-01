@@ -71,5 +71,5 @@ test: pre mount_tests pjdfs_tests xfstests
 test_macos: pre
 	cargo doc --all --no-deps
 	cargo test --all --all-targets --features=libfuse2 -- --skip=mnt::test::mount_unmount
-	./osx_mount_tests.sh
+	cargo run -p fuser-tests -- macos-mount
 	./tests/macos_pjdfs.sh

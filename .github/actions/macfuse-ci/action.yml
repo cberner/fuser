@@ -25,5 +25,5 @@ runs:
       shell: bash
       run: |
         cargo test --all --all-targets --features=libfuse -- --skip=mnt::test::mount_unmount
-        ./osx_mount_tests.sh
+        cargo run -p fuser-tests -- macos-mount
         ./tests/macos_pjdfs.sh
