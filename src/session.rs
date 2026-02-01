@@ -171,10 +171,6 @@ impl<FS: Filesystem> Session<FS> {
 
         let ret = self.event_loop();
 
-        if let Some(mut filesystem) = self.filesystem.take() {
-            filesystem.destroy();
-        }
-
         match ret {
             Err(e) => Err(e),
             Ok(None) => Ok(()),
@@ -403,10 +399,6 @@ impl SessionUnmounter {
 
 impl<FS: Filesystem> Drop for Session<FS> {
     fn drop(&mut self) {
-        if let Some(mut filesystem) = self.filesystem.take() {
-            filesystem.destroy();
-        }
-
         if let Some(mount) = std::mem::take(&mut *self.mount.lock()) {
             if let Err(e) = mount.umount() {
                 warn!("Unmount failed: {e}");
