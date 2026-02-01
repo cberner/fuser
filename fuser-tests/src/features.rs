@@ -1,5 +1,7 @@
 //! Feature flags for cargo builds.
 
+use std::fmt;
+
 /// Cargo feature flags for fuser.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Feature {
@@ -38,5 +40,11 @@ pub(crate) fn features_to_flags(features: &[Feature]) -> Option<String> {
         None
     } else {
         Some(format!("--features={}", features_to_string(features)))
+    }
+}
+
+impl fmt::Display for Feature {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
     }
 }

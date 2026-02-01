@@ -1,10 +1,9 @@
 use anyhow::Context;
-use anyhow::bail;
 use tokio::process::Child;
 
-use crate::ansi::green;
 use crate::command_utils::command_success;
-use crate::mount_util::read_mounts;
+use crate::mount_util::assert_no_fuse_mount;
+use crate::mount_util::assert_single_fuse_mount;
 use crate::mount_util::wait_for_fuse_umount;
 
 /// Unmount behavior for FUSE filesystem tests.
@@ -21,13 +20,8 @@ pub(crate) async fn kill_and_unmount(
     unmount: Unmount,
     device: &str,
     mount_path: &str,
-    description: &str,
 ) -> anyhow::Result<()> {
-    // Check that mount exists before killing the process
-    let entries = read_mounts().await?;
-    if !entries.iter().any(|e| e.is_fuse_mount_on_dev(device)) {
-        bail!("FUSE mount does not exist before kill");
-    }
+    assert_single_fuse_mount(device).await?;
 
     fuse_process
         .kill()
@@ -37,11 +31,10 @@ pub(crate) async fn kill_and_unmount(
     match unmount {
         Unmount::Auto => {
             wait_for_fuse_umount(device).await?;
-            green!("OK Mount cleaned up: {} --auto-unmount", description);
         }
         Unmount::Manual => {
             command_success(["umount", mount_path]).await?;
-            green!("OK Unmounted: {}", description);
+            assert_no_fuse_mount(device).await?;
         }
     }
 

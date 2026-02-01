@@ -42,24 +42,25 @@ pjdfs_tests_pure:
 	 -v "$(shell pwd)/logs:/code/logs" fuser:pjdfs-pure bash -c "cd /code/fuser && ./pjdfs.sh"
 
 mount_tests:
-	docker build -t fuser:mount_tests -f mount_tests.Dockerfile .
+	docker build -t fuser:mount_tests_libfuse2 -f mount_tests_libfuse2.Dockerfile .
+	docker build -t fuser:mount_tests_libfuse3 -f mount_tests_libfuse3.Dockerfile .
 	mkdir -p docker-cargo-caches/target docker-cargo-caches/git docker-cargo-caches/registry
 	# Additional permissions are needed to be able to mount FUSE
 	docker run --rm -$(INTERACTIVE)t --cap-add SYS_ADMIN --device /dev/fuse --security-opt apparmor:unconfined \
 	 -v "$(shell pwd)/docker-cargo-caches/target:/code/fuser/target" \
 	 -v "$(shell pwd)/docker-cargo-caches/git:/root/.cargo/git" \
 	 -v "$(shell pwd)/docker-cargo-caches/registry:/root/.cargo/registry" \
-	 fuser:mount_tests bash -c "cd /code/fuser && cargo run -p fuser-tests -- simple"
+	 fuser:mount_tests_libfuse3 bash -c "cd /code/fuser && cargo run -p fuser-tests -- simple"
 	docker run --rm -$(INTERACTIVE)t --cap-add SYS_ADMIN --device /dev/fuse --security-opt apparmor:unconfined \
 	 -v "$(shell pwd)/docker-cargo-caches/target:/code/fuser/target" \
 	 -v "$(shell pwd)/docker-cargo-caches/git:/root/.cargo/git" \
 	 -v "$(shell pwd)/docker-cargo-caches/registry:/root/.cargo/registry" \
-	 fuser:mount_tests bash -c "cd /code/fuser && cargo run -p fuser-tests -- mount"
+	 fuser:mount_tests_libfuse2 bash -c "cd /code/fuser && cargo run -p fuser-tests -- linux-mount-libfuse2"
 	docker run --rm -$(INTERACTIVE)t --cap-add SYS_ADMIN --device /dev/fuse --security-opt apparmor:unconfined \
 	 -v "$(shell pwd)/docker-cargo-caches/target:/code/fuser/target" \
 	 -v "$(shell pwd)/docker-cargo-caches/git:/root/.cargo/git" \
 	 -v "$(shell pwd)/docker-cargo-caches/registry:/root/.cargo/registry" \
-	 fuser:mount_tests bash -c "cd /code/fuser && cargo run -p fuser-tests -- experimental"
+	 fuser:mount_tests_libfuse3 bash -c "cd /code/fuser && cargo run -p fuser-tests -- linux-mount-libfuse3"
 
 test_passthrough:
 	cargo build --example passthrough
