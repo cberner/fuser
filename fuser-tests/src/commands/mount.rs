@@ -9,7 +9,6 @@ use tokio::process::Command;
 
 use crate::ansi::green;
 use crate::cargo::cargo_build_example;
-use crate::command_utils::command_output;
 use crate::experimental::run_experimental_tests;
 use crate::features::Feature;
 use crate::features::features_to_flags;
@@ -17,6 +16,7 @@ use crate::fuse_conf::fuse_conf_remove_user_allow_other;
 use crate::fuse_conf::fuse_conf_write_user_allow_other;
 use crate::fusermount::Fusermount;
 use crate::libfuse::Libfuse;
+use crate::mount_util::assert_no_fuse_mount;
 use crate::mount_util::wait_for_fuse_mount;
 use crate::unmount::Unmount;
 use crate::unmount::kill_and_unmount;
@@ -173,14 +173,8 @@ async fn test_no_user_allow_other(features: &[Feature], libfuse: &Libfuse) -> an
         bail!("Expected exit code 2, got {}", exit_code);
     }
 
-    // Make sure the FUSE mount did not mount
-    let mount_info = command_output(["mount"]).await?;
-    if mount_info.contains("hello") {
-        let _ = Command::new("umount").arg(&mount_dir).status().await;
-        bail!("Mount should not exist");
-    } else {
-        green!("OK Mount does not exist: {}", description);
-    }
+    assert_no_fuse_mount("hello").await?;
+    green!("OK Mount does not exist: {}", description);
 
     // Restore fuse.conf
     fuse_conf_write_user_allow_other().await?;
