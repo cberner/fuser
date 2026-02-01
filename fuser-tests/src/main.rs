@@ -1,18 +1,15 @@
 //! Test runner for fuser
 
 mod ansi;
-mod bsd_mount;
 mod cargo;
 mod command_utils;
+mod commands;
 mod experimental;
 mod features;
 mod fuse_conf;
 mod fusermount;
 mod libfuse;
-mod macos_mount;
-mod mount;
 mod mount_util;
-mod simple;
 mod unmount;
 mod users;
 
@@ -20,6 +17,10 @@ use anyhow::bail;
 use clap::Parser;
 use clap::Subcommand;
 
+use crate::commands::bsd_mount;
+use crate::commands::macos_mount;
+use crate::commands::mount;
+use crate::commands::simple;
 use crate::libfuse::Libfuse;
 
 /// Execute e2e tests for fuser.
