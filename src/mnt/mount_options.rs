@@ -3,6 +3,14 @@ use std::ffi::OsStr;
 use std::io;
 use std::io::ErrorKind;
 
+/// Fuser session configuration, including mount options.
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+#[non_exhaustive]
+pub struct Config {
+    /// Mount options.
+    pub mount_options: Vec<MountOption>,
+}
+
 /// Mount options accepted by the FUSE filesystem type
 /// See 'man mount.fuse' for details
 // TODO: add all options that 'man mount.fuse' documents and libfuse supports
@@ -87,10 +95,14 @@ impl MountOption {
     }
 }
 
-pub(crate) fn check_option_conflicts(options: &[MountOption]) -> Result<(), io::Error> {
+pub(crate) fn check_option_conflicts(options: &Config) -> Result<(), io::Error> {
     let mut options_set = HashSet::new();
-    options_set.extend(options.iter().cloned());
-    let conflicting: HashSet<MountOption> = options.iter().flat_map(conflicts_with).collect();
+    options_set.extend(options.mount_options.iter().cloned());
+    let conflicting: HashSet<MountOption> = options
+        .mount_options
+        .iter()
+        .flat_map(conflicts_with)
+        .collect();
     let intersection: Vec<MountOption> = conflicting.intersection(&options_set).cloned().collect();
     if intersection.is_empty() {
         Ok(())
@@ -160,7 +172,7 @@ pub(crate) fn option_to_string(option: &MountOption) -> String {
 ///
 /// Input: `"-o", "suid", "-o", "ro,nodev,noexec", "-osync"`
 /// Output Ok([`Suid`, `RO`, `NoDev`, `NoExec`, `Sync`])
-pub(crate) fn parse_options_from_args(args: &[&OsStr]) -> io::Result<Vec<MountOption>> {
+pub(crate) fn parse_options_from_args(args: &[&OsStr]) -> io::Result<Config> {
     let err = |x| io::Error::new(ErrorKind::InvalidInput, x);
     let args: Option<Vec<_>> = args.iter().map(|x| x.to_str()).collect();
     let args = args.ok_or_else(|| err("Error parsing args: Invalid UTF-8".to_owned()))?;
@@ -179,7 +191,7 @@ pub(crate) fn parse_options_from_args(args: &[&OsStr]) -> io::Result<Vec<MountOp
             out.push(MountOption::from_str(x));
         }
     }
-    Ok(out)
+    Ok(Config { mount_options: out })
 }
 
 #[cfg(test)]
@@ -190,8 +202,18 @@ mod test {
 
     #[test]
     fn option_checking() {
-        assert!(check_option_conflicts(&[MountOption::Suid, MountOption::NoSuid]).is_err());
-        assert!(check_option_conflicts(&[MountOption::Suid, MountOption::NoExec]).is_ok());
+        assert!(
+            check_option_conflicts(&Config {
+                mount_options: vec![MountOption::Suid, MountOption::NoSuid]
+            })
+            .is_err()
+        );
+        assert!(
+            check_option_conflicts(&Config {
+                mount_options: vec![MountOption::Suid, MountOption::NoExec]
+            })
+            .is_ok()
+        );
     }
     #[test]
     fn option_round_trip() {
@@ -225,14 +247,19 @@ mod test {
     fn test_parse_options() {
         use crate::mnt::mount_options::MountOption::*;
 
-        assert_eq!(parse_options_from_args(&[]).unwrap(), &[]);
+        assert_eq!(parse_options_from_args(&[]).unwrap(), Config::default());
 
         let o: Vec<_> = "-o suid -o ro,nodev,noexec -osync"
             .split(' ')
             .map(OsStr::new)
             .collect();
         let out = parse_options_from_args(o.as_ref()).unwrap();
-        assert_eq!(out, [Suid, RO, NoDev, NoExec, Sync]);
+        assert_eq!(
+            out,
+            Config {
+                mount_options: vec![Suid, RO, NoDev, NoExec, Sync]
+            }
+        );
 
         assert!(parse_options_from_args(&[OsStr::new("-o")]).is_err());
         assert!(parse_options_from_args(&[OsStr::new("not o")]).is_err());

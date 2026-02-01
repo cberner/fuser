@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use clap::Parser;
+use fuser::Config;
 use fuser::Filesystem;
 use fuser::MountOption;
 
@@ -18,10 +19,7 @@ impl Filesystem for NullFS {}
 fn main() {
     let args = Args::parse();
     env_logger::init();
-    fuser::mount2(
-        NullFS,
-        &args.mount_point,
-        &[MountOption::AutoUnmount, MountOption::AllowOther],
-    )
-    .unwrap();
+    let mut cfg = Config::default();
+    cfg.mount_options = vec![MountOption::AutoUnmount, MountOption::AllowOther];
+    fuser::mount2(NullFS, &args.mount_point, &cfg).unwrap();
 }

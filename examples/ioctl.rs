@@ -8,6 +8,7 @@ use std::time::Duration;
 use std::time::UNIX_EPOCH;
 
 use clap::Parser;
+use fuser::Config;
 use fuser::Errno;
 use fuser::FileAttr;
 use fuser::FileHandle;
@@ -205,14 +206,16 @@ fn main() {
     let args = Args::parse();
     env_logger::init();
 
-    let mut options = vec![MountOption::FSName("fioc".to_string())];
+    let mut cfg = Config::default();
+
+    cfg.mount_options = vec![MountOption::FSName("fioc".to_string())];
     if args.auto_unmount {
-        options.push(MountOption::AutoUnmount);
+        cfg.mount_options.push(MountOption::AutoUnmount);
     }
     if args.allow_root {
-        options.push(MountOption::AllowRoot);
+        cfg.mount_options.push(MountOption::AllowRoot);
     }
 
     let fs = FiocFS::new();
-    fuser::mount2(fs, &args.mount_point, &options).unwrap();
+    fuser::mount2(fs, &args.mount_point, &cfg).unwrap();
 }

@@ -11,6 +11,7 @@ use std::time::UNIX_EPOCH;
 
 use clap::Parser;
 use fuser::BackingId;
+use fuser::Config;
 use fuser::Errno;
 use fuser::FileAttr;
 use fuser::FileHandle;
@@ -263,17 +264,20 @@ fn main() {
     let args = Args::parse();
     env_logger::init();
 
-    let mut options = vec![MountOption::FSName("passthrough".to_string())];
+    let mut cfg = Config::default();
+    cfg.mount_options = vec![MountOption::FSName("passthrough".to_string())];
     if args.auto_unmount {
-        options.push(MountOption::AutoUnmount);
+        cfg.mount_options.push(MountOption::AutoUnmount);
     }
     if args.allow_root {
-        options.push(MountOption::AllowRoot);
+        cfg.mount_options.push(MountOption::AllowRoot);
     }
-    if options.contains(&MountOption::AutoUnmount) && !options.contains(&MountOption::AllowRoot) {
-        options.push(MountOption::AllowOther);
+    if cfg.mount_options.contains(&MountOption::AutoUnmount)
+        && !cfg.mount_options.contains(&MountOption::AllowRoot)
+    {
+        cfg.mount_options.push(MountOption::AllowOther);
     }
 
     let fs = PassthroughFs::new();
-    fuser::mount2(fs, &args.mount_point, &options).unwrap();
+    fuser::mount2(fs, &args.mount_point, &cfg).unwrap();
 }

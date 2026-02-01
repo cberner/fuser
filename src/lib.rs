@@ -16,7 +16,6 @@ use std::cmp::min;
 use std::convert::AsRef;
 use std::ffi::OsStr;
 use std::io;
-use std::io::ErrorKind;
 use std::os::unix::fs::FileTypeExt;
 use std::path::Path;
 use std::time::Duration;
@@ -49,6 +48,7 @@ pub use crate::ll::request::FileHandle;
 pub use crate::ll::request::INodeNo;
 pub use crate::ll::request::LockOwner;
 pub use crate::ll::request::Version;
+pub use crate::mnt::mount_options::Config;
 pub use crate::mnt::mount_options::MountOption;
 use crate::mnt::mount_options::check_option_conflicts;
 use crate::mnt::mount_options::parse_options_from_args;
@@ -1058,7 +1058,7 @@ pub fn mount<FS: Filesystem, P: AsRef<Path>>(
     options: &[&OsStr],
 ) -> io::Result<()> {
     let options = parse_options_from_args(options)?;
-    mount2(filesystem, mountpoint, options.as_ref())
+    mount2(filesystem, mountpoint, &options)
 }
 
 /// Mount the given filesystem to the given mountpoint. This function will
@@ -1071,7 +1071,7 @@ pub fn mount<FS: Filesystem, P: AsRef<Path>>(
 pub fn mount2<FS: Filesystem, P: AsRef<Path>>(
     filesystem: FS,
     mountpoint: P,
-    options: &[MountOption],
+    options: &Config,
 ) -> io::Result<()> {
     check_option_conflicts(options)?;
     Session::new(filesystem, mountpoint.as_ref(), options).and_then(|se| se.run())
@@ -1090,13 +1090,8 @@ pub fn spawn_mount<'a, FS: Filesystem + Send + 'static + 'a, P: AsRef<Path>>(
     mountpoint: P,
     options: &[&OsStr],
 ) -> io::Result<BackgroundSession> {
-    let options: Option<Vec<_>> = options
-        .iter()
-        .map(|x| Some(MountOption::from_str(x.to_str()?)))
-        .collect();
-    let options = options.ok_or(ErrorKind::InvalidData)?;
-    Session::new(filesystem, mountpoint.as_ref(), options.as_ref())
-        .and_then(session::Session::spawn)
+    let options = parse_options_from_args(options)?;
+    Session::new(filesystem, mountpoint.as_ref(), &options).and_then(session::Session::spawn)
 }
 
 /// Mount the given filesystem to the given mountpoint. This function spawns
@@ -1111,7 +1106,7 @@ pub fn spawn_mount<'a, FS: Filesystem + Send + 'static + 'a, P: AsRef<Path>>(
 pub fn spawn_mount2<'a, FS: Filesystem + Send + 'static + 'a, P: AsRef<Path>>(
     filesystem: FS,
     mountpoint: P,
-    options: &[MountOption],
+    options: &Config,
 ) -> io::Result<BackgroundSession> {
     check_option_conflicts(options)?;
     Session::new(filesystem, mountpoint.as_ref(), options).and_then(session::Session::spawn)
