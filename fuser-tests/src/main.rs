@@ -9,6 +9,7 @@ mod experimental;
 mod features;
 mod fuse_conf;
 mod fusermount;
+mod macos_mount;
 mod mount;
 mod mount_util;
 mod simple;
@@ -32,6 +33,8 @@ enum FuserCommand {
     Experimental,
     /// Run BSD mount tests.
     BsdMount,
+    /// Run macOS mount tests.
+    MacosMount,
     /// Run mount tests.
     Mount,
     /// Run simple filesystem tests.
@@ -64,6 +67,7 @@ async fn main_inner() -> anyhow::Result<()> {
     match command {
         FuserCommand::Experimental => experimental::run_experimental_tests().await?,
         FuserCommand::BsdMount => bsd_mount::run_bsd_mount_tests().await?,
+        FuserCommand::MacosMount => macos_mount::run_macos_mount_tests().await?,
         FuserCommand::Mount => mount::run_mount_tests().await?,
         FuserCommand::Simple => simple::run_simple_tests().await?,
     }
