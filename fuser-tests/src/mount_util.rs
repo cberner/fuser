@@ -74,6 +74,14 @@ pub(crate) async fn wait_for_fuse_mount(device: &str) -> anyhow::Result<()> {
     }
 }
 
+fn mounts_str<'a>(mounts: impl IntoIterator<Item = &'a MountEntry>) -> String {
+    let mut mounts_str = String::new();
+    for entry in mounts {
+        mounts_str.push_str(&format!("  {}\n", entry));
+    }
+    mounts_str
+}
+
 /// Waits for a FUSE mount with the specified device to disappear from mount output.
 pub(crate) async fn wait_for_fuse_umount(device: &str) -> anyhow::Result<()> {
     eprintln!("Waiting for umount...");
@@ -87,19 +95,52 @@ pub(crate) async fn wait_for_fuse_umount(device: &str) -> anyhow::Result<()> {
         }
 
         if start.elapsed() > Duration::from_secs(3) {
-            let mut mounts_str = String::new();
-            for entry in &entries {
-                mounts_str.push_str(&format!("  {}\n", entry));
-            }
             bail!(
                 "Timeout waiting for FUSE umount with device: {}\nAll mounts:\n{}",
                 device,
-                mounts_str
+                mounts_str(&entries)
             );
         }
 
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
+}
+
+pub(crate) async fn assert_no_fuse_mount(device: &str) -> anyhow::Result<()> {
+    let entries = read_mounts().await?;
+    let dev_entries: Vec<&MountEntry> = entries
+        .iter()
+        .filter(|e| e.is_fuse_mount_on_dev(device))
+        .collect();
+    if !dev_entries.is_empty() {
+        bail!(
+            "Expecting no mount of dev {device}, got {}:\nMounts:\n{}",
+            dev_entries.len(),
+            mounts_str(dev_entries)
+        );
+    }
+    Ok(())
+}
+
+pub(crate) async fn assert_single_fuse_mount(device: &str) -> anyhow::Result<()> {
+    let entries = read_mounts().await?;
+    let dev_entries: Vec<&MountEntry> = entries
+        .iter()
+        .filter(|e| e.is_fuse_mount_on_dev(device))
+        .collect();
+    if dev_entries.is_empty() {
+        bail!(
+            "Expecting single mount on dev {device}, got no mounts:\nAll mounts:\n{}",
+            mounts_str(&entries)
+        );
+    }
+    if dev_entries.len() > 1 {
+        bail!(
+            "Expecting single mount on dev {device}, got mounts:\nDevice mounts:\n{}",
+            mounts_str(dev_entries)
+        );
+    }
+    Ok(())
 }
 
 /// Parses the output of the `mount` command.

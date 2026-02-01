@@ -2,7 +2,7 @@ FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN apt update && apt install -y build-essential curl
+RUN apt update && apt install -y build-essential curl fuse3 libfuse3-dev pkg-config
 
 RUN useradd fusertestnoallow && \
     useradd fusertest1 && \

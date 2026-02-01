@@ -1,4 +1,7 @@
+use std::fmt;
+
 /// Override path to `fusermount` for running tests.
+#[derive(Debug, Clone, Copy)]
 pub(crate) enum Fusermount {
     Fusermount,
     Fusermount3,
@@ -15,5 +18,11 @@ impl Fusermount {
             Fusermount::Fusermount3 => "fusermount3",
             Fusermount::False => "/bin/false",
         }
+    }
+}
+
+impl fmt::Display for Fusermount {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_path())
     }
 }

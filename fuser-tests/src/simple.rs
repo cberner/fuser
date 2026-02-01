@@ -69,7 +69,6 @@ pub(crate) async fn run_simple_tests() -> anyhow::Result<()> {
         Unmount::Manual,
         "fuser",
         mount_dir.path().to_str().unwrap(),
-        "simple",
     )
     .await?;
 
