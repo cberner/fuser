@@ -35,10 +35,6 @@ thread_local! {
 struct Args {
     #[clap(flatten)]
     common_args: CommonArgs,
-
-    /// Number of threads to use
-    #[clap(long, default_value_t = 1)]
-    n_threads: usize,
 }
 
 const TTL: Duration = Duration::from_secs(1); // 1 second
@@ -218,9 +214,10 @@ fn main() {
     let mut cfg = args.common_args.config();
     cfg.mount_options
         .extend([MountOption::RO, MountOption::FSName("hello".to_string())]);
-    cfg.n_threads = Some(args.n_threads);
     let fs = HelloFS {
-        reads_per_thread: (0..args.n_threads).map(|_| AtomicU64::new(0)).collect(),
+        reads_per_thread: (0..args.common_args.n_threads)
+            .map(|_| AtomicU64::new(0))
+            .collect(),
         next_thread_index: AtomicUsize::new(0),
     };
     fuser::mount2(fs, &args.common_args.mount_point, &cfg).unwrap();
