@@ -6,6 +6,8 @@
 // Due to the above provenance, unlike the rest of fuser this file is
 // licensed under the terms of the GNU GPLv2.
 
+mod common;
+
 use std::convert::TryInto;
 use std::ffi::OsStr;
 use std::sync::Arc;
@@ -17,7 +19,6 @@ use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
 use clap::Parser;
-use fuser::Config;
 use fuser::Errno;
 use fuser::FileAttr;
 use fuser::FileHandle;
@@ -36,6 +37,8 @@ use fuser::ReplyEntry;
 use fuser::ReplyOpen;
 use fuser::Request;
 use parking_lot::Mutex;
+
+use crate::common::args::CommonArgs;
 
 struct ClockFS {
     file_contents: Arc<Mutex<String>>,
@@ -186,8 +189,8 @@ fn now_string() -> String {
 
 #[derive(Parser)]
 struct Options {
-    /// Mount demo filesystem at given path
-    mount_point: String,
+    #[clap(flatten)]
+    common_args: CommonArgs,
 
     /// Update interval for filesystem contents
     #[clap(short, long, default_value_t = 1.0)]
@@ -204,8 +207,9 @@ struct Options {
 
 fn main() {
     let opts = Options::parse();
-    let mut cfg = Config::default();
-    cfg.mount_options = vec![MountOption::RO, MountOption::FSName("clock".to_string())];
+    let mut cfg = opts.common_args.config();
+    cfg.mount_options
+        .extend([MountOption::RO, MountOption::FSName("clock".to_string())]);
     let fdata = Arc::new(Mutex::new(now_string()));
     let lookup_cnt = Box::leak(Box::new(AtomicU64::new(0)));
     let fs = ClockFS {
@@ -213,7 +217,7 @@ fn main() {
         lookup_cnt,
     };
 
-    let session = fuser::Session::new(fs, opts.mount_point, &cfg).unwrap();
+    let session = fuser::Session::new(fs, opts.common_args.mount_point, &cfg).unwrap();
     let notifier = session.notifier();
     let _bg = session.spawn().unwrap();
 

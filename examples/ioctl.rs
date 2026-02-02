@@ -2,13 +2,13 @@
 //
 //   cargo run --example ioctl /tmp/foobar
 
+mod common;
+
 use std::ffi::OsStr;
-use std::path::PathBuf;
 use std::time::Duration;
 use std::time::UNIX_EPOCH;
 
 use clap::Parser;
-use fuser::Config;
 use fuser::Errno;
 use fuser::FileAttr;
 use fuser::FileHandle;
@@ -17,7 +17,6 @@ use fuser::Filesystem;
 use fuser::INodeNo;
 use fuser::IoctlFlags;
 use fuser::LockOwner;
-use fuser::MountOption;
 use fuser::OpenFlags;
 use fuser::ReplyAttr;
 use fuser::ReplyData;
@@ -28,19 +27,13 @@ use fuser::Request;
 use log::debug;
 use parking_lot::Mutex;
 
+use crate::common::args::CommonArgs;
+
 #[derive(Parser)]
 #[command(version, author = "Colin Marc")]
 struct Args {
-    /// Act as a client, and mount FUSE at given path
-    mount_point: PathBuf,
-
-    /// Automatically unmount on process exit
-    #[clap(long)]
-    auto_unmount: bool,
-
-    /// Allow root user to access filesystem
-    #[clap(long)]
-    allow_root: bool,
+    #[clap(flatten)]
+    common_args: CommonArgs,
 }
 
 const TTL: Duration = Duration::from_secs(1); // 1 second
@@ -206,16 +199,7 @@ fn main() {
     let args = Args::parse();
     env_logger::init();
 
-    let mut cfg = Config::default();
-
-    cfg.mount_options = vec![MountOption::FSName("fioc".to_string())];
-    if args.auto_unmount {
-        cfg.mount_options.push(MountOption::AutoUnmount);
-    }
-    if args.allow_root {
-        cfg.acl = fuser::SessionACL::RootAndOwner;
-    }
-
+    let cfg = args.common_args.config();
     let fs = FiocFS::new();
-    fuser::mount2(fs, &args.mount_point, &cfg).unwrap();
+    fuser::mount2(fs, &args.common_args.mount_point, &cfg).unwrap();
 }

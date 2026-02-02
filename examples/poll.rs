@@ -7,10 +7,11 @@
 // Due to the above provenance, unlike the rest of fuser this file is
 // licensed under the terms of the GNU GPLv2.
 
+mod common;
+
 use std::convert::TryInto;
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::SeqCst;
@@ -19,7 +20,6 @@ use std::time::Duration;
 use std::time::UNIX_EPOCH;
 
 use clap::Parser;
-use fuser::Config;
 use fuser::Errno;
 use parking_lot::Mutex;
 use parking_lot::MutexGuard;
@@ -27,8 +27,8 @@ use parking_lot::MutexGuard;
 #[derive(Parser)]
 #[command(version, author = "Zev Weiss")]
 struct Args {
-    /// Act as a client, and mount FUSE at given path
-    mount_point: PathBuf,
+    #[clap(flatten)]
+    common_args: CommonArgs,
 }
 use fuser::FileAttr;
 use fuser::FileHandle;
@@ -50,6 +50,8 @@ use fuser::ReplyEmpty;
 use fuser::ReplyEntry;
 use fuser::ReplyOpen;
 use fuser::Request;
+
+use crate::common::args::CommonArgs;
 
 const NUMFILES: u8 = 16;
 const MAXBYTES: u64 = 10;
@@ -361,8 +363,9 @@ fn producer(data: &Mutex<FSelData>, notifier: &fuser::Notifier) {
 fn main() {
     let args = Args::parse();
 
-    let mut cfg = Config::default();
-    cfg.mount_options = vec![MountOption::RO, MountOption::FSName("fsel".to_string())];
+    let mut cfg = args.common_args.config();
+    cfg.mount_options
+        .extend([MountOption::RO, MountOption::FSName("fsel".to_string())]);
     let data = Arc::new(Mutex::new(FSelData {
         bytecnt: [0; NUMFILES as usize],
         open_mask: 0,
@@ -370,7 +373,7 @@ fn main() {
     }));
     let fs = FSelFS { data: data.clone() };
 
-    let session = fuser::Session::new(fs, &args.mount_point, &cfg).unwrap();
+    let session = fuser::Session::new(fs, &args.common_args.mount_point, &cfg).unwrap();
     let bg = session.spawn().unwrap();
 
     producer(&data, &bg.notifier());

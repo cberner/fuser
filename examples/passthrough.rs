@@ -2,16 +2,16 @@
 //
 //   cargo run --example passthrough /tmp/foobar
 
+mod common;
+
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs::File;
-use std::path::PathBuf;
 use std::time::Duration;
 use std::time::UNIX_EPOCH;
 
 use clap::Parser;
 use fuser::BackingId;
-use fuser::Config;
 use fuser::Errno;
 use fuser::FileAttr;
 use fuser::FileHandle;
@@ -30,21 +30,12 @@ use fuser::ReplyEmpty;
 use fuser::ReplyEntry;
 use fuser::ReplyOpen;
 use fuser::Request;
-use fuser::SessionACL;
 
 #[derive(Parser)]
 #[command(version, author = "Allison Karlitskaya")]
 struct Args {
-    /// Act as a client, and mount FUSE at given path
-    mount_point: PathBuf,
-
-    /// Automatically unmount on process exit
-    #[clap(long)]
-    auto_unmount: bool,
-
-    /// Allow root user to access filesystem
-    #[clap(long)]
-    allow_root: bool,
+    #[clap(flatten)]
+    common_args: CommonArgs,
 }
 
 const TTL: Duration = Duration::from_secs(1); // 1 second
@@ -117,6 +108,8 @@ use std::sync::Arc;
 use std::sync::Weak;
 
 use parking_lot::Mutex;
+
+use crate::common::args::CommonArgs;
 
 #[derive(Debug)]
 struct PassthroughFs {
@@ -265,19 +258,9 @@ fn main() {
     let args = Args::parse();
     env_logger::init();
 
-    let mut cfg = Config::default();
-    cfg.mount_options = vec![MountOption::FSName("passthrough".to_string())];
-    if args.auto_unmount {
-        cfg.mount_options.push(MountOption::AutoUnmount);
-    }
-    if args.allow_root {
-        cfg.acl = SessionACL::RootAndOwner;
-    }
-    if cfg.mount_options.contains(&MountOption::AutoUnmount) && cfg.acl != SessionACL::RootAndOwner
-    {
-        cfg.acl = SessionACL::All;
-    }
-
+    let mut cfg = args.common_args.config();
+    cfg.mount_options
+        .extend([MountOption::FSName("passthrough".to_string())]);
     let fs = PassthroughFs::new();
-    fuser::mount2(fs, &args.mount_point, &cfg).unwrap();
+    fuser::mount2(fs, &args.common_args.mount_point, &cfg).unwrap();
 }
