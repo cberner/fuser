@@ -1,6 +1,7 @@
 //! Utilities for reading and parsing mount output
 
 use std::fmt;
+use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
 use std::time::Instant;
@@ -18,9 +19,9 @@ pub(crate) struct MountEntry {
 }
 
 impl MountEntry {
-    /// Returns true if this is a FUSE mount with the specified device name.
-    pub(crate) fn is_fuse_mount_on_dev(&self, device: &str) -> bool {
-        self.fstype == "fuse" && self.device == device
+    /// Returns true if this is a FUSE mount at the specified mountpoint.
+    pub(crate) fn is_fuse_mount_at(&self, mountpoint: &Path) -> bool {
+        self.fstype == "fuse" && self.mountpoint == mountpoint
     }
 }
 
@@ -46,15 +47,15 @@ pub(crate) async fn read_mounts() -> anyhow::Result<Vec<MountEntry>> {
     parse_mount_output_on_linux(&content)
 }
 
-/// Waits for a FUSE mount with the specified device to appear in mount output.
-pub(crate) async fn wait_for_fuse_mount(device: &str) -> anyhow::Result<()> {
+/// Waits for a FUSE mount at the specified mountpoint to appear in mount output.
+pub(crate) async fn wait_for_fuse_mount(mountpoint: &Path) -> anyhow::Result<()> {
     eprintln!("Waiting for mount...");
 
     let start = Instant::now();
 
     loop {
         let entries = read_mounts().await?;
-        if entries.iter().any(|e| e.is_fuse_mount_on_dev(device)) {
+        if entries.iter().any(|e| e.is_fuse_mount_at(mountpoint)) {
             return Ok(());
         }
 
@@ -64,8 +65,8 @@ pub(crate) async fn wait_for_fuse_mount(device: &str) -> anyhow::Result<()> {
                 mounts_str.push_str(&format!("  {}\n", entry));
             }
             bail!(
-                "Timeout waiting for FUSE mount with device: {}\nAll mounts:\n{}",
-                device,
+                "Timeout waiting for FUSE mount at mountpoint: {}\nAll mounts:\n{}",
+                mountpoint.display(),
                 mounts_str
             );
         }
@@ -82,22 +83,22 @@ fn mounts_str<'a>(mounts: impl IntoIterator<Item = &'a MountEntry>) -> String {
     mounts_str
 }
 
-/// Waits for a FUSE mount with the specified device to disappear from mount output.
-pub(crate) async fn wait_for_fuse_umount(device: &str) -> anyhow::Result<()> {
+/// Waits for a FUSE mount at the specified mountpoint to disappear from mount output.
+pub(crate) async fn wait_for_fuse_umount(mountpoint: &Path) -> anyhow::Result<()> {
     eprintln!("Waiting for umount...");
 
     let start = Instant::now();
 
     loop {
         let entries = read_mounts().await?;
-        if !entries.iter().any(|e| e.is_fuse_mount_on_dev(device)) {
+        if !entries.iter().any(|e| e.is_fuse_mount_at(mountpoint)) {
             return Ok(());
         }
 
         if start.elapsed() > Duration::from_secs(3) {
             bail!(
-                "Timeout waiting for FUSE umount with device: {}\nAll mounts:\n{}",
-                device,
+                "Timeout waiting for FUSE umount at mountpoint: {}\nAll mounts:\n{}",
+                mountpoint.display(),
                 mounts_str(&entries)
             );
         }
@@ -106,38 +107,41 @@ pub(crate) async fn wait_for_fuse_umount(device: &str) -> anyhow::Result<()> {
     }
 }
 
-pub(crate) async fn assert_no_fuse_mount(device: &str) -> anyhow::Result<()> {
+pub(crate) async fn assert_no_fuse_mount(mountpoint: &Path) -> anyhow::Result<()> {
     let entries = read_mounts().await?;
-    let dev_entries: Vec<&MountEntry> = entries
+    let mp_entries: Vec<&MountEntry> = entries
         .iter()
-        .filter(|e| e.is_fuse_mount_on_dev(device))
+        .filter(|e| e.is_fuse_mount_at(mountpoint))
         .collect();
-    if !dev_entries.is_empty() {
+    if !mp_entries.is_empty() {
         bail!(
-            "Expecting no mount of dev {device}, got {}:\nMounts:\n{}",
-            dev_entries.len(),
-            mounts_str(dev_entries)
+            "Expecting no mount at mountpoint {}, got {}:\nMounts:\n{}",
+            mountpoint.display(),
+            mp_entries.len(),
+            mounts_str(mp_entries)
         );
     }
     Ok(())
 }
 
-pub(crate) async fn assert_single_fuse_mount(device: &str) -> anyhow::Result<()> {
+pub(crate) async fn assert_single_fuse_mount(mountpoint: &Path) -> anyhow::Result<()> {
     let entries = read_mounts().await?;
-    let dev_entries: Vec<&MountEntry> = entries
+    let mp_entries: Vec<&MountEntry> = entries
         .iter()
-        .filter(|e| e.is_fuse_mount_on_dev(device))
+        .filter(|e| e.is_fuse_mount_at(mountpoint))
         .collect();
-    if dev_entries.is_empty() {
+    if mp_entries.is_empty() {
         bail!(
-            "Expecting single mount on dev {device}, got no mounts:\nAll mounts:\n{}",
+            "Expecting single mount at mountpoint {}, got no mounts:\nAll mounts:\n{}",
+            mountpoint.display(),
             mounts_str(&entries)
         );
     }
-    if dev_entries.len() > 1 {
+    if mp_entries.len() > 1 {
         bail!(
-            "Expecting single mount on dev {device}, got mounts:\nDevice mounts:\n{}",
-            mounts_str(dev_entries)
+            "Expecting single mount at mountpoint {}, got mounts:\nMountpoint mounts:\n{}",
+            mountpoint.display(),
+            mounts_str(mp_entries)
         );
     }
     Ok(())

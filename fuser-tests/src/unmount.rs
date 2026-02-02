@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use anyhow::Context;
 use tokio::process::Child;
 
@@ -18,10 +20,10 @@ pub(crate) enum Unmount {
 pub(crate) async fn kill_and_unmount(
     mut fuse_process: Child,
     unmount: Unmount,
-    device: &str,
     mount_path: &str,
 ) -> anyhow::Result<()> {
-    assert_single_fuse_mount(device).await?;
+    let mountpoint = Path::new(mount_path);
+    assert_single_fuse_mount(mountpoint).await?;
 
     fuse_process
         .kill()
@@ -30,11 +32,11 @@ pub(crate) async fn kill_and_unmount(
 
     match unmount {
         Unmount::Auto => {
-            wait_for_fuse_umount(device).await?;
+            wait_for_fuse_umount(mountpoint).await?;
         }
         Unmount::Manual => {
             command_success(["umount", mount_path]).await?;
-            assert_no_fuse_mount(device).await?;
+            assert_no_fuse_mount(mountpoint).await?;
         }
     }
 
