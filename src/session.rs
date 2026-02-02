@@ -136,6 +136,7 @@ pub struct Session<FS: Filesystem> {
     /// FUSE protocol version, as reported by the kernel.
     /// The field is set to `Some` when the init message is received.
     pub(crate) proto_version: Option<Version>,
+    pub(crate) config: Config,
 }
 
 impl<FS: Filesystem> AsFd for Session<FS> {
@@ -180,12 +181,13 @@ impl<FS: Filesystem> Session<FS> {
             allowed: options.acl,
             session_owner: geteuid(),
             proto_version: None,
+            config: options.clone(),
         })
     }
 
     /// Wrap an existing /dev/fuse file descriptor. This doesn't mount the
     /// filesystem anywhere; that must be done separately.
-    pub fn from_fd(filesystem: FS, fd: OwnedFd, acl: SessionACL) -> Self {
+    pub fn from_fd(filesystem: FS, fd: OwnedFd, acl: SessionACL, config: Config) -> Self {
         let ch = Channel::new(Arc::new(DevFuse(File::from(fd))));
         Session {
             filesystem: FilesystemHolder {
@@ -198,6 +200,7 @@ impl<FS: Filesystem> Session<FS> {
             allowed: acl,
             session_owner: geteuid(),
             proto_version: None,
+            config,
         }
     }
 
@@ -224,45 +227,80 @@ impl<FS: Filesystem> Session<FS> {
     pub(crate) fn run(mut self) -> io::Result<()> {
         self.handshake()?;
 
-        let ret = self.event_loop();
+        let Session {
+            filesystem,
+            ch,
+            mount: _do_not_umount_yet,
+            allowed,
+            session_owner,
+            proto_version: _,
+            config,
+        } = self;
 
-        self.filesystem.destroy();
+        let n_threads = config.n_threads.unwrap_or(1);
 
-        ret
-    }
+        if !cfg!(target_os = "linux") && n_threads != 1 {
+            // TODO: check whether it works on macOS/FreeBSD and enable if it works.
+            return Err(io::Error::other(
+                "n_threads != 1 is only supported on Linux",
+            ));
+        }
 
-    fn event_loop(&self) -> io::Result<()> {
-        // Buffer for receiving requests from the kernel. Only one is allocated and
-        // it is reused immediately after dispatching to conserve memory and allocations.
-        let mut buf = FuseReadBuf::new();
-        let buf = buf.as_mut();
+        let Some(n_threads_minus_one) = n_threads.checked_sub(1) else {
+            return Err(io::Error::other("n_threads"));
+        };
 
-        loop {
-            // Read the next request from the given channel to kernel driver
-            // The kernel driver makes sure that we get exactly one request per read
-            match self.ch.receive_retrying(buf) {
-                Ok(size) => match RequestWithSender::new(self.ch.sender(), &buf[..size]) {
-                    // Dispatch request
-                    Some(req) => {
-                        if let Ok(Operation::Destroy(_)) = req.request.operation() {
-                            req.reply::<ReplyEmpty>().ok();
-                            return Ok(());
-                        } else {
-                            req.dispatch(self)
-                        }
-                    }
-                    // Quit loop on illegal request
-                    None => {
-                        return Err(io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            "Invalid request",
-                        ));
-                    }
-                },
-                Err(nix::errno::Errno::ENODEV) => return Ok(()),
-                Err(err) => return Err(err.into()),
+        let mut filesystem = Arc::new(filesystem);
+
+        let mut channels = Vec::with_capacity(n_threads);
+        for _ in 0..n_threads_minus_one {
+            // TODO: fuse_dev_ioc_clone
+            channels.push(ch.clone());
+        }
+        channels.push(ch);
+
+        let mut threads = Vec::with_capacity(n_threads);
+
+        for (i, ch) in channels.into_iter().enumerate() {
+            let thread_name = format!("fuser-{i}");
+            let event_loop = SessionEventLoop {
+                thread_name: thread_name.clone(),
+                filesystem: filesystem.clone(),
+                ch,
+                allowed,
+                session_owner,
+            };
+            threads.push(
+                thread::Builder::new()
+                    .name(thread_name)
+                    .spawn(move || event_loop.event_loop())?,
+            );
+        }
+
+        let mut reply: io::Result<()> = Ok(());
+        for thread in threads {
+            let res = match thread.join() {
+                Ok(res) => res,
+                Err(_) => {
+                    return Err(io::Error::other("event loop thread panicked"));
+                }
+            };
+            if let Err(e) = res {
+                if reply.is_ok() {
+                    reply = Err(e);
+                }
             }
         }
+
+        let Some(filesystem) = Arc::get_mut(&mut filesystem) else {
+            return Err(io::Error::other(
+                "BUG: must have one refcount for filesystem",
+            ));
+        };
+
+        filesystem.destroy();
+
+        reply
     }
 
     fn handshake(&mut self) -> io::Result<()> {
@@ -441,6 +479,50 @@ impl SessionUnmounter {
             mount.umount()?;
         }
         Ok(())
+    }
+}
+
+pub(crate) struct SessionEventLoop<FS: Filesystem> {
+    /// Cache thread name for faster `debug!`.
+    pub(crate) thread_name: String,
+    pub(crate) ch: Channel,
+    pub(crate) filesystem: Arc<FilesystemHolder<FS>>,
+    pub(crate) allowed: SessionACL,
+    pub(crate) session_owner: Uid,
+}
+
+impl<FS: Filesystem> SessionEventLoop<FS> {
+    fn event_loop(&self) -> io::Result<()> {
+        // Buffer for receiving requests from the kernel. Only one is allocated and
+        // it is reused immediately after dispatching to conserve memory and allocations.
+        let mut buf = FuseReadBuf::new();
+        let buf = buf.as_mut();
+        loop {
+            // Read the next request from the given channel to kernel driver
+            // The kernel driver makes sure that we get exactly one request per read
+            match self.ch.receive_retrying(buf) {
+                Ok(size) => match RequestWithSender::new(self.ch.sender(), &buf[..size]) {
+                    // Dispatch request
+                    Some(req) => {
+                        if let Ok(Operation::Destroy(_)) = req.request.operation() {
+                            req.reply::<ReplyEmpty>().ok();
+                            return Ok(());
+                        } else {
+                            req.dispatch(self)
+                        }
+                    }
+                    // Quit loop on illegal request
+                    None => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "Invalid request",
+                        ));
+                    }
+                },
+                Err(nix::errno::Errno::ENODEV) => return Ok(()),
+                Err(err) => return Err(err.into()),
+            }
+        }
     }
 }
 
