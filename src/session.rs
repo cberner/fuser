@@ -210,7 +210,9 @@ impl<FS: Filesystem> Session<FS> {
         let sender = self.ch.sender();
         // Take the fuse_session, so that we can unmount it
         let mount = std::mem::take(&mut *self.mount.mount.lock());
-        let guard = thread::spawn(move || self.run());
+        let guard = thread::Builder::new()
+            .name("fuser-bg".to_string())
+            .spawn(move || self.run())?;
         Ok(BackgroundSession {
             guard,
             sender,
