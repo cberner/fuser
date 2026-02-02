@@ -228,18 +228,10 @@ impl<FS: Filesystem> Session<FS> {
 
         self.filesystem.destroy();
 
-        match ret {
-            Err(e) => Err(e),
-            Ok(None) => Ok(()),
-            Ok(Some(destroy_reply)) => {
-                destroy_reply.ok();
-                Ok(())
-            }
-        }
+        ret
     }
 
-    /// Return `Some` if reply to `FUSE_DESTROY` needs to be sent.
-    fn event_loop(&self) -> io::Result<Option<ReplyEmpty>> {
+    fn event_loop(&self) -> io::Result<()> {
         // Buffer for receiving requests from the kernel. Only one is allocated and
         // it is reused immediately after dispatching to conserve memory and allocations.
         let mut buf = FuseReadBuf::new();
@@ -253,7 +245,8 @@ impl<FS: Filesystem> Session<FS> {
                     // Dispatch request
                     Some(req) => {
                         if let Ok(Operation::Destroy(_)) = req.request.operation() {
-                            return Ok(Some(req.reply()));
+                            req.reply::<ReplyEmpty>().ok();
+                            return Ok(());
                         } else {
                             req.dispatch(self)
                         }
@@ -266,7 +259,7 @@ impl<FS: Filesystem> Session<FS> {
                         ));
                     }
                 },
-                Err(nix::errno::Errno::ENODEV) => return Ok(None),
+                Err(nix::errno::Errno::ENODEV) => return Ok(()),
                 Err(err) => return Err(err.into()),
             }
         }
