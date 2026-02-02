@@ -170,7 +170,7 @@ impl<FS: Filesystem> Session<FS> {
 
         let ch = Channel::new(file);
 
-        Ok(Session {
+        let mut session = Session {
             filesystem: FilesystemHolder {
                 fs: Some(filesystem),
             },
@@ -182,14 +182,23 @@ impl<FS: Filesystem> Session<FS> {
             session_owner: geteuid(),
             proto_version: None,
             config: options.clone(),
-        })
+        };
+
+        session.handshake()?;
+
+        Ok(session)
     }
 
     /// Wrap an existing /dev/fuse file descriptor. This doesn't mount the
     /// filesystem anywhere; that must be done separately.
-    pub fn from_fd(filesystem: FS, fd: OwnedFd, acl: SessionACL, config: Config) -> Self {
+    pub fn from_fd(
+        filesystem: FS,
+        fd: OwnedFd,
+        acl: SessionACL,
+        config: Config,
+    ) -> io::Result<Self> {
         let ch = Channel::new(Arc::new(DevFuse(File::from(fd))));
-        Session {
+        let mut session = Session {
             filesystem: FilesystemHolder {
                 fs: Some(filesystem),
             },
@@ -201,7 +210,11 @@ impl<FS: Filesystem> Session<FS> {
             session_owner: geteuid(),
             proto_version: None,
             config,
-        }
+        };
+
+        session.handshake()?;
+
+        Ok(session)
     }
 
     /// Run the session loop in a background thread. If the returned handle is dropped,
@@ -226,9 +239,7 @@ impl<FS: Filesystem> Session<FS> {
     /// may run concurrent by spawning threads.
     /// # Errors
     /// Returns any final error when the session comes to an end.
-    pub(crate) fn run(mut self) -> io::Result<()> {
-        self.handshake()?;
-
+    pub(crate) fn run(self) -> io::Result<()> {
         let Session {
             filesystem,
             ch,
