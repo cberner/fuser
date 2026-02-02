@@ -9,7 +9,7 @@ use crate::dev_fuse::DevFuse;
 use crate::passthrough::BackingId;
 
 /// A raw communication channel to the FUSE kernel driver
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Channel(Arc<DevFuse>);
 
 impl AsFd for Channel {

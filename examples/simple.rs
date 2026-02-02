@@ -94,6 +94,9 @@ struct Args {
     #[clap(long)]
     suid: bool,
 
+    #[clap(long, default_value_t = 1)]
+    n_threads: usize,
+
     /// Sets the level of verbosity
     #[clap(short, action = clap::ArgAction::Count)]
     v: u8,
@@ -2181,6 +2184,7 @@ fn main() {
         cfg.acl = SessionACL::All;
     }
 
+    cfg.n_threads = Some(args.n_threads);
     let result = fuser::mount2(
         SimpleFS::new(args.data_dir, args.direct_io, args.suid),
         &args.mount_point,

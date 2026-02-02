@@ -1,11 +1,17 @@
 //! Main mount tests
 
+use std::convert::Infallible;
 use std::fmt::Write;
+use std::io;
+use std::time::Duration;
+use std::time::Instant;
 
 use anyhow::Context;
 use anyhow::bail;
 use tempfile::TempDir;
 use tokio::process::Command;
+use tokio::task::JoinError;
+use tokio::task::JoinSet;
 
 use crate::ansi::green;
 use crate::cargo::cargo_build_example;
@@ -35,13 +41,16 @@ async fn run_mount_tests_inner(libfuse: Libfuse) -> anyhow::Result<()> {
     fuse_conf_write_user_allow_other().await?;
 
     // Tests without libfuse feature (pure Rust implementation)
-    run_test(&[], Unmount::Manual, Fusermount::False).await?;
-    run_test(&[], Unmount::Auto, libfuse.fusermount()).await?;
+    run_test(&[], Unmount::Manual, Fusermount::False, 1).await?;
+    run_test(&[], Unmount::Auto, libfuse.fusermount(), 1).await?;
     test_no_user_allow_other(&[], &libfuse).await?;
 
     // Tests with libfuse
-    run_test(&[libfuse.feature()], Unmount::Manual, Fusermount::False).await?;
-    run_test(&[libfuse.feature()], Unmount::Auto, libfuse.fusermount()).await?;
+    run_test(&[libfuse.feature()], Unmount::Manual, Fusermount::False, 1).await?;
+    run_test(&[libfuse.feature()], Unmount::Auto, libfuse.fusermount(), 1).await?;
+
+    // Multi-threaded tests
+    run_test(&[], Unmount::Auto, libfuse.fusermount(), 2).await?;
 
     if let Libfuse::Libfuse3 = libfuse {
         run_allow_root_test()
@@ -62,6 +71,7 @@ async fn run_test(
     features: &[Feature],
     unmount: Unmount,
     fusermount: Fusermount,
+    n_threads: usize,
 ) -> anyhow::Result<()> {
     let mut description = String::new();
     match features_to_flags(features) {
@@ -73,8 +83,9 @@ async fn run_test(
         Unmount::Auto => description.push_str(" --auto-unmount"),
         Unmount::Manual => {}
     }
+    write!(description, " n_threads={n_threads}").unwrap();
 
-    run_test_inner(features, unmount, fusermount, &description)
+    run_test_inner(features, unmount, fusermount, n_threads, &description)
         .await
         .with_context(|| format!("Tests failed: {description}"))
 }
@@ -83,6 +94,7 @@ async fn run_test_inner(
     features: &[Feature],
     unmount: Unmount,
     fusermount: Fusermount,
+    n_threads: usize,
     description: &str,
 ) -> anyhow::Result<()> {
     eprintln!("\n=== Running test: {description} ===");
@@ -96,7 +108,8 @@ async fn run_test_inner(
 
     // Run the hello example
     eprintln!("Starting hello filesystem...");
-    let mut run_args = vec![mount_path];
+    let n_threads_str = n_threads.to_string();
+    let mut run_args = vec![mount_path, "--n-threads", &n_threads_str];
     if matches!(unmount, Unmount::Auto) {
         run_args.push("--auto-unmount");
     }
@@ -123,6 +136,48 @@ async fn run_test_inner(
             "hello.txt content mismatch: expected 'Hello World!', got '{}'",
             content
         );
+    }
+
+    // Check all threads handle requests.
+    if n_threads != 1 {
+        let mut tasks = JoinSet::new();
+        for _ in 0..20 {
+            let hello_path = hello_path.clone();
+            tasks.spawn(async move {
+                loop {
+                    tokio::fs::read_to_string(&hello_path).await?;
+                }
+            });
+        }
+
+        let stats_per_thread = mount_dir.path().join("stats-per-thread");
+
+        let start = Instant::now();
+
+        let stats_per_thread = loop {
+            let stats_per_thread = tokio::fs::read_to_string(&stats_per_thread).await?;
+            let stats_per_thread: Vec<u64> = stats_per_thread
+                .lines()
+                .map(|l| l.parse().context("Failed to parse stats line"))
+                .collect::<anyhow::Result<_>>()?;
+            anyhow::ensure!(stats_per_thread.len() == n_threads);
+            if stats_per_thread.iter().all(|t| *t > 0) {
+                break stats_per_thread;
+            }
+
+            if start.elapsed() > Duration::from_secs(5) {
+                bail!("Not all threads handled requests in 5s; current stats: {stats_per_thread:?}")
+            }
+
+            match tasks.try_join_next() {
+                None => continue,
+                Some(Err::<_, JoinError>(e)) => return Err(e).context("Failed to join task"),
+                Some(Ok(Err::<_, io::Error>(e))) => return Err(e).context("Reader thread failed"),
+                Some(Ok(Ok::<Infallible, _>(x))) => match x {},
+            }
+        };
+
+        green!("OK multi-threaded tests passed: {stats_per_thread:?}");
     }
 
     kill_and_unmount(fuse_process, unmount, "hello", mount_path).await?;

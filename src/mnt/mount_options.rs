@@ -13,6 +13,8 @@ pub struct Config {
     pub mount_options: Vec<MountOption>,
     /// Who can access the filesystem.
     pub acl: SessionACL,
+    /// Number of event loop threads. If unspecified, one thread is used.
+    pub n_threads: Option<usize>,
 }
 
 /// Mount options accepted by the FUSE filesystem type
@@ -207,6 +209,7 @@ pub(crate) fn parse_options_from_args(args: &[&OsStr]) -> io::Result<Config> {
     Ok(Config {
         mount_options: out,
         acl,
+        n_threads: None,
     })
 }
 
