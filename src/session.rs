@@ -266,8 +266,13 @@ impl<FS: Filesystem> Session<FS> {
         let mut filesystem = Arc::new(filesystem);
 
         let mut channels = Vec::with_capacity(n_threads);
+        #[cfg(target_os = "linux")]
         for _ in 0..n_threads_minus_one {
-            // TODO: fuse_dev_ioc_clone
+            channels.push(ch.clone_fd()?);
+        }
+        #[cfg(not(target_os = "linux"))]
+        for _ in 0..n_threads_minus_one {
+            // On non-Linux, fall back to sharing the fd (no true parallelism)
             channels.push(ch.clone());
         }
         channels.push(ch);

@@ -1,5 +1,7 @@
+use std::fs::OpenOptions;
 use std::io;
 use std::os::fd::AsFd;
+use std::os::fd::AsRawFd;
 use std::os::fd::BorrowedFd;
 use std::sync::Arc;
 
@@ -54,6 +56,40 @@ impl Channel {
         // Since write/writev syscalls are threadsafe, we can simply create
         // a sender by using the same file and use it in other threads.
         ChannelSender(self.0.clone())
+    }
+
+    /// Clone the FUSE device fd using FUSE_DEV_IOC_CLONE ioctl.
+    ///
+    /// This creates a new fd that can read FUSE requests independently,
+    /// enabling true parallel request processing. The kernel distributes
+    /// requests across all cloned fds.
+    ///
+    /// Only available on Linux.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn clone_fd(&self) -> io::Result<Channel> {
+        let new_fuse = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(DevFuse::PATH)?;
+
+        // FUSE_DEV_IOC_CLONE = _IOC(_IOC_WRITE, 229, 0, 4)
+        // Use libc::Ioctl to support both glibc (c_ulong) and musl (i32)
+        #[allow(overflowing_literals)]
+        const FUSE_DEV_IOC_CLONE: libc::Ioctl = 0x8004_e500u32 as libc::Ioctl;
+
+        let src_fd = self.0.as_raw_fd();
+        let ret = unsafe {
+            libc::ioctl(
+                new_fuse.as_raw_fd(),
+                FUSE_DEV_IOC_CLONE,
+                &src_fd as *const _,
+            )
+        };
+        if ret < 0 {
+            return Err(io::Error::last_os_error());
+        }
+
+        Ok(Channel::new(Arc::new(DevFuse(new_fuse))))
     }
 }
 
