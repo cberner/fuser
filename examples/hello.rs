@@ -1,10 +1,10 @@
+mod common;
+
 use std::ffi::OsStr;
-use std::path::PathBuf;
 use std::time::Duration;
 use std::time::UNIX_EPOCH;
 
 use clap::Parser;
-use fuser::Config;
 use fuser::Errno;
 use fuser::FileAttr;
 use fuser::FileHandle;
@@ -19,21 +19,14 @@ use fuser::ReplyData;
 use fuser::ReplyDirectory;
 use fuser::ReplyEntry;
 use fuser::Request;
-use fuser::SessionACL;
+
+use crate::common::args::CommonArgs;
 
 #[derive(Parser)]
 #[command(version, author = "Christopher Berner")]
 struct Args {
-    /// Act as a client, and mount FUSE at given path
-    mount_point: PathBuf,
-
-    /// Automatically unmount on process exit
-    #[clap(long)]
-    auto_unmount: bool,
-
-    /// Allow root user to access filesystem
-    #[clap(long)]
-    allow_root: bool,
+    #[clap(flatten)]
+    common_args: CommonArgs,
 }
 
 const TTL: Duration = Duration::from_secs(1); // 1 second
@@ -146,17 +139,8 @@ fn main() {
     let args = Args::parse();
     env_logger::init();
 
-    let mut cfg = Config::default();
-    cfg.mount_options = vec![MountOption::RO, MountOption::FSName("hello".to_string())];
-    if args.auto_unmount {
-        cfg.mount_options.push(MountOption::AutoUnmount);
-    }
-    if args.allow_root {
-        cfg.acl = SessionACL::RootAndOwner;
-    }
-    if cfg.mount_options.contains(&MountOption::AutoUnmount) && cfg.acl != SessionACL::RootAndOwner
-    {
-        cfg.acl = SessionACL::All;
-    }
-    fuser::mount2(HelloFS, &args.mount_point, &cfg).unwrap();
+    let mut cfg = args.common_args.config();
+    cfg.mount_options
+        .extend([MountOption::RO, MountOption::FSName("hello".to_string())]);
+    fuser::mount2(HelloFS, &args.common_args.mount_point, &cfg).unwrap();
 }
