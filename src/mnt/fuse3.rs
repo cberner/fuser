@@ -77,12 +77,10 @@ impl MountImpl {
     }
 
     pub(crate) fn umount_impl(&mut self) -> io::Result<()> {
-        use std::io::ErrorKind::PermissionDenied;
-
         if let Err(err) = crate::mnt::libc_umount(&self.mountpoint) {
             // Linux always returns EPERM for non-root users.  We have to let the
             // library go through the setuid-root "fusermount -u" to unmount.
-            if err.kind() == PermissionDenied {
+            if err == nix::errno::Errno::EPERM {
                 #[cfg(target_os = "linux")]
                 unsafe {
                     fuse_session_unmount(self.fuse_session);
@@ -90,7 +88,7 @@ impl MountImpl {
                     return Ok(());
                 }
             }
-            return Err(err);
+            return Err(err.into());
         }
         Ok(())
     }
