@@ -4,7 +4,6 @@ use std::fs::File;
 use std::io;
 use std::os::fd::BorrowedFd;
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::io::FromRawFd;
 use std::path::Path;
 use std::ptr;
 use std::sync::Arc;
@@ -70,8 +69,8 @@ impl MountImpl {
             let fd = unsafe { BorrowedFd::borrow_raw(fd) };
             // We dup the fd here as the existing fd is owned by the fuse_session, and we
             // don't want it being closed out from under us:
-            let fd = nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(0))?;
-            let file = unsafe { File::from_raw_fd(fd) };
+            let fd = fd.try_clone_to_owned()?;
+            let file = File::from(fd);
             Ok((Arc::new(DevFuse(file)), mount))
         })
     }
