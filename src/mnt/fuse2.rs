@@ -44,8 +44,6 @@ impl MountImpl {
     }
 
     pub(crate) fn umount_impl(&mut self) -> io::Result<()> {
-        use std::io::ErrorKind::PermissionDenied;
-
         // fuse_unmount_compat22 unfortunately doesn't return a status. Additionally,
         // it attempts to call realpath, which in turn calls into the filesystem. So
         // if the filesystem returns an error, the unmount does not take place, with
@@ -55,7 +53,7 @@ impl MountImpl {
         if let Err(err) = crate::mnt::libc_umount(&self.mountpoint) {
             // Linux always returns EPERM for non-root users.  We have to let the
             // library go through the setuid-root "fusermount -u" to unmount.
-            if err.kind() == PermissionDenied {
+            if err == nix::errno::Errno::EPERM {
                 #[cfg(not(any(
                     target_os = "macos",
                     target_os = "freebsd",
@@ -68,7 +66,7 @@ impl MountImpl {
                     return Ok(());
                 }
             }
-            return Err(err);
+            return Err(err.into());
         }
         Ok(())
     }

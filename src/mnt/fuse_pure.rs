@@ -87,13 +87,13 @@ impl MountImpl {
             return Ok(());
         }
         if let Err(err) = crate::mnt::libc_umount(&self.mountpoint) {
-            if err.kind() == ErrorKind::PermissionDenied {
+            if err == nix::errno::Errno::EPERM {
                 // Linux always returns EPERM for non-root users.  We have to let the
                 // library go through the setuid-root "fusermount -u" to unmount.
                 fuse_unmount_pure(&self.mountpoint);
                 return Ok(());
             } else {
-                return Err(err);
+                return Err(err.into());
             }
         }
         Ok(())
