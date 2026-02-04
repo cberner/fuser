@@ -98,7 +98,6 @@ impl MountOption {
     }
 }
 
-#[allow(dead_code)]
 #[derive(PartialEq)]
 pub(crate) enum MountOptionGroup {
     KernelOption,
@@ -173,7 +172,23 @@ pub(crate) fn option_to_string(option: &MountOption) -> String {
     }
 }
 
-#[allow(dead_code)]
+#[cfg_attr(
+    not(any(
+        all(target_os = "linux", fuser_mount_impl = "pure-rust"),
+        all(target_os = "linux", fuser_mount_impl = "direct-mount"),
+        all(
+            any(
+                target_os = "freebsd",
+                target_os = "dragonfly",
+                target_os = "openbsd",
+                target_os = "netbsd",
+            ),
+            fuser_mount_impl = "direct-mount"
+        ),
+        all(target_os = "macos", fuser_mount_impl = "pure-rust"),
+    )),
+    expect(dead_code)
+)]
 pub(crate) fn option_group(option: &MountOption) -> MountOptionGroup {
     match option {
         MountOption::FSName(_) => MountOptionGroup::Fusermount,
@@ -197,8 +212,15 @@ pub(crate) fn option_group(option: &MountOption) -> MountOptionGroup {
     }
 }
 
+#[cfg_attr(
+    not(any(
+        fuser_mount_impl = "macos-no-mount",
+        fuser_mount_impl = "pure-rust",
+        fuser_mount_impl = "direct-mount",
+    )),
+    expect(dead_code)
+)]
 #[cfg(target_os = "linux")]
-#[allow(dead_code)]
 pub(crate) fn option_to_flag(option: &MountOption) -> io::Result<nix::mount::MsFlags> {
     match option {
         MountOption::Dev => Ok(nix::mount::MsFlags::empty()), // There is no option for dev. It's the absence of NoDev
@@ -222,7 +244,7 @@ pub(crate) fn option_to_flag(option: &MountOption) -> io::Result<nix::mount::MsF
 }
 
 #[cfg(target_os = "macos")]
-#[allow(dead_code)]
+#[expect(dead_code)]
 pub(crate) fn option_to_flag(option: &MountOption) -> io::Result<nix::mount::MntFlags> {
     match option {
         MountOption::Dev => Ok(nix::mount::MntFlags::empty()), // There is no option for dev. It's the absence of NoDev
