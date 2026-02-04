@@ -1,51 +1,49 @@
 use std::fs::File;
 use std::io;
+use std::io::Read;
 use std::io::Write;
+use std::os::fd::AsFd;
 use std::os::fd::AsRawFd;
 use std::os::fd::RawFd;
-use std::os::fd::AsFd;
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::process::exit;
-use std::io::Read;
+use std::sync::Arc;
 
+use log::error;
+use log::warn;
+use nix::fcntl::OFlag;
+use nix::fcntl::open;
 use nix::mount::MntFlags;
 use nix::mount::MsFlags;
 use nix::mount::mount;
 use nix::mount::umount2;
 use nix::sys::resource::Resource;
 use nix::sys::resource::getrlimit;
-use nix::sys::stat::SFlag;
-use nix::unistd::Gid;
-use nix::unistd::SysconfVar;
-use nix::unistd::Uid;
-use nix::unistd::User;
-use nix::unistd::sysconf;
-use nix::unistd::close;
-use nix::unistd::dup2_stdin;
-use nix::unistd::dup2_stdout;
-use nix::unistd::dup2_stderr;
-use nix::fcntl::open;
-use nix::fcntl::OFlag;
-use nix::sys::stat::Mode;
-use nix::unistd::fork;
-use nix::unistd::ForkResult;
-use nix::unistd::setsid;
 use nix::sys::signal::SigSet;
 use nix::sys::signal::SigmaskHow;
 use nix::sys::signal::sigprocmask;
-
-use log::error;
-use log::warn;
+use nix::sys::stat::Mode;
+use nix::sys::stat::SFlag;
+use nix::unistd::ForkResult;
+use nix::unistd::Gid;
+use nix::unistd::SysconfVar;
+use nix::unistd::Uid;
+use nix::unistd::close;
+use nix::unistd::dup2_stderr;
+use nix::unistd::dup2_stdin;
+use nix::unistd::dup2_stdout;
+use nix::unistd::fork;
+use nix::unistd::setsid;
+use nix::unistd::sysconf;
 
 use crate::SessionACL;
 use crate::dev_fuse::DevFuse;
 use crate::mnt::mount_options::MountOption;
 
-const DEV_FUSE: &'static str = "/dev/fuse";
+const DEV_FUSE: &str = "/dev/fuse";
 
 #[derive(Debug)]
 pub(crate) struct MountImpl {
@@ -115,11 +113,9 @@ impl MountImpl {
                 MountOption::DirSync => flags |= MsFlags::MS_DIRSYNC,
                 MountOption::DefaultPermissions => write!(opts, "default_permissions,")?,
                 MountOption::CUSTOM(val)
-                    if val == "allow_other"
-                        || val.starts_with("max_read=")
-                        || val.starts_with("blksize=") =>
+                    if val.starts_with("max_read=") || val.starts_with("blksize=") =>
                 {
-                    write!(opts, "{val}")?
+                    write!(opts, "{val},")?
                 }
                 MountOption::CUSTOM(val) => {
                     error!("invalid mount option '{val}'");
@@ -128,50 +124,8 @@ impl MountImpl {
             }
         }
 
-        if flags.contains(MsFlags::MS_RDONLY) {
-            write!(opts, "ro,")?;
-        } else {
-            write!(opts, "rw,")?;
-        }
-        if flags.contains(MsFlags::MS_NOSUID) {
-            write!(opts, "nosuid,")?;
-        }
-        if flags.contains(MsFlags::MS_NODEV) {
-            write!(opts, "nodev,")?;
-        }
-        if flags.contains(MsFlags::MS_NOEXEC) {
-            write!(opts, "noexec,")?;
-        }
-        if flags.contains(MsFlags::MS_SYNCHRONOUS) {
-            write!(opts, "sync,")?;
-        }
-        if flags.contains(MsFlags::MS_NOATIME) {
-            write!(opts, "noatime,")?;
-        }
-        if flags.contains(MsFlags::MS_NODIRATIME) {
-            write!(opts, "nodiratime,")?;
-        }
-        if flags.contains(MsFlags::MS_LAZYTIME) {
-            write!(opts, "lazytime,")?;
-        }
-        if flags.contains(MsFlags::MS_RELATIME) {
-            write!(opts, "relatime,")?;
-        }
-        if flags.contains(MsFlags::MS_STRICTATIME) {
-            write!(opts, "strictatime,")?;
-        }
-        if flags.contains(MsFlags::MS_DIRSYNC) {
-            write!(opts, "dirsync,")?;
-        }
-
-        if !uid.is_root() {
-            if let Some(user) = User::from_uid(uid)? {
-                write!(opts, "user={},", user.name)?;
-            }
-        }
-
         if let Some(opt) = acl.to_mount_option() {
-            write!(opts, "{opt}")?;
+            write!(opts, "{opt},")?;
         }
 
         let root_mode = mountpoint
@@ -181,7 +135,7 @@ impl MountImpl {
         let old_len = opts.len();
         write!(
             opts,
-            "fd={},rootmode={},user_id={},group_id={}",
+            "fd={},rootmode={:o},user_id={},group_id={}",
             dev_fd,
             root_mode,
             uid.as_raw(),
@@ -247,7 +201,7 @@ impl MountImpl {
 
             write!(
                 opts,
-                "fd={},rootmode={},user_id={}",
+                "fd={},rootmode={:o},user_id={}",
                 dev_fd,
                 root_mode,
                 uid.as_raw(),
@@ -307,18 +261,14 @@ impl MountImpl {
     fn do_auto_unmount(&mut self, mut pipe: UnixStream) -> io::Result<()> {
         close_inherited_fds(pipe.as_raw_fd());
         let _ = setsid();
-        let _ = sigprocmask(
-            SigmaskHow::SIG_BLOCK,
-            Some(&SigSet::empty()),
-            None,
-        );
+        let _ = sigprocmask(SigmaskHow::SIG_BLOCK, Some(&SigSet::empty()), None);
 
         let mut buf = [0u8; 16];
         loop {
             match pipe.read(&mut buf) {
                 Ok(0) => break,
-                Ok(_) => {},
-                Err(err) if err.kind() == io::ErrorKind::Interrupted => {},
+                Ok(_) => {}
+                Err(err) if err.kind() == io::ErrorKind::Interrupted => {}
                 _ => break,
             }
         }
@@ -336,12 +286,9 @@ impl MountImpl {
 }
 
 fn close_inherited_fds(pipe: RawFd) {
-    let max_fds = getrlimit(Resource::RLIMIT_NOFILE)
-        .map_or(RawFd::MAX, |(soft, hard)| {
-            Ord::min(soft, hard)
-                .try_into()
-                .unwrap_or(RawFd::MAX)
-        });
+    let max_fds = getrlimit(Resource::RLIMIT_NOFILE).map_or(RawFd::MAX, |(soft, hard)| {
+        Ord::min(soft, hard).try_into().unwrap_or(RawFd::MAX)
+    });
 
     let _ = redirect_stdio();
 
