@@ -1,6 +1,7 @@
 //! Low-level kernel communication.
 
 mod argument;
+pub(crate) mod errno;
 pub(crate) mod flags;
 pub(crate) mod fuse_abi;
 pub(crate) mod ioctl;
@@ -50,11 +51,12 @@ macro_rules! no_xattr_doc {
 }
 
 /// Represents an error code to be returned to the caller
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct Errno(
     /// Positive value.
     NonZeroI32,
 );
+
 impl Errno {
     /// Operation not permitted
     pub const EPERM: Errno = errno!(libc::EPERM);

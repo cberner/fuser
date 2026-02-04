@@ -7,6 +7,7 @@ use std::env;
 use std::ffi::CStr;
 use std::ffi::CString;
 use std::ffi::OsStr;
+use std::ffi::OsString;
 use std::fs::File;
 use std::io;
 use std::io::Error;
@@ -29,7 +30,6 @@ use std::sync::Arc;
 
 use log::debug;
 use log::error;
-use log::warn;
 use nix::fcntl::FcntlArg;
 use nix::fcntl::FdFlag;
 use nix::fcntl::OFlag;
@@ -38,7 +38,9 @@ use nix::sys::socket::ControlMessageOwned;
 use nix::sys::socket::MsgFlags;
 use nix::sys::socket::SockaddrStorage;
 use nix::sys::socket::recvmsg;
+use regex::bytes::Regex;
 
+use crate::Errno;
 use crate::SessionACL;
 use crate::dev_fuse::DevFuse;
 use crate::mnt::is_mounted;
@@ -93,12 +95,12 @@ impl MountImpl {
         //     return Ok(());
         // }
         if let Err(err) = crate::mnt::libc_umount(&self.mountpoint, flags) {
-            if err.kind() == ErrorKind::PermissionDenied {
+            if err == nix::errno::Errno::EPERM {
                 // Linux always returns EPERM for non-root users.  We have to let the
                 // library go through the setuid-root "fusermount -u" to unmount.
                 fuse_unmount_pure(&self.mountpoint, flags)?;
             } else {
-                return Err(err);
+                return Err(err.into());
             }
         }
         Ok(())
@@ -148,7 +150,7 @@ fn fuse_unmount_pure(mountpoint: &CStr, flags: &[UnmountOption]) -> Result<(), i
     }
     let mut builder = Command::new(detect_fusermount_bin());
     builder.stdout(Stdio::piped()).stderr(Stdio::piped());
-    builder.arg("-u").arg("-q");
+    builder.arg("-u");
     for flag in flags {
         if let Some(cmd_arg) = unmount_options::to_fusermount_option(flag) {
             builder.arg(cmd_arg);
@@ -164,14 +166,12 @@ fn fuse_unmount_pure(mountpoint: &CStr, flags: &[UnmountOption]) -> Result<(), i
             if output.status.success() {
                 return Ok(());
             } else {
-                warn!(
-                    "fusermount failed: {}",
-                    String::from_utf8_lossy(&output.stderr)
-                );
-                // FIXME: fusermount does not return the actual unmount error code in the process
-                // (e.g. should the `umount2` call in `fusermount` return `EBUSY`, we should
-                // return `EBUSY` here)
-                Err(io::Error::from_raw_os_error(libc::EIO))
+                let fusermount_error =
+                    parse_fusermount_unmount_stderr(&OsStr::from_bytes(&output.stderr));
+                let error = fusermount_error.map_or(Errno::EIO, |e| {
+                    crate::ll::errno::get_errno_by_message(e).unwrap_or(Errno::EIO)
+                });
+                Err(io::Error::from_raw_os_error(error.code()))
             }
         }
         Err(e) => Err(e),
@@ -275,6 +275,17 @@ unsafe fn clear_cloexec_in_pre_exec(command: &mut Command, fd: BorrowedFd<'_>) {
             Ok(())
         })
     };
+}
+
+fn parse_fusermount_unmount_stderr(output: &OsStr) -> Option<OsString> {
+    let parse_regex = Regex::new(r"([^:]+): failed to unmount ([^:]+): (.+)")
+        .expect("built-in regex should be valid");
+    parse_regex
+        .captures(output.as_bytes())
+        .and_then(|captures| {
+            let error = captures.get(3).map(|m| m.as_bytes()).unwrap_or_default();
+            Some(OsStr::from_bytes(error).to_os_string())
+        })
 }
 
 fn fuse_mount_fusermount(

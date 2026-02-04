@@ -119,7 +119,9 @@ impl UmountOnDrop {
 
 impl Drop for UmountOnDrop {
     fn drop(&mut self) {
-        loop {}
+        let mut guard = self.mount.lock();
+        // Use the internal unmount implementation.
+        drop(guard.take());
     }
 }
 
@@ -604,7 +606,8 @@ impl BackgroundSession {
 
     /// Join the filesystem thread.
     pub fn join(self) -> io::Result<()> {
-        let _ = self.guard
+        let _ = self
+            .guard
             .join()
             .map_err(|_panic: Box<dyn std::any::Any + Send>| {
                 io::Error::new(

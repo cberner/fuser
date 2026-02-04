@@ -221,7 +221,7 @@ impl Drop for Mount {
 }
 
 #[cfg_attr(fuser_mount_impl = "macos-no-mount", expect(dead_code))]
-fn libc_umount(mnt: &CStr, flags: &[UnmountOption]) -> io::Result<()> {
+fn libc_umount(mnt: &CStr, flags: &[UnmountOption]) -> nix::Result<()> {
     let nix_flags =
         nix::mount::MntFlags::from_bits_retain(unmount_options::to_unmount_syscall(flags));
     #[cfg(any(
@@ -235,7 +235,6 @@ fn libc_umount(mnt: &CStr, flags: &[UnmountOption]) -> io::Result<()> {
         nix::mount::unmount(mnt, nix_flags)?;
         Ok(())
     }
-
     #[cfg(not(any(
         target_os = "macos",
         target_os = "freebsd",
