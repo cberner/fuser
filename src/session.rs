@@ -19,7 +19,6 @@ use std::thread::{self};
 use log::debug;
 use log::error;
 use log::info;
-use log::warn;
 use nix::unistd::Uid;
 use nix::unistd::geteuid;
 use parking_lot::Mutex;
@@ -30,6 +29,7 @@ use crate::KernelConfig;
 use crate::MountOption;
 use crate::ReplyEmpty;
 use crate::Request;
+use crate::UnmountOption;
 use crate::channel::Channel;
 use crate::channel::ChannelSender;
 use crate::dev_fuse::DevFuse;
@@ -103,19 +103,23 @@ struct UmountOnDrop {
 }
 
 impl UmountOnDrop {
-    fn umount(&self) -> io::Result<()> {
-        if let Some(mount) = self.mount.lock().take() {
-            mount.umount()?;
-        }
+    fn umount(&self, flags: &[UnmountOption]) -> io::Result<()> {
+        let mut guard = self.mount.lock();
+        let mount = match guard.take() {
+            Some(mount) => mount,
+            None => return Ok(()),
+        };
+        mount.umount(flags).map_err(|(mount, error)| {
+            *guard = mount;
+            error
+        })?;
         Ok(())
     }
 }
 
 impl Drop for UmountOnDrop {
     fn drop(&mut self) {
-        if let Err(e) = self.umount() {
-            warn!("Failed to umount filesystem: {}", e);
-        }
+        loop {}
     }
 }
 
@@ -462,8 +466,8 @@ impl<FS: Filesystem> Session<FS> {
     }
 
     /// Unmount the filesystem
-    pub fn unmount(&mut self) -> io::Result<()> {
-        self.mount.umount()
+    pub fn unmount(&mut self, flags: &[UnmountOption]) -> io::Result<()> {
+        self.mount.umount(flags)
     }
 
     /// Returns a thread-safe object that can be used to unmount the Filesystem
@@ -487,10 +491,17 @@ pub struct SessionUnmounter {
 
 impl SessionUnmounter {
     /// Unmount the filesystem
-    pub fn unmount(&mut self) -> io::Result<()> {
-        if let Some(mount) = std::mem::take(&mut *self.mount.lock()) {
-            mount.umount()?;
-        }
+    pub fn unmount(&mut self, flags: &[UnmountOption]) -> io::Result<()> {
+        let mut guard = self.mount.lock();
+        let mount = match guard.take() {
+            Some(mount) => mount,
+            None => return Ok(()),
+        };
+        mount.umount(flags).map_err(|(mount, error)| {
+            // Restore the mount implementation if it is allowed
+            *guard = mount;
+            error
+        })?;
         Ok(())
     }
 }
@@ -552,11 +563,38 @@ pub struct BackgroundSession {
 
 impl BackgroundSession {
     /// Unmount the filesystem and join the background thread.
-    pub fn umount_and_join(mut self) -> io::Result<()> {
+    ///
+    /// # Arguments
+    /// - `flags`: The flags to use for the unmount operation.
+    ///
+    /// # Returns
+    /// - `Ok(())` if the background thread joined successfully
+    /// - `Err(Some<Self>, io::Error)` if the unmount operation failed. The session is salvaged and returned to the caller
+    /// - `Err(None, io::Error)` if the background thread returns an error for any reason.
+    ///
+    /// # Panics
+    /// Panics if the background thread can't be recovered (e.g., because it panicked).
+    pub fn umount_and_join(
+        mut self,
+        flags: &[UnmountOption],
+    ) -> Result<(), (Option<Self>, io::Error)> {
         if let Some(mount) = self.mount.take() {
-            mount.umount()?;
+            if let Err((mount, e)) = mount.umount(flags) {
+                // Return the mount and error to the object and to retry unmounting at another time if it exists
+                self.mount = mount;
+                match &self.mount {
+                    Some(_) => {
+                        return Err((Some(self), e));
+                    }
+                    None => {
+                        return Err((None, e));
+                    }
+                }
+            }
         }
-        self.join()
+        // The mount object is already removed at this point
+        self.join().map_err(|e| (None, e))?;
+        Ok(())
     }
 
     /// Returns an object that can be used to send notifications to the kernel
@@ -566,13 +604,14 @@ impl BackgroundSession {
 
     /// Join the filesystem thread.
     pub fn join(self) -> io::Result<()> {
-        self.guard
+        let _ = self.guard
             .join()
             .map_err(|_panic: Box<dyn std::any::Any + Send>| {
                 io::Error::new(
                     io::ErrorKind::Other,
                     "filesystem background thread panicked",
                 )
-            })?
+            })?;
+        Ok(())
     }
 }

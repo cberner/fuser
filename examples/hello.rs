@@ -23,6 +23,7 @@ use fuser::ReplyData;
 use fuser::ReplyDirectory;
 use fuser::ReplyEntry;
 use fuser::Request;
+use fuser::UnmountOption;
 
 use crate::common::args::CommonArgs;
 
@@ -210,7 +211,6 @@ impl Filesystem for HelloFS {
 fn main() {
     let args = Args::parse();
     env_logger::init();
-
     let mut cfg = args.common_args.config();
     cfg.mount_options
         .extend([MountOption::RO, MountOption::FSName("hello".to_string())]);
@@ -220,5 +220,7 @@ fn main() {
             .collect(),
         next_thread_index: AtomicUsize::new(0),
     };
-    fuser::mount2(fs, &args.common_args.mount_point, &cfg).unwrap();
+    let session = fuser::spawn_mount2(fs, &args.common_args.mount_point, &cfg).unwrap();
+    std::io::stdin().read_line(&mut String::new()).unwrap();
+    session.umount_and_join(&[UnmountOption::Detach]).unwrap();
 }

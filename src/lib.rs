@@ -51,6 +51,7 @@ pub use crate::mnt::mount_options::Config;
 pub use crate::mnt::mount_options::MountOption;
 use crate::mnt::mount_options::check_option_conflicts;
 use crate::mnt::mount_options::parse_options_from_args;
+pub use crate::mnt::unmount_options::UnmountOption;
 pub use crate::notify::Notifier;
 pub use crate::notify::PollHandle;
 pub use crate::notify::PollNotifier;
