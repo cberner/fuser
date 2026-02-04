@@ -12,7 +12,7 @@ fn test_unmount_while_file_is_open_with_autounmount() {
 
     let mountpoint = tempfile::tempdir().unwrap();
     let mut cfg = Config::default();
-    cfg.acl = SessionACL::RootAndOwner;
+    cfg.acl = SessionACL::All;
     cfg.n_threads = Some(2);
     cfg.mount_options.push(MountOption::AutoUnmount);
     let session = fuser::spawn_mount2(HelloFS, &mountpoint, &cfg).unwrap();
@@ -68,8 +68,8 @@ fn test_unmount_while_file_is_open_with_autounmount() {
     });
 
     unmount_completed_rx
-        .recv_timeout(Duration::from_secs(10))
-        .expect("test case should finish within 10 seconds, something might be blocking the unmount process");
+        .recv_timeout(Duration::from_secs(3))
+        .expect("test case should finish within 3 seconds, something might be blocking the unmount process");
     session_thread.join().expect("join session thread");
     hello_thread.join().expect("join hello thread");
 }

@@ -81,6 +81,7 @@ impl MountImpl {
             // Linux always returns EPERM for non-root users.  We have to let the
             // library go through the setuid-root "fusermount -u" to unmount.
             if err == nix::errno::Errno::EPERM {
+                // FIXME: fallback method should be fallible
                 #[cfg(target_os = "linux")]
                 unsafe {
                     fuse_session_unmount(self.fuse_session);
