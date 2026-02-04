@@ -220,7 +220,5 @@ fn main() {
             .collect(),
         next_thread_index: AtomicUsize::new(0),
     };
-    let session = fuser::spawn_mount2(fs, &args.common_args.mount_point, &cfg).unwrap();
-    std::io::stdin().read_line(&mut String::new()).unwrap();
-    session.umount_and_join(&[UnmountOption::Detach]).unwrap();
+    fuser::mount2(fs, &args.common_args.mount_point, &cfg).unwrap();
 }
