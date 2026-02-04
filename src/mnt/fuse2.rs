@@ -46,8 +46,6 @@ impl MountImpl {
     }
 
     pub(crate) fn umount_impl(&mut self, flags: &[UnmountOption]) -> io::Result<()> {
-        use std::io::ErrorKind::PermissionDenied;
-
         // fuse_unmount_compat22 unfortunately doesn't return a status. Additionally,
         // it attempts to call realpath, which in turn calls into the filesystem. So
         // if the filesystem returns an error, the unmount does not take place, with
