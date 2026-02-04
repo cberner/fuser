@@ -87,48 +87,80 @@ const ALL_RAW_ERRNOS: &[libc::c_int] = &[
     libc::EWOULDBLOCK,
     libc::ENOMSG,
     libc::EIDRM,
+    #[cfg(target_os = "linux")]
     libc::ECHRNG,
+    #[cfg(target_os = "linux")]
     libc::EL2NSYNC,
+    #[cfg(target_os = "linux")]
     libc::EL3HLT,
+    #[cfg(target_os = "linux")]
     libc::EL3RST,
+    #[cfg(target_os = "linux")]
     libc::ELNRNG,
+    #[cfg(target_os = "linux")]
     libc::EUNATCH,
+    #[cfg(target_os = "linux")]
     libc::ENOCSI,
+    #[cfg(target_os = "linux")]
     libc::EL2HLT,
+    #[cfg(target_os = "linux")]
     libc::EBADE,
+    #[cfg(target_os = "linux")]
     libc::EBADR,
+    #[cfg(target_os = "linux")]
     libc::EXFULL,
+    #[cfg(target_os = "linux")]
     libc::ENOANO,
+    #[cfg(target_os = "linux")]
     libc::EBADRQC,
+    #[cfg(target_os = "linux")]
     libc::EBADSLT,
+    #[cfg(target_os = "linux")]
     libc::EDEADLOCK,
+    #[cfg(target_os = "linux")]
     libc::EBFONT,
     libc::ENOSTR,
     libc::ENODATA,
     libc::ETIME,
     libc::ENOSR,
+    #[cfg(target_os = "linux")]
     libc::ENONET,
+    #[cfg(target_os = "linux")]
     libc::ENOPKG,
     libc::EREMOTE,
     libc::ENOLINK,
+    #[cfg(target_os = "linux")]
     libc::EADV,
+    #[cfg(target_os = "linux")]
     libc::ESRMNT,
+    #[cfg(target_os = "linux")]
     libc::ECOMM,
     libc::EPROTO,
     libc::EMULTIHOP,
+    #[cfg(target_os = "linux")]
     libc::EDOTDOT,
     libc::EBADMSG,
     libc::EOVERFLOW,
+    #[cfg(target_os = "linux")]
     libc::ENOTUNIQ,
+    #[cfg(target_os = "linux")]
     libc::EBADFD,
+    #[cfg(target_os = "linux")]
     libc::EREMCHG,
+    #[cfg(target_os = "linux")]
     libc::ELIBACC,
+    #[cfg(target_os = "linux")]
     libc::ELIBBAD,
+    #[cfg(target_os = "linux")]
     libc::ELIBSCN,
+    #[cfg(target_os = "linux")]
     libc::ELIBMAX,
+    #[cfg(target_os = "linux")]
     libc::ELIBEXEC,
     libc::EILSEQ,
+    #[cfg(target_os = "linux")]
     libc::ERESTART,
+    #[cfg(target_os = "linux")]
     libc::ESTRPIPE,
     libc::EUSERS,
     libc::ENOTSOCK,
@@ -160,22 +192,35 @@ const ALL_RAW_ERRNOS: &[libc::c_int] = &[
     libc::EALREADY,
     libc::EINPROGRESS,
     libc::ESTALE,
+    #[cfg(target_os = "linux")]
     libc::EUCLEAN,
+    #[cfg(target_os = "linux")]
     libc::ENOTNAM,
+    #[cfg(target_os = "linux")]
     libc::ENAVAIL,
+    #[cfg(target_os = "linux")]
     libc::EISNAM,
+    #[cfg(target_os = "linux")]
     libc::EREMOTEIO,
     libc::EDQUOT,
+    #[cfg(target_os = "linux")]
     libc::ENOMEDIUM,
+    #[cfg(target_os = "linux")]
     libc::EMEDIUMTYPE,
     libc::ECANCELED,
+    #[cfg(target_os = "linux")]
     libc::ENOKEY,
+    #[cfg(target_os = "linux")]
     libc::EKEYEXPIRED,
+    #[cfg(target_os = "linux")]
     libc::EKEYREVOKED,
+    #[cfg(target_os = "linux")]
     libc::EKEYREJECTED,
     libc::EOWNERDEAD,
     libc::ENOTRECOVERABLE,
+    #[cfg(target_os = "linux")]
     libc::ERFKILL,
+    #[cfg(target_os = "linux")]
     libc::EHWPOISON,
     libc::ENOTSUP,
 ];
