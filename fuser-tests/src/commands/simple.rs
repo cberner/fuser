@@ -67,7 +67,6 @@ pub(crate) async fn run_simple_tests() -> anyhow::Result<()> {
     kill_and_unmount(
         fuse_process,
         Unmount::Manual,
-        "fuser",
         mount_dir.path().to_str().unwrap(),
     )
     .await?;

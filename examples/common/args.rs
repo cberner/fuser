@@ -15,6 +15,10 @@ pub struct CommonArgs {
     /// Allow root user to access filesystem
     #[clap(long)]
     pub allow_root: bool,
+
+    /// Number of threads to use
+    #[clap(long, default_value_t = 1)]
+    pub n_threads: usize,
 }
 
 impl CommonArgs {
@@ -31,6 +35,7 @@ impl CommonArgs {
         {
             config.acl = SessionACL::All;
         }
+        config.n_threads = Some(self.n_threads);
         config
     }
 }

@@ -3,6 +3,7 @@
 use std::convert::Infallible;
 use std::fmt::Write;
 use std::io;
+use std::path::Path;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -121,7 +122,7 @@ async fn run_test_inner(
         .spawn()
         .context("Failed to start hello example")?;
 
-    wait_for_fuse_mount("hello").await?;
+    wait_for_fuse_mount(mount_dir.path()).await?;
 
     // Read hello.txt
     let hello_path = mount_dir.path().join("hello.txt");
@@ -180,7 +181,7 @@ async fn run_test_inner(
         green!("OK multi-threaded tests passed: {stats_per_thread:?}");
     }
 
-    kill_and_unmount(fuse_process, unmount, "hello", mount_path).await?;
+    kill_and_unmount(fuse_process, unmount, mount_path).await?;
 
     green!("OK {description}");
 
@@ -228,7 +229,7 @@ async fn test_no_user_allow_other(features: &[Feature], libfuse: &Libfuse) -> an
         bail!("Expected exit code 2, got {}", exit_code);
     }
 
-    assert_no_fuse_mount("hello").await?;
+    assert_no_fuse_mount(Path::new(&mount_dir)).await?;
     green!("OK Mount does not exist: {}", description);
 
     // Restore fuse.conf
@@ -253,7 +254,7 @@ async fn run_allow_root_test() -> anyhow::Result<()> {
         .spawn()
         .context("Failed to start hello example")?;
 
-    wait_for_fuse_mount("hello").await?;
+    wait_for_fuse_mount(Path::new(&mount_dir)).await?;
 
     // Test: root can read
     let hello_path = format!("{}/hello.txt", mount_dir);
@@ -268,7 +269,7 @@ async fn run_allow_root_test() -> anyhow::Result<()> {
     assert_cannot_read_as_user("fusertest2", &hello_path).await?;
     green!("OK other user can't read");
 
-    kill_and_unmount(fuse_process, Unmount::Manual, "hello", &mount_dir).await?;
+    kill_and_unmount(fuse_process, Unmount::Manual, &mount_dir).await?;
 
     green!("OK run_allow_root_test");
 

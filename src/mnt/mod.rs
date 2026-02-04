@@ -188,7 +188,7 @@ impl Drop for Mount {
     any(fuser_mount_impl = "macos-no-mount", fuser_mount_impl = "direct-mount"),
     expect(dead_code)
 )]
-fn libc_umount(mnt: &CStr) -> io::Result<()> {
+fn libc_umount(mnt: &CStr) -> nix::Result<()> {
     #[cfg(any(
         target_os = "macos",
         target_os = "freebsd",
@@ -197,8 +197,7 @@ fn libc_umount(mnt: &CStr) -> io::Result<()> {
         target_os = "netbsd"
     ))]
     {
-        nix::mount::unmount(mnt, nix::mount::MntFlags::empty())?;
-        Ok(())
+        nix::mount::unmount(mnt, nix::mount::MntFlags::empty())
     }
 
     #[cfg(not(any(
@@ -209,8 +208,7 @@ fn libc_umount(mnt: &CStr) -> io::Result<()> {
         target_os = "netbsd"
     )))]
     {
-        nix::mount::umount(mnt)?;
-        Ok(())
+        nix::mount::umount(mnt)
     }
 }
 
