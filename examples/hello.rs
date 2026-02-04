@@ -23,7 +23,6 @@ use fuser::ReplyData;
 use fuser::ReplyDirectory;
 use fuser::ReplyEntry;
 use fuser::Request;
-use fuser::UnmountOption;
 
 use crate::common::args::CommonArgs;
 
@@ -212,6 +211,7 @@ fn main() {
     let args = Args::parse();
     env_logger::init();
     let mut cfg = args.common_args.config();
+    
     cfg.mount_options
         .extend([MountOption::RO, MountOption::FSName("hello".to_string())]);
     let fs = HelloFS {
