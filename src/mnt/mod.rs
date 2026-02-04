@@ -13,6 +13,10 @@ mod fuse3_sys;
 
 #[cfg(fuser_mount_impl = "pure-rust")]
 mod fuse_pure;
+
+#[cfg(fuser_mount_impl = "direct-mount")]
+mod fuse_direct;
+
 pub(crate) mod mount_options;
 
 use std::io;
@@ -65,6 +69,8 @@ use crate::SessionACL;
 
 #[derive(Debug)]
 enum MountImpl {
+    #[cfg(fuser_mount_impl = "direct-mount")]
+    Direct(fuse_direct::MountImpl),
     #[cfg(fuser_mount_impl = "pure-rust")]
     Pure(fuse_pure::MountImpl),
     #[cfg(fuser_mount_impl = "libfuse2")]
@@ -76,6 +82,8 @@ enum MountImpl {
 impl MountImpl {
     fn umount_impl(&mut self) -> io::Result<()> {
         match self {
+            #[cfg(fuser_mount_impl = "direct-mount")]
+            MountImpl::Direct(mount) => mount.umount_impl(),
             #[cfg(fuser_mount_impl = "pure-rust")]
             MountImpl::Pure(mount) => mount.umount_impl(),
             #[cfg(fuser_mount_impl = "libfuse2")]
@@ -101,6 +109,17 @@ impl Mount {
         options: &[MountOption],
         acl: SessionACL,
     ) -> io::Result<(Arc<DevFuse>, Mount)> {
+        #[cfg(fuser_mount_impl = "direct-mount")]
+        {
+            let (dev_fuse, mount) = fuse_direct::MountImpl::new(mountpoint, options, acl)?;
+            Ok((
+                dev_fuse,
+                Mount {
+                    mount_impl: Some(MountImpl::Direct(mount)),
+                    mount_point: mountpoint.to_path_buf(),
+                },
+            ))
+        }
         #[cfg(fuser_mount_impl = "pure-rust")]
         {
             let (dev_fuse, mount) = fuse_pure::MountImpl::new(mountpoint, options, acl)?;
@@ -165,7 +184,10 @@ impl Drop for Mount {
     }
 }
 
-#[cfg_attr(fuser_mount_impl = "macos-no-mount", expect(dead_code))]
+#[cfg_attr(
+    any(fuser_mount_impl = "macos-no-mount", fuser_mount_impl = "direct-mount"),
+    expect(dead_code)
+)]
 fn libc_umount(mnt: &CStr) -> io::Result<()> {
     #[cfg(any(
         target_os = "macos",

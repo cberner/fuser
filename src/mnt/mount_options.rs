@@ -137,7 +137,10 @@ fn conflicts_with(option: &MountOption) -> Vec<MountOption> {
 }
 
 // Format option to be passed to libfuse or kernel
-#[cfg_attr(fuser_mount_impl = "macos-no-mount", expect(dead_code))]
+#[cfg_attr(
+    any(fuser_mount_impl = "macos-no-mount", fuser_mount_impl = "direct-mount"),
+    expect(dead_code)
+)]
 pub(crate) fn option_to_string(option: &MountOption) -> String {
     match option {
         MountOption::FSName(name) => format!("fsname={name}"),
