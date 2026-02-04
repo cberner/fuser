@@ -1,8 +1,7 @@
-use std::{
-    collections::HashSet,
-    ffi::c_int,
-    io::{self, ErrorKind},
-};
+use std::collections::HashSet;
+use std::ffi::c_int;
+use std::io::ErrorKind;
+use std::io::{self};
 
 /// Unmount options accepted by the umount2 or unmount syscall
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
@@ -101,6 +100,7 @@ pub(crate) fn check_option_conflicts(options: &[UnmountOption]) -> Result<(), io
     }
 }
 
+#[cfg(fuser_mount_impl = "pure-rust")]
 pub(crate) fn to_fusermount_option(option: &UnmountOption) -> Option<String> {
     match option {
         UnmountOption::Force => None,

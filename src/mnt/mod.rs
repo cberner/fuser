@@ -197,11 +197,7 @@ pub(crate) fn drop_umount_flags() -> &'static [UnmountOption] {
 impl Drop for Mount {
     fn drop(&mut self) {
         let drop_flags = drop_umount_flags();
-        loop {
-            let mount_impl = match self.mount_impl.as_mut() {
-                Some(mount) => mount,
-                None => break,
-            };
+        while let Some(mount_impl) = self.mount_impl.as_mut() {
             match mount_impl.umount_impl(drop_flags) {
                 Ok(()) => break,
                 Err(err) => {

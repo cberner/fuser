@@ -6,12 +6,12 @@ use std::os::unix::prelude::OsStrExt;
 use std::path::Path;
 use std::sync::Arc;
 
+use super::unmount_options::UnmountOption;
 use crate::SessionACL;
 use crate::dev_fuse::DevFuse;
 use crate::mnt::MountOption;
 use crate::mnt::fuse2_sys::*;
 use crate::mnt::with_fuse_args;
-use super::unmount_options::UnmountOption;
 
 /// Ensures that an os error is never 0/Success
 fn ensure_last_os_error() -> io::Error {

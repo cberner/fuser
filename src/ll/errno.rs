@@ -1,11 +1,46 @@
-use crate::Errno;
+use std::ffi::CStr;
+use std::ffi::CString;
+use std::ffi::NulError;
+use std::ffi::OsStr;
+use std::ffi::OsString;
+use std::os::unix::ffi::OsStrExt;
+
 use bimap::BiHashMap;
-use dashmap::{DashMap, mapref::one::Ref};
+use dashmap::DashMap;
+use dashmap::mapref::one::Ref;
 use lazy_static::lazy_static;
-use std::{
-    ffi::{CStr, OsStr, OsString},
-    os::unix::ffi::OsStrExt,
-};
+
+use crate::Errno;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct LocaleId(CString);
+
+impl TryFrom<&str> for LocaleId {
+    type Error = NulError;
+    fn try_from(locale: &str) -> Result<Self, Self::Error> {
+        let cstr = CString::new(locale)?;
+        Ok(Self(cstr))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct Locale(libc::locale_t);
+
+impl Locale {
+    fn new(category: libc::c_int, locale: LocaleId) -> Result<Self, std::io::Error> {
+        let inner = unsafe { libc::newlocale(category, locale.0.as_ptr(), std::ptr::null_mut()) };
+        if inner.is_null() {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(Self(inner))
+    }
+}
+
+impl Drop for Locale {
+    fn drop(&mut self) {
+        unsafe { libc::freelocale(self.0) };
+    }
+}
 
 // Sourced from https://github.com/pgdr/moreutils/blob/master/Makefile
 const ALL_RAW_ERRNOS: &[libc::c_int] = &[
@@ -145,31 +180,22 @@ const ALL_RAW_ERRNOS: &[libc::c_int] = &[
     libc::ENOTSUP,
 ];
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct Locale(libc::locale_t);
-
-// FIXME: Assumes that locale_t is an opaque string that is immutable and
-// has static lifetime, and locales in one language are immutable
-unsafe impl Send for Locale {}
-unsafe impl Sync for Locale {}
-
 lazy_static! {
     static ref ERRNO_MAPPING: ErrnoMapping = ErrnoMapping::new();
 }
 
 type ErrnoLocaleMapping = BiHashMap<Errno, OsString>;
-type ErrnoMapping = DashMap<Locale, ErrnoLocaleMapping>;
+type ErrnoMapping = DashMap<LocaleId, ErrnoLocaleMapping>;
 
 unsafe extern "C" {
     fn strerror_l(errnum: i32, locale: libc::locale_t) -> *const libc::c_char;
 }
 
-fn get_current_message_locale() -> Locale {
-    let locale = unsafe { libc::uselocale(std::ptr::null_mut()) };
-    Locale(locale)
-}
-
-fn populate_errno_mapping(mapping: &mut ErrnoLocaleMapping, locale: Locale) {
+fn populate_errno_mapping(
+    mapping: &mut ErrnoLocaleMapping,
+    locale_id: &LocaleId,
+) -> Result<(), std::io::Error> {
+    let locale = Locale::new(libc::LC_MESSAGES, locale_id.clone())?;
     for errno in ALL_RAW_ERRNOS.iter() {
         let errno = Errno::from_i32(*errno);
         if mapping.contains_left(&errno) {
@@ -180,38 +206,46 @@ fn populate_errno_mapping(mapping: &mut ErrnoLocaleMapping, locale: Locale) {
             OsStr::from_bytes(CStr::from_ptr(error_str).to_bytes()).to_os_string()
         });
     }
+    Ok(())
 }
 
-fn get_errno_mapping(
-    mapping: &ErrnoMapping,
-    locale: Locale,
-) -> Ref<'_, Locale, ErrnoLocaleMapping> {
-    match mapping.get(&locale) {
-        Some(locale_mapping) => return locale_mapping,
-        None => (),
-    };
-    let ref_mut = mapping.entry(locale).or_insert_with(|| {
-        let mut mapping = ErrnoLocaleMapping::new();
-        populate_errno_mapping(&mut mapping, locale);
+fn get_errno_mapping<'a>(
+    mapping: &'a ErrnoMapping,
+    locale_id: &LocaleId,
+) -> Result<Ref<'a, LocaleId, ErrnoLocaleMapping>, std::io::Error> {
+    if let Some(locale_mapping) = mapping.get(locale_id) {
+        return Ok(locale_mapping);
+    }
+    let ref_mut =
         mapping
-    });
-    ref_mut.downgrade()
+            .entry(locale_id.clone())
+            .or_try_insert_with(|| -> Result<_, std::io::Error> {
+                let mut mapping = ErrnoLocaleMapping::new();
+                populate_errno_mapping(&mut mapping, locale_id)?;
+                Ok(mapping)
+            })?;
+    Ok(ref_mut.downgrade())
 }
 
 #[allow(unused)]
-pub(crate) fn get_errno_message(errno: impl Into<Errno>) -> Option<OsString> {
-    let locale = get_current_message_locale();
-    let mapping = get_errno_mapping(&ERRNO_MAPPING, locale);
-    mapping
+pub(crate) fn get_errno_message(
+    errno: impl Into<Errno>,
+    locale_id: &LocaleId,
+) -> Result<Option<OsString>, std::io::Error> {
+    let mapping = get_errno_mapping(&ERRNO_MAPPING, locale_id)?;
+    Ok(mapping
         .get_by_left(&errno.into())
-        .map(|os_str| os_str.to_owned())
+        .map(|os_str| os_str.to_owned()))
 }
 
 /// Attempts to convert a message to an errno object.
-pub(crate) fn get_errno_by_message(message: impl Into<OsString>) -> Option<Errno> {
-    let locale = get_current_message_locale();
-    let mapping = get_errno_mapping(&ERRNO_MAPPING, locale);
-    mapping.get_by_right(&message.into()).map(|errno| *errno)
+#[allow(unused)]
+pub(crate) fn get_errno_by_message(
+    message: impl Into<OsString>,
+    locale_id: &LocaleId,
+) -> Result<Option<Errno>, std::io::Error> {
+    let mapping = get_errno_mapping(&ERRNO_MAPPING, locale_id)?;
+    Ok(mapping.get_by_right(&message.into()).copied())
 }
 
 #[cfg(test)]
@@ -221,14 +255,18 @@ mod tests {
     #[test]
     fn test_get_errno_message() {
         let errno = Errno::EPERM;
-        let message = get_errno_message(errno).expect("message should be present");
+        let message = get_errno_message(errno, &"C".try_into().expect("locale should be valid"))
+            .expect("locale should be valid")
+            .expect("message should be present");
         assert_eq!(message, "Operation not permitted");
     }
 
     #[test]
     fn test_get_errno_by_message() {
         let message = OsString::from("Operation not permitted");
-        let errno = get_errno_by_message(message).expect("errno should be present");
+        let errno = get_errno_by_message(message, &"C".try_into().expect("locale should be valid"))
+            .expect("locale should be valid")
+            .expect("errno should be present");
         assert_eq!(errno, Errno::EPERM);
     }
 }

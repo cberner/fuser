@@ -40,7 +40,6 @@ use nix::sys::socket::SockaddrStorage;
 use nix::sys::socket::recvmsg;
 use regex::bytes::Regex;
 
-use crate::Errno;
 use crate::SessionACL;
 use crate::dev_fuse::DevFuse;
 use crate::mnt::is_mounted;
@@ -139,7 +138,7 @@ fn fuse_unmount_pure(mountpoint: &CStr, flags: &[UnmountOption]) -> Result<(), i
     #[cfg(target_os = "linux")]
     match nix::mount::umount2(mountpoint, nix_flags) {
         Ok(()) => return Ok(()),
-        Err(e) if e == nix::errno::Errno::EPERM => {}
+        Err(nix::errno::Errno::EPERM) => {}
         Err(e) => return Err(e.into()),
     }
     #[cfg(target_os = "macos")]
@@ -164,14 +163,46 @@ fn fuse_unmount_pure(mountpoint: &CStr, flags: &[UnmountOption]) -> Result<(), i
             debug!("fusermount: {}", String::from_utf8_lossy(&output.stdout));
             debug!("fusermount: {}", String::from_utf8_lossy(&output.stderr));
             if output.status.success() {
-                return Ok(());
+                Ok(())
             } else {
                 let fusermount_error =
-                    parse_fusermount_unmount_stderr(&OsStr::from_bytes(&output.stderr));
-                let error = fusermount_error.map_or(Errno::EIO, |e| {
-                    crate::ll::errno::get_errno_by_message(e).unwrap_or(Errno::EIO)
-                });
-                Err(io::Error::from_raw_os_error(error.code()))
+                    match parse_fusermount_unmount_stderr(OsStr::from_bytes(&output.stderr)) {
+                        Some(e) => e,
+                        None => {
+                            error!(
+                                "failed to parse fusermount umount error message: {:?}",
+                                output.stderr
+                            );
+                            return Err(io::Error::new(
+                                ErrorKind::Other,
+                                "Failed to parse fusermount umount error message",
+                            ));
+                        }
+                    };
+                // Since `fusermount` does not invoke any locale functions,
+                // the locale used for `strerror` in the program is guaranteed to be `C`.
+                let errno = crate::ll::errno::get_errno_by_message(
+                    &fusermount_error,
+                    &"C".try_into().expect("locale should be valid"),
+                )
+                .map_err(|e| {
+                    error!("failed to get errno by fusermount umount message: {}", e);
+                    io::Error::new(
+                        ErrorKind::Other,
+                        "failed to get errno by fusermount umount message",
+                    )
+                })?
+                .ok_or_else(|| {
+                    error!(
+                        "errno not found for fusermount umount message: {:?}",
+                        fusermount_error
+                    );
+                    io::Error::new(
+                        ErrorKind::Other,
+                        "errno not found for fusermount umount message",
+                    )
+                })?;
+                Err(io::Error::from_raw_os_error(errno.code()))
             }
         }
         Err(e) => Err(e),
@@ -280,12 +311,10 @@ unsafe fn clear_cloexec_in_pre_exec(command: &mut Command, fd: BorrowedFd<'_>) {
 fn parse_fusermount_unmount_stderr(output: &OsStr) -> Option<OsString> {
     let parse_regex = Regex::new(r"([^:]+): failed to unmount ([^:]+): (.+)")
         .expect("built-in regex should be valid");
-    parse_regex
-        .captures(output.as_bytes())
-        .and_then(|captures| {
-            let error = captures.get(3).map(|m| m.as_bytes()).unwrap_or_default();
-            Some(OsStr::from_bytes(error).to_os_string())
-        })
+    parse_regex.captures(output.as_bytes()).map(|captures| {
+        let error = captures.get(3).map(|m| m.as_bytes()).unwrap_or_default();
+        OsStr::from_bytes(error).to_os_string()
+    })
 }
 
 fn fuse_mount_fusermount(

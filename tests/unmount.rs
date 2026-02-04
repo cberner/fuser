@@ -1,5 +1,9 @@
-use fuser::{Config, MountOption, SessionACL};
-use std::{io::Read, time::Duration};
+use std::io::Read;
+use std::time::Duration;
+
+use fuser::Config;
+use fuser::MountOption;
+use fuser::SessionACL;
 mod fixtures;
 
 #[test_log::test]

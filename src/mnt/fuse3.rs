@@ -20,6 +20,14 @@ use crate::mnt::fuse3_sys::fuse_session_new;
 use crate::mnt::fuse3_sys::fuse_session_unmount;
 use crate::mnt::with_fuse_args;
 
+fn ensure_last_os_error() -> io::Error {
+    let err = io::Error::last_os_error();
+    match err.raw_os_error() {
+        Some(0) => io::Error::new(io::ErrorKind::Other, "Unspecified Error"),
+        _ => err,
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct MountImpl {
     fuse_session: *mut c_void,
@@ -69,8 +77,6 @@ impl MountImpl {
     }
 
     pub(crate) fn umount_impl(&mut self, flags: &[UnmountOption]) -> io::Result<()> {
-        use std::io::ErrorKind::PermissionDenied;
-
         if let Err(err) = crate::mnt::libc_umount(&self.mountpoint, flags) {
             // Linux always returns EPERM for non-root users.  We have to let the
             // library go through the setuid-root "fusermount -u" to unmount.
