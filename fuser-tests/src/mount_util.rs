@@ -23,6 +23,8 @@ impl MountEntry {
     pub(crate) fn is_fuse_mount_at(&self, mountpoint: &Path) -> bool {
         let expected_fstype = if cfg!(target_os = "macos") {
             "macfuse"
+        } else if cfg!(target_os = "freebsd") {
+            "fusefs"
         } else {
             "fuse"
         };
@@ -47,8 +49,8 @@ pub(crate) async fn read_mounts() -> anyhow::Result<Vec<MountEntry>> {
 
     if cfg!(target_os = "linux") {
         parse_mount_output_on_linux(&content)
-    } else if cfg!(target_os = "macos") {
-        parse_mount_output_on_macos(&content)
+    } else if cfg!(target_os = "macos") || cfg!(target_os = "freebsd") {
+        parse_mount_output_on_bsd(&content)
     } else {
         bail!("mount parsing is only implemented on Linux and macOS")
     }
@@ -179,7 +181,7 @@ fn parse_mount_output_on_linux(content: &str) -> anyhow::Result<Vec<MountEntry>>
 
 /// Parses the output of the `mount` command on macOS.
 /// Format: device on mountpoint (fstype, options...)
-fn parse_mount_output_on_macos(content: &str) -> anyhow::Result<Vec<MountEntry>> {
+fn parse_mount_output_on_bsd(content: &str) -> anyhow::Result<Vec<MountEntry>> {
     let mut entries = Vec::new();
     for line in content.lines() {
         // Format: device on mountpoint (fstype, options...)
@@ -212,8 +214,8 @@ mod tests {
     use std::path::PathBuf;
 
     use crate::mount_util::MountEntry;
+    use crate::mount_util::parse_mount_output_on_bsd;
     use crate::mount_util::parse_mount_output_on_linux;
-    use crate::mount_util::parse_mount_output_on_macos;
 
     #[test]
     fn test_parse_mount_output_on_linux() {
@@ -251,12 +253,12 @@ sysfs on /sys type sysfs (rw,nosuid,nodev,noexec,relatime)
     }
 
     #[test]
-    fn test_parse_mount_output_on_macos() {
+    fn test_parse_mount_output_on_bsd() {
         let content = r#"/dev/disk3s1s1 on / (apfs, sealed, local, read-only, journaled)
 devfs on /dev (devfs, local, nobrowse)
 map auto_home on /System/Volumes/Data/home (autofs, automounted, nobrowse)
 "#;
-        let entries = parse_mount_output_on_macos(content).unwrap();
+        let entries = parse_mount_output_on_bsd(content).unwrap();
         assert_eq!(
             entries,
             vec![
