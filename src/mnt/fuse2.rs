@@ -51,12 +51,15 @@ impl MountImpl {
             )
         })?;
         with_fuse_args(options, acl, |args| {
+            // FIXME/SAFETY: If AutoUnmount is enabled, this function leaks the fusermount
+            // communication socket fd[1] used for receiving the FUSE fd from fusermount
+            // and unmounting on socket removal. This may cause problems with long
+            // running processes. The file descriptor is left on `_FUSE_COMMFD2`.
             let fd = unsafe { fuse_mount_compat25(mountpoint_cstr.as_ptr(), args) };
             if fd < 0 {
                 Err(ensure_last_os_error())
             } else {
                 let file = unsafe { File::from_raw_fd(fd) };
-                
                 let device = Arc::new(DevFuse(file));
                 Ok((
                     device.clone(),

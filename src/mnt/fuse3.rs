@@ -89,6 +89,10 @@ impl FuseSession {
                 format!("Invalid mount path: {}", e),
             )
         })?;
+        // FIXME/SAFETY: If AutoUnmount is enabled, this function leaks the fusermount
+        // communication socket fd[1] used for receiving the FUSE fd from fusermount
+        // and unmounting on socket removal. This may cause problems with long
+        // running processes. The file descriptor is left on `_FUSE_COMMFD2`.
         let result = unsafe { fuse_session_mount(self.inner, mnt_cstr.as_ptr()) };
         if result != 0 {
             return Err(ensure_last_os_error());
