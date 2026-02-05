@@ -1,4 +1,3 @@
-use std::fs::OpenOptions;
 use std::io;
 use std::os::fd::AsFd;
 use std::os::fd::AsRawFd;
@@ -8,6 +7,7 @@ use std::sync::Arc;
 use nix::errno::Errno;
 
 use crate::dev_fuse::DevFuse;
+use crate::ll::ioctl::fuse_dev_ioc_clone;
 use crate::passthrough::BackingId;
 
 /// A raw communication channel to the FUSE kernel driver
@@ -64,32 +64,21 @@ impl Channel {
     /// enabling true parallel request processing. The kernel distributes
     /// requests across all cloned fds.
     ///
-    /// Only available on Linux.
+    /// Requires Linux 4.5+. Returns an error on older kernels or non-Linux.
     #[cfg(target_os = "linux")]
     pub(crate) fn clone_fd(&self) -> io::Result<Channel> {
-        let new_fuse = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(DevFuse::PATH)?;
+        // Open a new /dev/fuse fd
+        let new_dev = DevFuse::open()?;
 
-        // FUSE_DEV_IOC_CLONE = _IOC(_IOC_WRITE, 229, 0, 4)
-        // Use libc::Ioctl to support both glibc (c_ulong) and musl (i32)
-        #[allow(overflowing_literals)]
-        const FUSE_DEV_IOC_CLONE: libc::Ioctl = 0x8004_e500u32 as libc::Ioctl;
-
-        let src_fd = self.0.as_raw_fd();
-        let ret = unsafe {
-            libc::ioctl(
-                new_fuse.as_raw_fd(),
-                FUSE_DEV_IOC_CLONE,
-                &src_fd as *const _,
-            )
-        };
-        if ret < 0 {
-            return Err(io::Error::last_os_error());
+        // Clone the connection to the new fd
+        let mut source_fd = self.0.as_raw_fd() as u32;
+        // SAFETY: fuse_dev_ioc_clone is a valid ioctl for /dev/fuse
+        unsafe {
+            fuse_dev_ioc_clone(new_dev.as_raw_fd(), &mut source_fd)
+                .map_err(|e| io::Error::from_raw_os_error(e as i32))?;
         }
 
-        Ok(Channel::new(Arc::new(DevFuse(new_fuse))))
+        Ok(Channel::new(Arc::new(new_dev)))
     }
 }
 

@@ -267,12 +267,18 @@ impl<FS: Filesystem> Session<FS> {
 
         let mut channels = Vec::with_capacity(n_threads);
         #[cfg(target_os = "linux")]
-        for _ in 0..n_threads_minus_one {
-            channels.push(ch.clone_fd()?);
-        }
+        let use_clone_fd = config.clone_fd;
         #[cfg(not(target_os = "linux"))]
+        let use_clone_fd = false;
+
         for _ in 0..n_threads_minus_one {
-            // On non-Linux, fall back to sharing the fd (no true parallelism)
+            if use_clone_fd {
+                #[cfg(target_os = "linux")]
+                {
+                    channels.push(ch.clone_fd()?);
+                    continue;
+                }
+            }
             channels.push(ch.clone());
         }
         channels.push(ch);

@@ -19,6 +19,10 @@ pub struct CommonArgs {
     /// Number of threads to use
     #[clap(long, default_value_t = 1)]
     pub n_threads: usize,
+
+    /// Use FUSE_DEV_IOC_CLONE to give each thread its own fd (Linux 4.5+)
+    #[clap(long)]
+    pub clone_fd: bool,
 }
 
 impl CommonArgs {
@@ -36,6 +40,7 @@ impl CommonArgs {
             config.acl = SessionACL::All;
         }
         config.n_threads = Some(self.n_threads);
+        config.clone_fd = self.clone_fd;
         config
     }
 }
