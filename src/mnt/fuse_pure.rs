@@ -4,8 +4,6 @@
 //! open/close a fd to the FUSE kernel driver.
 
 use std::env;
-use std::ffi::CStr;
-use std::ffi::CString;
 use std::ffi::OsStr;
 use std::ffi::OsString;
 use std::fs::File;
@@ -24,6 +22,7 @@ use std::os::unix::io::RawFd;
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -55,7 +54,12 @@ const MOUNT_FUSEFS_BIN: &str = "mount_fusefs";
 
 #[derive(Debug)]
 pub(crate) struct MountImpl {
-    mountpoint: CString,
+    state: Option<MountState>,
+}
+
+#[derive(Debug)]
+struct MountState {
+    mountpoint: PathBuf,
     #[allow(dead_code)]
     auto_unmount_socket: Option<UnixStream>,
     fuse_device: Arc<DevFuse>,
@@ -68,23 +72,34 @@ impl MountImpl {
         acl: SessionACL,
     ) -> io::Result<(Arc<DevFuse>, MountImpl)> {
         let mountpoint = mountpoint.canonicalize()?;
-        let (file, sock) = fuse_mount_pure(mountpoint.as_os_str(), options, acl)?;
+        let (file, sock) = fuse_mount_pure(&mountpoint, options, acl)?;
         let file = Arc::new(file);
         Ok((
             file.clone(),
             MountImpl {
-                mountpoint: CString::new(mountpoint.as_os_str().as_bytes())?,
-                auto_unmount_socket: sock,
-                fuse_device: file,
+                state: Some(MountState {
+                    mountpoint: mountpoint.to_path_buf(),
+                    auto_unmount_socket: sock,
+                    fuse_device: file,
+                }),
             },
         ))
     }
 
+    fn mountpoint(&self) -> Option<&Path> {
+        self.state.as_ref().map(|state| state.mountpoint.as_path())
+    }
+
     pub(crate) fn umount_impl(&mut self, flags: &[UnmountOption]) -> io::Result<()> {
-        if !is_mounted(&self.fuse_device) {
+        let state = match self.state.as_mut() {
+            Some(state) => state,
+            None => return Ok(()),
+        };
+        if !is_mounted(&state.fuse_device) {
             // If the filesystem has already been unmounted, avoid unmounting it again.
             // Unmounting it a second time could cause a race with a newly mounted filesystem
             // living at the same mountpoint
+            self.state = None;
             return Ok(());
         }
         // FIXME: removing unmount socket affects the unmounting process.
@@ -93,21 +108,49 @@ impl MountImpl {
         //     // fusermount in auto-unmount mode, no more work to do.
         //     return Ok(());
         // }
-        if let Err(err) = crate::mnt::libc_umount(&self.mountpoint, flags) {
-            if err == nix::errno::Errno::EPERM {
-                // Linux always returns EPERM for non-root users.  We have to let the
-                // library go through the setuid-root "fusermount -u" to unmount.
-                fuse_unmount_pure(&self.mountpoint, flags)?;
-            } else {
-                return Err(err.into());
+        if let Err(err) = crate::mnt::libc_umount(&state.mountpoint, flags) {
+            // If the filesystem is gone, we need to clear the state and prevent the
+            // unmount function from being called again.
+            if !is_mounted(&state.fuse_device) {
+                self.state = None;
             }
+            // Linux always returns EPERM for non-root users.  We have to let the
+            // library go through the setuid-root "fusermount -u" to unmount.
+            else if err == nix::errno::Errno::EPERM {
+                fuse_unmount_pure(&state.mountpoint, flags)?;
+                self.state = None;
+                return Ok(());
+            }
+            return Err(err.into());
         }
+        // If the unmount was successful, we must clear the state.
+        self.state = None;
         Ok(())
+    }
+
+    pub(crate) fn is_alive(&self) -> bool {
+        self.state
+            .as_ref()
+            .map_or(false, |state| is_mounted(&state.fuse_device))
+    }
+}
+
+impl Drop for MountImpl {
+    fn drop(&mut self) {
+        let flags = super::drop_umount_flags();
+        if let Err(err) = super::with_retry_on_busy_or_again(|| self.umount_impl(&flags)) {
+            error!(
+                "Failed to unmount filesystem on mountpoint {:?}: {}",
+                self.mountpoint(),
+                err
+            );
+        }
+        self.state = None;
     }
 }
 
 fn fuse_mount_pure(
-    mountpoint: &OsStr,
+    mountpoint: &Path,
     options: &[MountOption],
     acl: SessionACL,
 ) -> Result<(DevFuse, Option<UnixStream>), io::Error> {
@@ -132,7 +175,7 @@ fn fuse_mount_pure(
     fuse_mount_fusermount(mountpoint, options, acl)
 }
 
-fn fuse_unmount_pure(mountpoint: &CStr, flags: &[UnmountOption]) -> Result<(), io::Error> {
+fn fuse_unmount_pure(mountpoint: &Path, flags: &[UnmountOption]) -> Result<(), io::Error> {
     let nix_flags =
         nix::mount::MntFlags::from_bits_retain(unmount_options::to_unmount_syscall(flags));
     #[cfg(target_os = "linux")]
@@ -318,7 +361,7 @@ fn parse_fusermount_unmount_stderr(output: &OsStr) -> Option<OsString> {
 }
 
 fn fuse_mount_fusermount(
-    mountpoint: &OsStr,
+    mountpoint: &Path,
     options: &[MountOption],
     acl: SessionACL,
 ) -> Result<(DevFuse, Option<UnixStream>), Error> {
@@ -407,7 +450,7 @@ fn fuse_mount_fusermount(
 
 fn fuse_mount_mount_fusefs(
     fusermount_bin: &str,
-    mountpoint: &OsStr,
+    mountpoint: &Path,
     options: &[MountOption],
 ) -> Result<(DevFuse, Option<UnixStream>), Error> {
     let fuse_device = DevFuse::open()?;
@@ -440,7 +483,7 @@ fn fuse_mount_mount_fusefs(
 // If returned option is none. Then fusermount binary should be tried
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn fuse_mount_sys(
-    mountpoint: &OsStr,
+    mountpoint: &Path,
     options: &[MountOption],
     acl: SessionACL,
 ) -> Result<Option<DevFuse>, Error> {

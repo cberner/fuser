@@ -1,14 +1,14 @@
-use std::io::Read;
-use std::time::Duration;
-
-use fuser::Config;
-use fuser::MountOption;
-use fuser::SessionACL;
 mod fixtures;
 
+#[cfg(fuser_mount_impl = "pure-rust")]
 #[test_log::test]
 fn test_unmount_while_file_is_open_with_autounmount() {
     use fixtures::hello_fs::HelloFS;
+    use fuser::Config;
+    use fuser::MountOption;
+    use fuser::SessionACL;
+    use std::io::Read;
+    use std::time::Duration;
 
     let mountpoint = tempfile::tempdir().unwrap();
     let mut cfg = Config::default();

@@ -1,3 +1,5 @@
+use std::{error::Error, io};
+
 fn main() {
     // Register rustc cfg for switching between mount implementations.
     println!(
@@ -45,7 +47,17 @@ fn main() {
     }
 }
 
-fn configure_libfuse3() -> Result<(), pkg_config::Error> {
+fn configure_libfuse3() -> Result<(), Box<dyn Error>> {
+    let target_os =
+        std::env::var("CARGO_CFG_TARGET_OS").expect("CARGO_CFG_TARGET_OS should be set");
+    // There are critical unmount methods that are only supported on Linux,
+    // so fuser_mount_impl="libfuse3" should never work on other platforms.
+    if target_os.as_str() != "linux" {
+        return Err(Box::new(io::Error::new(
+            io::ErrorKind::Other,
+            "libfuse3 is only supported on Linux",
+        )));
+    }
     pkg_config::Config::new()
         .atleast_version("3.0.0")
         .probe("fuse3")?;

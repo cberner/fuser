@@ -29,7 +29,7 @@ use crate::dev_fuse::DevFuse;
 /// Helper function to provide options as a `fuse_args` struct
 /// (which contains an argc count and an argv pointer)
 #[cfg(any(test, fuser_mount_impl = "libfuse2", fuser_mount_impl = "libfuse3"))]
-fn with_fuse_args<T, F: FnOnce(&fuse_args) -> T>(
+fn with_fuse_args<T, F: FnOnce(&mut fuse_args) -> T>(
     options: &[MountOption],
     acl: SessionACL,
     f: F,
@@ -50,19 +50,17 @@ fn with_fuse_args<T, F: FnOnce(&fuse_args) -> T>(
         args.push(CString::new(acl).unwrap());
     }
     let argptrs: Vec<_> = args.iter().map(|s| s.as_ptr()).collect();
-    f(&fuse_args {
+    f(&mut fuse_args {
         argc: argptrs.len() as i32,
         argv: argptrs.as_ptr(),
         allocated: 0,
     })
 }
 
-use std::ffi::CStr;
+use crate::SessionACL;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
-
-use crate::SessionACL;
 
 #[derive(Debug)]
 enum MountImpl {
@@ -75,6 +73,20 @@ enum MountImpl {
 }
 
 impl MountImpl {
+    fn is_alive(&self) -> bool {
+        match self {
+            #[cfg(fuser_mount_impl = "pure-rust")]
+            MountImpl::Pure(mount) => mount.is_alive(),
+            #[cfg(fuser_mount_impl = "libfuse2")]
+            MountImpl::Fuse2(mount) => mount.is_alive(),
+            #[cfg(fuser_mount_impl = "libfuse3")]
+            MountImpl::Fuse3(mount) => mount.is_alive(),
+            // This branch is needed because Rust does not consider & empty enum non-empty.
+            #[cfg(fuser_mount_impl = "macos-no-mount")]
+            _ => false,
+        }
+    }
+
     fn umount_impl(&mut self, flags: &[UnmountOption]) -> io::Result<()> {
         match self {
             #[cfg(fuser_mount_impl = "pure-rust")]
@@ -158,17 +170,10 @@ impl Mount {
             Err(err) => return Err((Some(self), err)),
         };
         if let Err(err) = mount_impl.umount_impl(flags) {
-            let salvaged = match err.raw_os_error() {
-                Some(libc::EBUSY) => true,
-                Some(libc::EAGAIN) => true,
-                Some(libc::EFAULT) => false,
-                Some(libc::EINVAL) => false,
-                Some(libc::ENAMETOOLONG) => false,
-                Some(libc::ENOENT) => false,
-                Some(libc::ENOMEM) => true,
-                Some(libc::EPERM) => true,
-                _ => true,
-            };
+            let salvaged = salvage_policy(&err) && mount_impl.is_alive();
+            if !salvaged {
+                self.mount_impl = None;
+            }
             return Err((salvaged.then_some(self), err));
         }
         // This prevents the mount from being removed twice.
@@ -194,22 +199,33 @@ pub(crate) fn drop_umount_flags() -> &'static [UnmountOption] {
     }
 }
 
+pub(crate) fn with_retry_on_busy_or_again(mut f: impl FnMut() -> io::Result<()>) -> io::Result<()> {
+    loop {
+        match f() {
+            Ok(()) => return Ok(()),
+            Err(err) => {
+                let err_kind = err.kind();
+                if err_kind == io::ErrorKind::ResourceBusy {
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                } else if err_kind == io::ErrorKind::WouldBlock {
+                    std::thread::sleep(std::time::Duration::from_secs_f64(0.01));
+                } else {
+                    return Err(err);
+                }
+            }
+        }
+    }
+}
+
 impl Drop for Mount {
     fn drop(&mut self) {
         let drop_flags = drop_umount_flags();
-        while let Some(mount_impl) = self.mount_impl.as_mut() {
-            match mount_impl.umount_impl(drop_flags) {
-                Ok(()) => break,
+        if let Some(mount_impl) = self.mount_impl.as_mut() {
+            match with_retry_on_busy_or_again(|| mount_impl.umount_impl(drop_flags)) {
+                Ok(()) => (),
                 Err(err) => {
                     // This is a fallback when DETACH is not supported.
-                    if err.raw_os_error() == Some(libc::EBUSY) {
-                        log::warn!("Unmount failed due to EBUSY, retrying...");
-                        std::thread::sleep(std::time::Duration::from_secs(1));
-                        continue;
-                    } else {
-                        error!("Unmount failed: {}", err);
-                        break;
-                    }
+                    error!("Unmount failed: {}", err);
                 }
             }
         }
@@ -217,7 +233,7 @@ impl Drop for Mount {
 }
 
 #[cfg_attr(fuser_mount_impl = "macos-no-mount", expect(dead_code))]
-fn libc_umount(mnt: &CStr, flags: &[UnmountOption]) -> nix::Result<()> {
+fn libc_umount(mnt: &Path, flags: &[UnmountOption]) -> nix::Result<()> {
     let nix_flags =
         nix::mount::MntFlags::from_bits_retain(unmount_options::to_unmount_syscall(flags));
     #[cfg(any(
@@ -244,9 +260,31 @@ fn libc_umount(mnt: &CStr, flags: &[UnmountOption]) -> nix::Result<()> {
     }
 }
 
+fn salvage_policy(err: &io::Error) -> bool {
+    match err.kind() {
+        io::ErrorKind::ResourceBusy => return true,
+        io::ErrorKind::WouldBlock => return true,
+        io::ErrorKind::InvalidInput => return false,
+        io::ErrorKind::PermissionDenied => return true,
+        io::ErrorKind::NotFound => return false,
+        io::ErrorKind::OutOfMemory => return true,
+        _ => {}
+    };
+    match err.raw_os_error() {
+        Some(libc::EBUSY) => true,
+        Some(libc::EAGAIN) => true,
+        Some(libc::EFAULT) => false,
+        Some(libc::EINVAL) => false,
+        Some(libc::ENAMETOOLONG) => false,
+        Some(libc::ENOENT) => true,
+        Some(libc::ENOMEM) => true,
+        Some(libc::EPERM) => true,
+        _ => false,
+    }
+}
+
 /// Warning: This will return true if the filesystem has been detached (lazy unmounted), but not
 /// yet destroyed by the kernel.
-#[cfg(any(test, fuser_mount_impl = "pure-rust"))]
 fn is_mounted(fuse_device: &DevFuse) -> bool {
     use std::os::unix::io::AsFd;
     use std::slice;
