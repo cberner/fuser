@@ -3,7 +3,6 @@
 use anyhow::Context;
 use anyhow::bail;
 use tempfile::TempDir;
-use tokio::process::Child;
 use tokio::process::Command;
 
 use crate::ansi::green;
@@ -42,40 +41,12 @@ pub(crate) async fn run_macos_mount_tests() -> anyhow::Result<()> {
     }
 
     command_success(["umount", mount_path.to_str().unwrap()]).await?;
-    ensure_process_stopped(&mut fuse_process).await?;
+
+    fuse_process
+        .kill()
+        .await
+        .context("Failed to kill/wait FUSE process")?;
 
     green!("All macOS mount tests passed!");
-    Ok(())
-}
-
-async fn ensure_process_stopped(process: &mut Child) -> anyhow::Result<()> {
-    if process
-        .try_wait()
-        .context("Failed to check FUSE process status")?
-        .is_some()
-    {
-        return Ok(());
-    }
-
-    match process.kill().await {
-        Ok(()) => {
-            let _ = process
-                .wait()
-                .await
-                .context("Failed to wait for FUSE process after kill")?;
-        }
-        Err(err)
-            if matches!(
-                err.kind(),
-                std::io::ErrorKind::InvalidInput | std::io::ErrorKind::NotFound
-            ) =>
-        {
-            // Process already exited after unmount.
-        }
-        Err(err) => {
-            return Err(err).context("Failed to kill FUSE process");
-        }
-    }
-
     Ok(())
 }
