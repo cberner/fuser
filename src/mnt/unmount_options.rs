@@ -100,7 +100,6 @@ pub(crate) fn check_option_conflicts(options: &[UnmountOption]) -> Result<(), io
     }
 }
 
-#[cfg(fuser_mount_impl = "pure-rust")]
 pub(crate) fn to_fusermount_option(option: &UnmountOption) -> Option<String> {
     match option {
         UnmountOption::Force => None,

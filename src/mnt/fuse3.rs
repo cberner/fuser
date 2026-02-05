@@ -21,6 +21,7 @@ use crate::mnt::fuse3_sys::fuse_session_fd;
 use crate::mnt::fuse3_sys::fuse_session_mount;
 use crate::mnt::fuse3_sys::fuse_session_new;
 use crate::mnt::fuse3_sys::fuse_session_unmount;
+use crate::mnt::fusermount;
 use crate::mnt::is_mounted;
 use crate::mnt::with_fuse_args;
 
@@ -105,10 +106,8 @@ impl FuseSession {
         Ok(())
     }
 
-    fn unmount(&mut self, _flags: &[UnmountOption]) -> io::Result<()> {
+    fn unmount(&mut self, flags: &[UnmountOption]) -> io::Result<()> {
         // FIXME: Detect mismatching/shadowing mounts
-        // FIXME: Currently, `fuse_session_unmount` does not honor user flags,
-        // and does not return any errors.
         let state = match self.state.as_mut() {
             None => return Ok(()),
             Some(state) => state,
@@ -119,7 +118,7 @@ impl FuseSession {
             self.user_unmount_and_clear();
             return Ok(());
         }
-        if let Err(err) = crate::mnt::libc_umount(&state.mountpoint, _flags) {
+        if let Err(err) = crate::mnt::libc_umount(&state.mountpoint, flags) {
             // If the filesystem is gone, we need to clear the state and prevent the
             // unmount function from being called again
             if !is_mounted(&state.device) {
@@ -128,6 +127,12 @@ impl FuseSession {
             // Linux always returns EPERM for non-root users.  We have to let the
             // library go through the setuid-root "fusermount -u" to unmount.
             else if err == nix::errno::Errno::EPERM {
+                if let Err(e) = fusermount::fuse_unmount_pure(&state.mountpoint, flags) {
+                    if !is_mounted(&state.device) {
+                        self.user_unmount_and_clear();
+                    }
+                    return Err(e);
+                }
                 self.user_unmount_and_clear();
                 return Ok(());
             }

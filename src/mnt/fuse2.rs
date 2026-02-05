@@ -13,8 +13,9 @@ use crate::SessionACL;
 use crate::dev_fuse::DevFuse;
 use crate::mnt::MountOption;
 use crate::mnt::fuse2_sys::*;
+use crate::mnt::fusermount;
 use crate::mnt::with_fuse_args;
-use log::error;
+use log::{debug, error};
 
 /// Ensures that an os error is never 0/Success
 fn ensure_last_os_error() -> io::Error {
@@ -55,6 +56,7 @@ impl MountImpl {
                 Err(ensure_last_os_error())
             } else {
                 let file = unsafe { File::from_raw_fd(fd) };
+                
                 let device = Arc::new(DevFuse(file));
                 Ok((
                     device.clone(),
@@ -83,12 +85,6 @@ impl MountImpl {
             self.state = None;
             return Ok(());
         }
-        // fuse_unmount_compat22 unfortunately doesn't return a status. Additionally,
-        // it attempts to call realpath, which in turn calls into the filesystem. So
-        // if the filesystem returns an error, the unmount does not take place, with
-        // no indication of the error available to the caller. So we call unmount
-        // directly, which is what osxfuse does anyway, since we already converted
-        // to the real path when we first mounted.
         if let Err(err) = super::libc_umount(&state.mountpoint, flags) {
             // If the filesystem is gone, we need to clear the state and prevent the
             // unmount function from being called again
@@ -98,21 +94,14 @@ impl MountImpl {
             // Linux always returns EPERM for non-root users.  We have to let the
             // library go through the setuid-root "fusermount -u" to unmount.
             else if err == nix::errno::Errno::EPERM {
-                // FIXME: fallback method should be fallible. The branch should only run on these
-                #[cfg(not(any(
-                    target_os = "macos",
-                    target_os = "freebsd",
-                    target_os = "dragonfly",
-                    target_os = "openbsd",
-                    target_os = "netbsd"
-                )))]
-                unsafe {
-                    let mountpoint_cstr = CString::new(state.mountpoint.as_os_str().as_bytes())
-                        .expect("Invalid mountpoint path");
-                    fuse_unmount_compat22(mountpoint_cstr.as_ptr());
-                    self.state = None;
-                    return Ok(());
+                if let Err(e) = fusermount::fuse_unmount_pure(&state.mountpoint, flags) {
+                    if !is_mounted(&state.device) {
+                        self.state = None;
+                    }
+                    return Err(e);
                 }
+                self.state = None;
+                return Ok(());
             }
             return Err(err.into());
         }

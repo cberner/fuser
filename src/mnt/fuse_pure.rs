@@ -3,9 +3,6 @@
 //! This is a small set of bindings that are required to mount/unmount FUSE filesystems and
 //! open/close a fd to the FUSE kernel driver.
 
-use std::env;
-use std::ffi::OsStr;
-use std::ffi::OsString;
 use std::fs::File;
 use std::io;
 use std::io::Error;
@@ -15,7 +12,6 @@ use std::io::Read;
 use std::mem;
 use std::os::fd::AsFd;
 use std::os::fd::BorrowedFd;
-use std::os::unix::ffi::OsStrExt;
 use std::os::unix::io::AsRawFd;
 use std::os::unix::io::FromRawFd;
 use std::os::unix::io::RawFd;
@@ -37,20 +33,17 @@ use nix::sys::socket::ControlMessageOwned;
 use nix::sys::socket::MsgFlags;
 use nix::sys::socket::SockaddrStorage;
 use nix::sys::socket::recvmsg;
-use regex::bytes::Regex;
 
 use crate::SessionACL;
 use crate::dev_fuse::DevFuse;
+use crate::mnt::fusermount;
+use crate::mnt::fusermount::MOUNT_FUSEFS_BIN;
 use crate::mnt::is_mounted;
 use crate::mnt::mount_options::MountOption;
 use crate::mnt::mount_options::option_to_string;
-use crate::mnt::unmount_options;
 use crate::mnt::unmount_options::UnmountOption;
 
-const FUSERMOUNT_BIN: &str = "fusermount";
-const FUSERMOUNT3_BIN: &str = "fusermount3";
 const FUSERMOUNT_COMM_ENV: &str = "_FUSE_COMMFD";
-const MOUNT_FUSEFS_BIN: &str = "mount_fusefs";
 
 #[derive(Debug)]
 pub(crate) struct MountImpl {
@@ -117,7 +110,12 @@ impl MountImpl {
             // Linux always returns EPERM for non-root users.  We have to let the
             // library go through the setuid-root "fusermount -u" to unmount.
             else if err == nix::errno::Errno::EPERM {
-                fuse_unmount_pure(&state.mountpoint, flags)?;
+                if let Err(e) = fusermount::fuse_unmount_pure(&state.mountpoint, flags) {
+                    if !is_mounted(&state.fuse_device) {
+                        self.state = None;
+                    }
+                    return Err(e);
+                }
                 self.state = None;
                 return Ok(());
             }
@@ -173,111 +171,6 @@ fn fuse_mount_pure(
     }
 
     fuse_mount_fusermount(mountpoint, options, acl)
-}
-
-fn fuse_unmount_pure(mountpoint: &Path, flags: &[UnmountOption]) -> Result<(), io::Error> {
-    let nix_flags =
-        nix::mount::MntFlags::from_bits_retain(unmount_options::to_unmount_syscall(flags));
-    #[cfg(target_os = "linux")]
-    match nix::mount::umount2(mountpoint, nix_flags) {
-        Ok(()) => return Ok(()),
-        Err(nix::errno::Errno::EPERM) => {}
-        Err(e) => return Err(e.into()),
-    }
-    #[cfg(target_os = "macos")]
-    match nix::mount::unmount(mountpoint, nix_flags) {
-        Ok(()) => return Ok(()),
-        Err(e) if e == nix::errno::Errno::EPERM => {}
-        Err(e) => return Err(e.into()),
-    }
-    let mut builder = Command::new(detect_fusermount_bin());
-    builder.stdout(Stdio::piped()).stderr(Stdio::piped());
-    builder.arg("-u");
-    for flag in flags {
-        if let Some(cmd_arg) = unmount_options::to_fusermount_option(flag) {
-            builder.arg(cmd_arg);
-        }
-    }
-    builder
-        .arg("--")
-        .arg(OsStr::new(&mountpoint.to_string_lossy().into_owned()));
-    match builder.output() {
-        Ok(output) => {
-            debug!("fusermount: {}", String::from_utf8_lossy(&output.stdout));
-            debug!("fusermount: {}", String::from_utf8_lossy(&output.stderr));
-            if output.status.success() {
-                Ok(())
-            } else {
-                let fusermount_error =
-                    match parse_fusermount_unmount_stderr(OsStr::from_bytes(&output.stderr)) {
-                        Some(e) => e,
-                        None => {
-                            error!(
-                                "failed to parse fusermount umount error message: {:?}",
-                                output.stderr
-                            );
-                            return Err(io::Error::new(
-                                ErrorKind::Other,
-                                "Failed to parse fusermount umount error message",
-                            ));
-                        }
-                    };
-                // Since `fusermount` does not invoke any locale functions,
-                // the locale used for `strerror` in the program is guaranteed to be `C`.
-                let errno = crate::ll::errno::get_errno_by_message(
-                    &fusermount_error,
-                    &"C".try_into().expect("locale should be valid"),
-                )
-                .map_err(|e| {
-                    error!("failed to get errno by fusermount umount message: {}", e);
-                    io::Error::new(
-                        ErrorKind::Other,
-                        "failed to get errno by fusermount umount message",
-                    )
-                })?
-                .ok_or_else(|| {
-                    error!(
-                        "errno not found for fusermount umount message: {:?}",
-                        fusermount_error
-                    );
-                    io::Error::new(
-                        ErrorKind::Other,
-                        "errno not found for fusermount umount message",
-                    )
-                })?;
-                Err(io::Error::from_raw_os_error(errno.code()))
-            }
-        }
-        Err(e) => Err(e),
-    }
-}
-
-fn detect_fusermount_bin() -> String {
-    if let Some(fusermount) = env::var_os("FUSERMOUNT_PATH") {
-        return fusermount
-            .to_str()
-            .expect("FUSERMOUNT_PATH is not UTF-8")
-            .to_owned();
-    }
-
-    for name in [
-        FUSERMOUNT3_BIN.to_string(),
-        FUSERMOUNT_BIN.to_string(),
-        MOUNT_FUSEFS_BIN.to_string(),
-        format!("/sbin/{FUSERMOUNT3_BIN}"),
-        format!("/sbin/{FUSERMOUNT_BIN}"),
-        format!("/sbin/{MOUNT_FUSEFS_BIN}"),
-        format!("/bin/{FUSERMOUNT3_BIN}"),
-        format!("/bin/{FUSERMOUNT_BIN}"),
-    ]
-    .iter()
-    {
-        if Command::new(name).arg("-h").output().is_ok() {
-            return name.to_string();
-        }
-    }
-    // Default to fusermount3
-    FUSERMOUNT3_BIN.to_string()
 }
 
 fn receive_fusermount_message(socket: &UnixStream) -> Result<DevFuse, Error> {
@@ -351,21 +244,12 @@ unsafe fn clear_cloexec_in_pre_exec(command: &mut Command, fd: BorrowedFd<'_>) {
     };
 }
 
-fn parse_fusermount_unmount_stderr(output: &OsStr) -> Option<OsString> {
-    let parse_regex = Regex::new(r"([^:]+): failed to unmount ([^:]+): (.+)")
-        .expect("built-in regex should be valid");
-    parse_regex.captures(output.as_bytes()).map(|captures| {
-        let error = captures.get(3).map(|m| m.as_bytes()).unwrap_or_default();
-        OsStr::from_bytes(error).to_os_string()
-    })
-}
-
 fn fuse_mount_fusermount(
     mountpoint: &Path,
     options: &[MountOption],
     acl: SessionACL,
 ) -> Result<(DevFuse, Option<UnixStream>), Error> {
-    let fusermount_bin = detect_fusermount_bin();
+    let fusermount_bin = fusermount::detect_fusermount_bin();
 
     if fusermount_bin.ends_with(MOUNT_FUSEFS_BIN) {
         return fuse_mount_mount_fusefs(&fusermount_bin, mountpoint, options);
@@ -642,7 +526,6 @@ pub(crate) fn option_group(option: &MountOption) -> MountOptionGroup {
     }
 }
 
-#[cfg(target_os = "linux")]
 pub(crate) fn option_to_flag(option: &MountOption) -> io::Result<nix::mount::MsFlags> {
     match option {
         MountOption::Dev => Ok(nix::mount::MsFlags::empty()), // There is no option for dev. It's the absence of NoDev

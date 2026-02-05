@@ -23,12 +23,13 @@ unsafe extern "C" {
     // Therefore, the minimum version requirement for *_compat25 functions is libfuse-2.6.0.
 
     pub(crate) fn fuse_mount_compat25(mountpoint: *const c_char, args: *const fuse_args) -> c_int;
-    #[cfg(not(any(
-        target_os = "macos",
-        target_os = "freebsd",
-        target_os = "dragonfly",
-        target_os = "openbsd",
-        target_os = "netbsd"
-    )))]
-    pub(crate) fn fuse_unmount_compat22(mountpoint: *const c_char);
+    // #[cfg(not(any(
+    //     target_os = "macos",
+    //     target_os = "freebsd",
+    //     target_os = "dragonfly",
+    //     target_os = "openbsd",
+    //     target_os = "netbsd"
+    // )))]
+    // #[allow(dead_code)]
+    // pub(crate) fn fuse_unmount_compat22(mountpoint: *const c_char);
 }

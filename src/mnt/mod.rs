@@ -13,6 +13,9 @@ mod fuse3_sys;
 
 #[cfg(fuser_mount_impl = "pure-rust")]
 mod fuse_pure;
+
+mod fusermount;
+
 pub(crate) mod mount_options;
 pub(crate) mod unmount_options;
 
@@ -170,7 +173,7 @@ impl Mount {
             Err(err) => return Err((Some(self), err)),
         };
         if let Err(err) = mount_impl.umount_impl(flags) {
-            let salvaged = salvage_policy(&err) && mount_impl.is_alive();
+            let salvaged = is_mount_salvageable(&err) && mount_impl.is_alive();
             if !salvaged {
                 self.mount_impl = None;
             }
@@ -260,7 +263,8 @@ fn libc_umount(mnt: &Path, flags: &[UnmountOption]) -> nix::Result<()> {
     }
 }
 
-fn salvage_policy(err: &io::Error) -> bool {
+/// Determines whether a mount can be salvaged after an error.
+fn is_mount_salvageable(err: &io::Error) -> bool {
     match err.kind() {
         io::ErrorKind::ResourceBusy => return true,
         io::ErrorKind::WouldBlock => return true,

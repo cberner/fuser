@@ -1,15 +1,24 @@
 mod fixtures;
 
-#[cfg(fuser_mount_impl = "pure-rust")]
-#[test_log::test]
-fn test_unmount_while_file_is_open_with_autounmount() {
-    use fixtures::hello_fs::HelloFS;
-    use fuser::Config;
-    use fuser::MountOption;
-    use fuser::SessionACL;
-    use std::io::Read;
-    use std::time::Duration;
+use fixtures::hello_fs::HelloFS;
+use fuser::Config;
+use fuser::MountOption;
+use fuser::SessionACL;
+use std::io::Read;
+use std::time::Duration;
 
+#[test_log::test]
+fn should_unmount_without_outstanding_handles() {
+    let mountpoint = tempfile::tempdir().unwrap();
+    let mut cfg = Config::default();
+    cfg.acl = SessionACL::All;
+    cfg.n_threads = Some(2);
+    let session = fuser::spawn_mount2(HelloFS, &mountpoint, &cfg).unwrap();
+    session.umount_and_join(&[]).unwrap();
+}
+
+#[test_log::test]
+fn should_prompt_unmount_retry_while_file_is_open_with_autounmount() {
     let mountpoint = tempfile::tempdir().unwrap();
     let mut cfg = Config::default();
     cfg.acl = SessionACL::All;
@@ -49,7 +58,6 @@ fn test_unmount_while_file_is_open_with_autounmount() {
             .send(())
             .expect("send unmount completed");
     });
-
     let hello_thread = std::thread::spawn(move || {
         let mut file = std::fs::File::open(hello_file).expect("open hello file");
         let mut buffer = Vec::new();
