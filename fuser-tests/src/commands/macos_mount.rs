@@ -2,18 +2,17 @@
 
 use anyhow::Context;
 use anyhow::bail;
-use tempfile::TempDir;
 use tokio::process::Command;
 
 use crate::ansi::green;
+use crate::canonical_temp_dir::CanonicalTempDir;
 use crate::cargo::cargo_build_example;
 use crate::command_utils::command_success;
 use crate::mount_util::wait_for_fuse_mount;
 
 pub(crate) async fn run_macos_mount_tests() -> anyhow::Result<()> {
-    let mount_path = TempDir::new().context("Failed to create mount directory")?;
-    // Must canonicalize to check `mount` output.
-    let mount_path = mount_path.path().canonicalize()?;
+    let mount_dir = CanonicalTempDir::new()?;
+    let mount_path = mount_dir.path();
 
     let hello_exe = cargo_build_example("hello", &[]).await?;
 

@@ -1,6 +1,7 @@
 //! Test runner for fuser
 
 mod ansi;
+mod canonical_temp_dir;
 mod cargo;
 mod command_utils;
 mod commands;
