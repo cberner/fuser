@@ -2,17 +2,17 @@
 
 use anyhow::Context;
 use anyhow::bail;
-use tempfile::TempDir;
 use tokio::process::Command;
 
 use crate::ansi::green;
+use crate::canonical_temp_dir::CanonicalTempDir;
 use crate::cargo::cargo_build_example;
 use crate::command_utils::command_success;
 use crate::mount_util::wait_for_fuse_mount;
 
 pub(crate) async fn run_bsd_mount_tests() -> anyhow::Result<()> {
-    let mount_dir = TempDir::new().context("Failed to create mount directory")?;
-    let mount_path = mount_dir.path().to_str().context("Invalid mount path")?;
+    let mount_dir = CanonicalTempDir::new()?;
+    let mount_path = mount_dir.path();
 
     let hello_exe = cargo_build_example("hello", &[]).await?;
 
@@ -39,7 +39,7 @@ pub(crate) async fn run_bsd_mount_tests() -> anyhow::Result<()> {
         );
     }
 
-    command_success(["umount", mount_path]).await?;
+    command_success(["umount", mount_path.to_str().unwrap()]).await?;
 
     fuse_process
         .kill()

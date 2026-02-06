@@ -3,18 +3,17 @@
 use std::convert::Infallible;
 use std::fmt::Write;
 use std::io;
-use std::path::Path;
 use std::time::Duration;
 use std::time::Instant;
 
 use anyhow::Context;
 use anyhow::bail;
-use tempfile::TempDir;
 use tokio::process::Command;
 use tokio::task::JoinError;
 use tokio::task::JoinSet;
 
 use crate::ansi::green;
+use crate::canonical_temp_dir::CanonicalTempDir;
 use crate::cargo::cargo_build_example;
 use crate::experimental::run_experimental_tests;
 use crate::features::Feature;
@@ -29,7 +28,6 @@ use crate::unmount::Unmount;
 use crate::unmount::kill_and_unmount;
 use crate::users::assert_can_read_as_user;
 use crate::users::assert_cannot_read_as_user;
-use crate::users::mktempdir_as_user;
 use crate::users::run_as_user_status;
 
 pub(crate) async fn run_mount_tests(libfuse: Libfuse) -> anyhow::Result<()> {
@@ -100,17 +98,18 @@ async fn run_test_inner(
 ) -> anyhow::Result<()> {
     eprintln!("\n=== Running test: {description} ===");
 
-    let mount_dir = TempDir::new().context("Failed to create mount directory")?;
-    let mount_path = mount_dir.path().to_str().unwrap();
+    let mount_dir = CanonicalTempDir::new()?;
+    let mount_path = mount_dir.path();
+    let mount_path_str = mount_path.to_str().unwrap();
 
-    eprintln!("Mount dir: {}", mount_path);
+    eprintln!("Mount dir: {}", mount_path.display());
 
     let hello_exe = cargo_build_example("hello", features).await?;
 
     // Run the hello example
     eprintln!("Starting hello filesystem...");
     let n_threads_str = n_threads.to_string();
-    let mut run_args = vec![mount_path, "--n-threads", &n_threads_str];
+    let mut run_args = vec![mount_path_str, "--n-threads", &n_threads_str];
     if matches!(unmount, Unmount::Auto) {
         run_args.push("--auto-unmount");
     }
@@ -181,7 +180,7 @@ async fn run_test_inner(
         green!("OK multi-threaded tests passed: {stats_per_thread:?}");
     }
 
-    kill_and_unmount(fuse_process, unmount, mount_path).await?;
+    kill_and_unmount(fuse_process, unmount, mount_path_str).await?;
 
     green!("OK {description}");
 
@@ -205,11 +204,11 @@ async fn test_no_user_allow_other(features: &[Feature], libfuse: &Libfuse) -> an
 
     fuse_conf_remove_user_allow_other().await?;
 
-    let mount_dir = mktempdir_as_user("fusertestnoallow").await?;
-    let data_dir = mktempdir_as_user("fusertestnoallow").await?;
+    let mount_dir = CanonicalTempDir::for_user("fusertestnoallow").await?;
+    let data_dir = CanonicalTempDir::for_user("fusertestnoallow").await?;
 
-    eprintln!("Mount dir: {}", mount_dir);
-    eprintln!("Data dir: {}", data_dir);
+    eprintln!("Mount dir: {}", mount_dir.path().display());
+    eprintln!("Data dir: {}", data_dir.path().display());
 
     let simple_exe = cargo_build_example("simple", features).await?;
 
@@ -217,8 +216,8 @@ async fn test_no_user_allow_other(features: &[Feature], libfuse: &Libfuse) -> an
     let run_command = format!(
         "{} --auto-unmount -vvv --data-dir {} --mount-point {}",
         simple_exe.display(),
-        data_dir,
-        mount_dir
+        data_dir.path().display(),
+        mount_dir.path().display()
     );
 
     let exit_code = run_as_user_status("fusertestnoallow", &run_command).await?;
@@ -229,7 +228,7 @@ async fn test_no_user_allow_other(features: &[Feature], libfuse: &Libfuse) -> an
         bail!("Expected exit code 2, got {}", exit_code);
     }
 
-    assert_no_fuse_mount(Path::new(&mount_dir)).await?;
+    assert_no_fuse_mount(mount_dir.path()).await?;
     green!("OK Mount does not exist: {}", description);
 
     // Restore fuse.conf
@@ -241,35 +240,44 @@ async fn test_no_user_allow_other(features: &[Feature], libfuse: &Libfuse) -> an
 async fn run_allow_root_test() -> anyhow::Result<()> {
     eprintln!("\n=== Running run_allow_root_test ===");
 
-    let mount_dir = mktempdir_as_user("fusertest1").await?;
-    eprintln!("Mount dir: {}", mount_dir);
+    let mount_dir = CanonicalTempDir::for_user("fusertest1").await?;
+    eprintln!("Mount dir: {}", mount_dir.path().display());
 
     let hello_exe = cargo_build_example("hello", &[Feature::Libfuse3]).await?;
 
     // Run the hello example as fusertest1 with --allow-root
-    let run_command = format!("{} {} --allow-root", hello_exe.display(), mount_dir);
+    let run_command = format!(
+        "{} {} --allow-root",
+        hello_exe.display(),
+        mount_dir.path().display()
+    );
     let fuse_process = Command::new("su")
         .args(["fusertest1", "-c", &run_command])
         .kill_on_drop(true)
         .spawn()
         .context("Failed to start hello example")?;
 
-    wait_for_fuse_mount(Path::new(&mount_dir)).await?;
+    wait_for_fuse_mount(mount_dir.path()).await?;
 
     // Test: root can read
-    let hello_path = format!("{}/hello.txt", mount_dir);
-    assert_can_read_as_user("root", &hello_path, "Hello World!\n").await?;
+    let hello_path = mount_dir.path().join("hello.txt");
+    assert_can_read_as_user("root", hello_path.to_str().unwrap(), "Hello World!\n").await?;
     green!("OK root can read");
 
     // Test: owner can read
-    assert_can_read_as_user("fusertest1", &hello_path, "Hello World!\n").await?;
+    assert_can_read_as_user("fusertest1", hello_path.to_str().unwrap(), "Hello World!\n").await?;
     green!("OK owner can read");
 
     // Test: other user can't read
-    assert_cannot_read_as_user("fusertest2", &hello_path).await?;
+    assert_cannot_read_as_user("fusertest2", hello_path.to_str().unwrap()).await?;
     green!("OK other user can't read");
 
-    kill_and_unmount(fuse_process, Unmount::Manual, &mount_dir).await?;
+    kill_and_unmount(
+        fuse_process,
+        Unmount::Manual,
+        mount_dir.path().to_str().unwrap(),
+    )
+    .await?;
 
     green!("OK run_allow_root_test");
 

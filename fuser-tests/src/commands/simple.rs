@@ -4,11 +4,11 @@ use std::time::Duration;
 
 use anyhow::Context;
 use anyhow::bail;
-use tempfile::TempDir;
 use tokio::fs::File;
 use tokio::process::Command;
 
 use crate::ansi::green;
+use crate::canonical_temp_dir::CanonicalTempDir;
 use crate::cargo::cargo_build_example;
 use crate::command_utils::command_output;
 use crate::fusermount::Fusermount;
@@ -17,8 +17,8 @@ use crate::unmount::kill_and_unmount;
 
 pub(crate) async fn run_simple_tests() -> anyhow::Result<()> {
     // Create temp directories
-    let data_dir = TempDir::new().context("Failed to create data directory")?;
-    let mount_dir = TempDir::new().context("Failed to create mount directory")?;
+    let data_dir = CanonicalTempDir::new()?;
+    let mount_dir = CanonicalTempDir::new()?;
 
     eprintln!("Data dir: {:?}", data_dir.path());
     eprintln!("Mount dir: {:?}", mount_dir.path());
