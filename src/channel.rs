@@ -55,6 +55,28 @@ impl Channel {
         // a sender by using the same file and use it in other threads.
         ChannelSender(self.0.clone())
     }
+
+    /// Clone the FUSE device fd using FUSE_DEV_IOC_CLONE ioctl.
+    ///
+    /// This creates a new fd that can read FUSE requests independently,
+    /// enabling true parallel request processing. The kernel distributes
+    /// requests across all cloned fds.
+    ///
+    /// Requires Linux 4.5+. Returns an error on older kernels or non-Linux.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn clone_fd(&self) -> io::Result<Channel> {
+        use std::os::fd::AsRawFd;
+
+        let new_dev = DevFuse::open()?;
+
+        let mut source_fd = self.0.as_raw_fd() as u32;
+        // SAFETY: fuse_dev_ioc_clone is a valid ioctl for /dev/fuse
+        unsafe {
+            crate::ll::ioctl::fuse_dev_ioc_clone(new_dev.as_raw_fd(), &mut source_fd)?;
+        }
+
+        Ok(Channel::new(Arc::new(new_dev)))
+    }
 }
 
 #[derive(Clone, Debug)]
