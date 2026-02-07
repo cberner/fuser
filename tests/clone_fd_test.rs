@@ -5,10 +5,10 @@
 
 use std::ffi::OsStr;
 use std::io;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::sync::Barrier;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
 
@@ -81,7 +81,10 @@ impl Filesystem for BarrierFS {
     }
 
     fn lookup(&self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
-        let thread_name = std::thread::current().name().unwrap_or("unknown").to_string();
+        let thread_name = std::thread::current()
+            .name()
+            .unwrap_or("unknown")
+            .to_string();
         eprintln!("Server thread {} got lookup for {:?}", thread_name, name);
 
         // Accept any file starting with "barrier" (barrier0, barrier1, etc.)
