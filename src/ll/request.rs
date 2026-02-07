@@ -1568,7 +1568,6 @@ mod op {
         name: &'a OsStr,
     }
     #[cfg(target_os = "macos")]
-    #[cfg(target_os = "macos")]
     impl<'a> SetVolName<'a> {
         pub(crate) fn name(&self) -> &'a OsStr {
             self.name
@@ -1583,12 +1582,11 @@ mod op {
         header: &'a fuse_in_header,
     }
     #[cfg(target_os = "macos")]
-    impl<'a> GetXTimes<'a> {
+    impl GetXTimes<'_> {
         pub(crate) fn nodeid(&self) -> INodeNo {
             INodeNo(self.header.nodeid)
         }
     }
-    #[cfg(target_os = "macos")]
     // API TODO: Consider `rename2(RENAME_EXCHANGE)`
     /// `MacOS` only (undocumented)
     #[cfg(target_os = "macos")]
@@ -1600,7 +1598,6 @@ mod op {
         oldname: &'a Path,
         newname: &'a Path,
     }
-    #[cfg(target_os = "macos")]
     #[cfg(target_os = "macos")]
     impl<'a> Exchange<'a> {
         pub(crate) fn from(&self) -> FilenameInDir<'a> {

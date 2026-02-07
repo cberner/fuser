@@ -93,14 +93,19 @@ bitflags! {
         /// kernel supports request timeout
         const FUSE_REQUEST_TIMEOUT = 1 << 42;
 
+        /// pre-allocate space for a file
         #[cfg(target_os = "macos")]
         const FUSE_ALLOCATE = 1 << 27;
+        /// atomically exchange data between files
         #[cfg(target_os = "macos")]
         const FUSE_EXCHANGE_DATA = 1 << 28;
+        /// filesystem is case-insensitive
         #[cfg(target_os = "macos")]
         const FUSE_CASE_INSENSITIVE = 1 << 29;
+        /// filesystem supports volume renaming
         #[cfg(target_os = "macos")]
         const FUSE_VOL_RENAME = 1 << 30;
+        /// filesystem supports extended times (backup and creation times)
         #[cfg(target_os = "macos")]
         const FUSE_XTIMES = 1 << 31;
     }
