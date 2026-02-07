@@ -73,8 +73,3 @@ pub(crate) async fn assert_cannot_read_as_user(username: &str, path: &str) -> an
     );
     Ok(())
 }
-
-pub(crate) async fn mktempdir_as_user(username: &str) -> anyhow::Result<String> {
-    let output = run_as_user(username, "mktemp --directory").await?;
-    Ok(output.trim().to_owned())
-}
