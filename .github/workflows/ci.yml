@@ -99,6 +99,8 @@ jobs:
   mac-ci:
     runs-on: macos-26
     env:
+      RUSTFLAGS: --deny warnings
+      RUSTDOCFLAGS: --deny warnings
       PKG_CONFIG_PATH: /usr/local/lib/pkgconfig:$PKG_CONFIG_PATH
     steps:
       - uses: actions/checkout@v4

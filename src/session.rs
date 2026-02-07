@@ -69,6 +69,7 @@ impl SessionACL {
     /// Returns the mount option string for kernel/fusermount/libfuse paths.
     /// Both `All` and `RootAndOwner` map to `allow_other` - the kernel only
     /// understands `allow_other`, and fuser enforces the root-only restriction internally.
+    #[allow(dead_code)]
     pub(crate) fn to_mount_option(self) -> Option<&'static str> {
         match self {
             SessionACL::All | SessionACL::RootAndOwner => Some("allow_other"),

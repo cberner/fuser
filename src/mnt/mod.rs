@@ -136,7 +136,7 @@ impl Mount {
         }
         #[cfg(fuser_mount_impl = "macos-no-mount")]
         {
-            let _ = (mountpoint, options);
+            let _ = (mountpoint, options, acl);
             Err(io::Error::other(
                 "Mount is not enabled; this is test-only configuration",
             ))
@@ -192,7 +192,7 @@ fn libc_umount(mnt: &CStr) -> nix::Result<()> {
 
 /// Warning: This will return true if the filesystem has been detached (lazy unmounted), but not
 /// yet destroyed by the kernel.
-#[cfg(any(test, fuser_mount_impl = "pure-rust"))]
+#[cfg(any(all(not(target_os = "macos"), test), fuser_mount_impl = "pure-rust"))]
 fn is_mounted(fuse_device: &DevFuse) -> bool {
     use std::os::unix::io::AsFd;
     use std::slice;
@@ -251,6 +251,8 @@ mod test {
             },
         );
     }
+
+    #[cfg(not(target_os = "macos"))]
     fn cmd_mount() -> String {
         std::str::from_utf8(
             std::process::Command::new("sh")
