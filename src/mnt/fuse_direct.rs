@@ -1,10 +1,13 @@
+use std::ffi::OsString;
 use std::fs::File;
 use std::io;
+use std::io::BufRead;
 use std::io::Read;
 use std::io::Write;
 use std::os::fd::AsFd;
 use std::os::fd::AsRawFd;
 use std::os::fd::RawFd;
+use std::os::unix::ffi::OsStringExt;
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
@@ -97,7 +100,7 @@ impl MountImpl {
                 MountOption::Async => flags &= !MsFlags::MS_SYNCHRONOUS,
                 MountOption::Sync => flags |= MsFlags::MS_SYNCHRONOUS,
                 MountOption::Atime => flags &= !MsFlags::MS_NOATIME,
-                MountOption::NoAtime => flags |= !MsFlags::MS_NOATIME,
+                MountOption::NoAtime => flags |= MsFlags::MS_NOATIME,
                 MountOption::CUSTOM(val) if val == "diratime" => flags &= !MsFlags::MS_NODIRATIME,
                 MountOption::CUSTOM(val) if val == "nodiratime" => flags |= MsFlags::MS_NODIRATIME,
                 MountOption::CUSTOM(val) if val == "lazytime" => flags |= MsFlags::MS_LAZYTIME,
@@ -281,7 +284,98 @@ impl MountImpl {
     }
 
     fn should_auto_unmount(&self) -> io::Result<bool> {
-        todo!()
+        let etc_mtab = Path::new("/etc/mtab");
+        let proc_mounts = Path::new("/proc/mounts");
+
+        let mtab_path = if etc_mtab.try_exists()? {
+            etc_mtab
+        } else if proc_mounts.try_exists()? {
+            proc_mounts
+        } else {
+            return Err(io::ErrorKind::NotFound.into());
+        };
+
+        let mut mtab = io::BufReader::new(File::open(mtab_path)?);
+        let mut line = Vec::new();
+        loop {
+            line.clear();
+            if mtab.read_until(b'\n', &mut line)? == 0 {
+                break;
+            }
+            let line = line.as_slice();
+
+            let Some(fs_name_len) = line.iter().position(u8::is_ascii_whitespace) else {
+                continue;
+            };
+            let line = &line[fs_name_len..];
+
+            let Some(path_start) = line.iter().position(|b| !b.is_ascii_whitespace()) else {
+                continue;
+            };
+            let line = &line[path_start..];
+            let Some(path_len) = line.iter().position(u8::is_ascii_whitespace) else {
+                continue;
+            };
+            let path = &line[..path_len];
+            let line = &line[path_len..];
+
+            let Some(fstype_start) = line.iter().position(|b| !b.is_ascii_whitespace()) else {
+                continue;
+            };
+            let line = &line[fstype_start..];
+            let Some(fstype_len) = line.iter().position(u8::is_ascii_whitespace) else {
+                continue;
+            };
+            let fstype = &line[..fstype_len];
+
+            let Some(path) = decode_mtab_str(path) else {
+                continue;
+            };
+            if path != self.mountpoint.as_os_str()
+                || !(fstype == b"fuse"
+                    || fstype == b"fuseblk"
+                    || fstype.starts_with(b"fuse.")
+                    || fstype.starts_with(b"fuseblk."))
+            {
+                continue;
+            }
+
+            return Ok(true);
+        }
+
+        Ok(false)
+    }
+}
+
+fn decode_mtab_str(mut s: &[u8]) -> Option<OsString> {
+    let mut out = Vec::with_capacity(s.len());
+    loop {
+        let Some(next_escape) = s.iter().position(|b| *b == b'\\') else {
+            out.extend_from_slice(s);
+            break;
+        };
+
+        out.extend_from_slice(&s[..next_escape]);
+        s = &s[(next_escape + 1)..];
+
+        if s.len() < 3 {
+            return None;
+        }
+
+        let byte = (oct_digit(s[0])? << 6) | (oct_digit(s[1])? << 3) | oct_digit(s[2])?;
+
+        out.push(byte);
+
+        s = &s[3..];
+    }
+
+    Some(OsString::from_vec(out))
+}
+
+fn oct_digit(digit: u8) -> Option<u8> {
+    match digit {
+        b'0'..=b'7' => Some(digit - b'0'),
+        _ => None,
     }
 }
 
