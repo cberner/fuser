@@ -40,8 +40,8 @@ async fn run_mount_tests_inner(libfuse: Libfuse) -> anyhow::Result<()> {
     fuse_conf_write_user_allow_other().await?;
 
     // Tests without libfuse feature (pure Rust implementation)
-    run_test(&[], Unmount::Manual, Fusermount::False, 1).await?;
-    run_test(&[], Unmount::Auto, libfuse.fusermount(), 1).await?;
+    run_test(&[], Unmount::Manual, Fusermount::False, 1, false).await?;
+    run_test(&[], Unmount::Auto, libfuse.fusermount(), 1, false).await?;
     test_no_user_allow_other(&[], &libfuse).await?;
 
     // Tests without libfuse feature (direct mount syscall implementation)
@@ -62,11 +62,26 @@ async fn run_mount_tests_inner(libfuse: Libfuse) -> anyhow::Result<()> {
     test_no_user_allow_other(&[Feature::DirectMount], &libfuse).await?;
 
     // Tests with libfuse
-    run_test(&[libfuse.feature()], Unmount::Manual, Fusermount::False, 1).await?;
-    run_test(&[libfuse.feature()], Unmount::Auto, libfuse.fusermount(), 1).await?;
+    run_test(
+        &[libfuse.feature()],
+        Unmount::Manual,
+        Fusermount::False,
+        1,
+        false,
+    )
+    .await?;
+    run_test(
+        &[libfuse.feature()],
+        Unmount::Auto,
+        libfuse.fusermount(),
+        1,
+        false,
+    )
+    .await?;
 
     // Multi-threaded tests
-    run_test(&[], Unmount::Auto, libfuse.fusermount(), 2).await?;
+    run_test(&[], Unmount::Auto, libfuse.fusermount(), 2, false).await?;
+    run_test(&[], Unmount::Auto, libfuse.fusermount(), 2, true).await?;
 
     if let Libfuse::Libfuse3 = libfuse {
         run_allow_root_test()
@@ -88,6 +103,7 @@ async fn run_test(
     unmount: Unmount,
     fusermount: Fusermount,
     n_threads: usize,
+    clone_fd: bool,
 ) -> anyhow::Result<()> {
     let mut description = String::new();
     match features_to_flags(features) {
@@ -100,10 +116,20 @@ async fn run_test(
         Unmount::Manual => {}
     }
     write!(description, " n_threads={n_threads}").unwrap();
+    if clone_fd {
+        description.push_str(" --clone-fd");
+    }
 
-    run_test_inner(features, unmount, fusermount, n_threads, &description)
-        .await
-        .with_context(|| format!("Tests failed: {description}"))
+    run_test_inner(
+        features,
+        unmount,
+        fusermount,
+        n_threads,
+        clone_fd,
+        &description,
+    )
+    .await
+    .with_context(|| format!("Tests failed: {description}"))
 }
 
 async fn run_test_inner(
@@ -111,6 +137,7 @@ async fn run_test_inner(
     unmount: Unmount,
     fusermount: Fusermount,
     n_threads: usize,
+    clone_fd: bool,
     description: &str,
 ) -> anyhow::Result<()> {
     eprintln!("\n=== Running test: {description} ===");
@@ -127,6 +154,9 @@ async fn run_test_inner(
     eprintln!("Starting hello filesystem...");
     let n_threads_str = n_threads.to_string();
     let mut run_args = vec![mount_path_str, "--n-threads", &n_threads_str];
+    if clone_fd {
+        run_args.push("--clone-fd");
+    }
     if matches!(unmount, Unmount::Auto) {
         run_args.push("--auto-unmount");
     }
