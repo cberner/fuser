@@ -16,7 +16,6 @@ use std::process::exit;
 use std::sync::Arc;
 
 use log::error;
-use log::warn;
 use nix::fcntl::OFlag;
 use nix::fcntl::open;
 use nix::mount::MntFlags;
@@ -45,6 +44,10 @@ use nix::unistd::sysconf;
 use crate::SessionACL;
 use crate::dev_fuse::DevFuse;
 use crate::mnt::mount_options::MountOption;
+use crate::mnt::mount_options::MountOptionGroup;
+use crate::mnt::mount_options::option_group;
+use crate::mnt::mount_options::option_to_flag;
+use crate::mnt::mount_options::option_to_string;
 
 const DEV_FUSE: &str = "/dev/fuse";
 
@@ -71,59 +74,29 @@ impl MountImpl {
 
         let mut fsname: Option<&str> = None;
         let mut subtype: Option<&str> = None;
-        let mut blkdev = false;
         let mut auto_unmount = false;
-        let mut flags = MsFlags::MS_NOSUID | MsFlags::MS_NODEV;
+        let mut flags = MsFlags::empty();
+
+        if !uid.is_root() || !options.contains(&MountOption::Dev) {
+            // Default to nodev
+            flags |= MsFlags::MS_NODEV;
+        }
+        if !uid.is_root() || !options.contains(&MountOption::Suid) {
+            // default to nosuid
+            flags |= MsFlags::MS_NOSUID;
+        }
 
         let mut opts = Vec::new();
         for opt in options {
-            match opt {
-                MountOption::FSName(val) => fsname = Some(val),
-                MountOption::Subtype(val) => subtype = Some(val),
-                MountOption::CUSTOM(val) if val == "blkdev" => {
-                    if !uid.is_root() {
-                        return Err(io::ErrorKind::PermissionDenied.into());
-                    }
-                    blkdev = true;
-                }
-                MountOption::AutoUnmount => auto_unmount = true,
-                MountOption::RW => flags &= !MsFlags::MS_RDONLY,
-                MountOption::RO => flags |= MsFlags::MS_RDONLY,
-                MountOption::Suid if uid.is_root() => flags &= !MsFlags::MS_NOSUID,
-                MountOption::Suid => warn!("unsafe mount option 'suid' ignored"),
-                MountOption::NoSuid => flags |= MsFlags::MS_NOSUID,
-                MountOption::Dev if uid.is_root() => flags &= !MsFlags::MS_NODEV,
-                MountOption::Dev => warn!("unsafe mount option 'nodev' ignored"),
-                MountOption::NoDev => flags |= MsFlags::MS_NODEV,
-                MountOption::Exec => flags &= !MsFlags::MS_NOEXEC,
-                MountOption::NoExec => flags |= MsFlags::MS_NOEXEC,
-                MountOption::Async => flags &= !MsFlags::MS_SYNCHRONOUS,
-                MountOption::Sync => flags |= MsFlags::MS_SYNCHRONOUS,
-                MountOption::Atime => flags &= !MsFlags::MS_NOATIME,
-                MountOption::NoAtime => flags |= MsFlags::MS_NOATIME,
-                MountOption::CUSTOM(val) if val == "diratime" => flags &= !MsFlags::MS_NODIRATIME,
-                MountOption::CUSTOM(val) if val == "nodiratime" => flags |= MsFlags::MS_NODIRATIME,
-                MountOption::CUSTOM(val) if val == "lazytime" => flags |= MsFlags::MS_LAZYTIME,
-                MountOption::CUSTOM(val) if val == "nolazytime" => flags &= !MsFlags::MS_LAZYTIME,
-                MountOption::CUSTOM(val) if val == "relatime" => flags |= MsFlags::MS_RELATIME,
-                MountOption::CUSTOM(val) if val == "norelatime" => flags &= !MsFlags::MS_RELATIME,
-                MountOption::CUSTOM(val) if val == "strictatime" => {
-                    flags |= MsFlags::MS_STRICTATIME
-                }
-                MountOption::CUSTOM(val) if val == "nostrictatime" => {
-                    flags &= !MsFlags::MS_STRICTATIME
-                }
-                MountOption::DirSync => flags |= MsFlags::MS_DIRSYNC,
-                MountOption::DefaultPermissions => write!(opts, "default_permissions,")?,
-                MountOption::CUSTOM(val)
-                    if val.starts_with("max_read=") || val.starts_with("blksize=") =>
-                {
-                    write!(opts, "{val},")?
-                }
-                MountOption::CUSTOM(val) => {
-                    error!("invalid mount option '{val}'");
-                    return Err(nix::Error::EINVAL.into());
-                }
+            match option_group(opt) {
+                MountOptionGroup::KernelFlag => flags |= option_to_flag(opt)?,
+                MountOptionGroup::KernelOption => write!(opts, "{},", option_to_string(opt))?,
+                MountOptionGroup::Fusermount => match opt {
+                    MountOption::FSName(val) => fsname = Some(val),
+                    MountOption::Subtype(val) => subtype = Some(val),
+                    MountOption::AutoUnmount => auto_unmount = true,
+                    _ => {}
+                },
             }
         }
 
@@ -145,12 +118,7 @@ impl MountImpl {
             gid.as_raw(),
         )?;
 
-        let mut ty = match (subtype, blkdev) {
-            (None, false) => "fuse".into(),
-            (None, true) => "fuseblk".into(),
-            (Some(subtype), false) => format!("fuse.{subtype}"),
-            (Some(subtype), true) => format!("fuseblk.{subtype}"),
-        };
+        let mut ty = subtype.map_or("fuse".into(), |subtype| format!("fuse.{subtype}"));
 
         let mut source = if let Some(fsname) = fsname {
             fsname
@@ -182,13 +150,13 @@ impl MountImpl {
         let source_tmp;
         if let Err(nix::Error::ENODEV) = &res {
             if let Some(subtype) = subtype {
-                ty = (if blkdev { "fuseblk" } else { "fuse" }).into();
-                source_tmp = match (fsname, blkdev) {
-                    (Some(fsname), false) => format!("{subtype}#{fsname}"),
-                    (Some(_), true) => source.into(),
-                    _ => ty.clone(),
-                };
-                source = source_tmp.as_str();
+                ty = "fuse".into();
+                if let Some(fsname) = fsname {
+                    source_tmp = format!("{subtype}#{fsname}");
+                    source = source_tmp.as_str();
+                } else {
+                    source = ty.as_str();
+                }
 
                 res = mount(
                     Some(source),

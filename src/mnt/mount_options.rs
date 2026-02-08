@@ -69,6 +69,14 @@ pub enum MountOption {
     to libfuse, and not part of the kernel ABI */
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[derive(PartialEq)]
+pub(crate) enum MountOptionGroup {
+    KernelOption,
+    KernelFlag,
+    Fusermount,
+}
+
 impl MountOption {
     pub(crate) fn from_str(s: &str) -> MountOption {
         match s {
@@ -137,10 +145,7 @@ fn conflicts_with(option: &MountOption) -> Vec<MountOption> {
 }
 
 // Format option to be passed to libfuse or kernel
-#[cfg_attr(
-    any(fuser_mount_impl = "macos-no-mount", fuser_mount_impl = "direct-mount"),
-    expect(dead_code)
-)]
+#[cfg_attr(fuser_mount_impl = "macos-no-mount", expect(dead_code))]
 pub(crate) fn option_to_string(option: &MountOption) -> String {
     match option {
         MountOption::FSName(name) => format!("fsname={name}"),
@@ -161,6 +166,91 @@ pub(crate) fn option_to_string(option: &MountOption) -> String {
         MountOption::DirSync => "dirsync".to_string(),
         MountOption::Sync => "sync".to_string(),
         MountOption::Async => "async".to_string(),
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg_attr(
+    not(any(
+        fuser_mount_impl = "macos-no-mount",
+        fuser_mount_impl = "pure-rust",
+        fuser_mount_impl = "direct-mount",
+    )),
+    expect(dead_code)
+)]
+pub(crate) fn option_group(option: &MountOption) -> MountOptionGroup {
+    match option {
+        MountOption::FSName(_) => MountOptionGroup::Fusermount,
+        MountOption::Subtype(_) => MountOptionGroup::Fusermount,
+        MountOption::CUSTOM(_) => MountOptionGroup::KernelOption,
+        MountOption::AutoUnmount => MountOptionGroup::Fusermount,
+        MountOption::Dev => MountOptionGroup::KernelFlag,
+        MountOption::NoDev => MountOptionGroup::KernelFlag,
+        MountOption::Suid => MountOptionGroup::KernelFlag,
+        MountOption::NoSuid => MountOptionGroup::KernelFlag,
+        MountOption::RO => MountOptionGroup::KernelFlag,
+        MountOption::RW => MountOptionGroup::KernelFlag,
+        MountOption::Exec => MountOptionGroup::KernelFlag,
+        MountOption::NoExec => MountOptionGroup::KernelFlag,
+        MountOption::Atime => MountOptionGroup::KernelFlag,
+        MountOption::NoAtime => MountOptionGroup::KernelFlag,
+        MountOption::DirSync => MountOptionGroup::KernelFlag,
+        MountOption::Sync => MountOptionGroup::KernelFlag,
+        MountOption::Async => MountOptionGroup::KernelFlag,
+        MountOption::DefaultPermissions => MountOptionGroup::KernelOption,
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[cfg_attr(
+    not(any(
+        fuser_mount_impl = "macos-no-mount",
+        fuser_mount_impl = "pure-rust",
+        fuser_mount_impl = "direct-mount",
+    )),
+    expect(dead_code)
+)]
+pub(crate) fn option_to_flag(option: &MountOption) -> io::Result<nix::mount::MsFlags> {
+    match option {
+        MountOption::Dev => Ok(nix::mount::MsFlags::empty()), // There is no option for dev. It's the absence of NoDev
+        MountOption::NoDev => Ok(nix::mount::MsFlags::MS_NODEV),
+        MountOption::Suid => Ok(nix::mount::MsFlags::empty()),
+        MountOption::NoSuid => Ok(nix::mount::MsFlags::MS_NOSUID),
+        MountOption::RW => Ok(nix::mount::MsFlags::empty()),
+        MountOption::RO => Ok(nix::mount::MsFlags::MS_RDONLY),
+        MountOption::Exec => Ok(nix::mount::MsFlags::empty()),
+        MountOption::NoExec => Ok(nix::mount::MsFlags::MS_NOEXEC),
+        MountOption::Atime => Ok(nix::mount::MsFlags::empty()),
+        MountOption::NoAtime => Ok(nix::mount::MsFlags::MS_NOATIME),
+        MountOption::Async => Ok(nix::mount::MsFlags::empty()),
+        MountOption::Sync => Ok(nix::mount::MsFlags::MS_SYNCHRONOUS),
+        MountOption::DirSync => Ok(nix::mount::MsFlags::MS_DIRSYNC),
+        option => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("Invalid mount option for flag conversion: {option:?}"),
+        )),
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn option_to_flag(option: &MountOption) -> io::Result<nix::mount::MntFlags> {
+    match option {
+        MountOption::Dev => Ok(nix::mount::MntFlags::empty()), // There is no option for dev. It's the absence of NoDev
+        MountOption::NoDev => Ok(nix::mount::MntFlags::MNT_NODEV),
+        MountOption::Suid => Ok(nix::mount::MntFlags::empty()),
+        MountOption::NoSuid => Ok(nix::mount::MntFlags::MNT_NOSUID),
+        MountOption::RW => Ok(nix::mount::MntFlags::empty()),
+        MountOption::RO => Ok(nix::mount::MntFlags::MNT_RDONLY),
+        MountOption::Exec => Ok(nix::mount::MntFlags::empty()),
+        MountOption::NoExec => Ok(nix::mount::MntFlags::MNT_NOEXEC),
+        MountOption::Atime => Ok(nix::mount::MntFlags::empty()),
+        MountOption::NoAtime => Ok(nix::mount::MntFlags::MNT_NOATIME),
+        MountOption::Async => Ok(nix::mount::MntFlags::empty()),
+        MountOption::Sync => Ok(nix::mount::MntFlags::MNT_SYNCHRONOUS),
+        option => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("Invalid mount option for flag conversion: {option:?}"),
+        )),
     }
 }
 
