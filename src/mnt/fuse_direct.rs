@@ -3,7 +3,6 @@ use std::fs::File;
 use std::io;
 use std::io::BufRead;
 use std::io::Read;
-use std::io::Write;
 use std::os::fd::AsFd;
 use std::os::fd::AsRawFd;
 use std::os::fd::RawFd;
@@ -112,17 +111,16 @@ impl MountImpl {
             }
         }
 
-        let mut opts = Vec::new();
         for opt in options {
             match option_group(opt) {
                 MountOptionGroup::KernelFlag => flags |= option_to_flag(opt)?,
-                MountOptionGroup::KernelOption => write!(opts, "{},", option_to_string(opt))?,
                 MountOptionGroup::Fusermount => match opt {
                     MountOption::FSName(val) => fsname = Some(val),
                     MountOption::Subtype(val) => subtype = Some(val),
                     MountOption::AutoUnmount => auto_unmount = true,
                     _ => {}
                 },
+                _ => {}
             }
         }
 
@@ -164,6 +162,7 @@ impl MountImpl {
         acl: SessionACL,
         dev_fd: RawFd,
     ) -> io::Result<()> {
+        use std::io::Write;
         use std::os::unix::fs::MetadataExt;
 
         let mut opts = Vec::new();
@@ -333,9 +332,9 @@ impl MountImpl {
     ))]
     fn do_unmount(&mut self, lazy: bool) -> io::Result<()> {
         let flags = if lazy {
-            nix::mount::MntFlags::MNT_FORCE
-        } else {
             nix::mount::MntFlags::empty()
+        } else {
+            nix::mount::MntFlags::MNT_FORCE
         };
         nix::mount::unmount(&self.mountpoint, flags)?;
         Ok(())
@@ -359,7 +358,7 @@ impl MountImpl {
     fn do_auto_unmount(&mut self, mut pipe: UnixStream) -> io::Result<()> {
         close_inherited_fds(pipe.as_raw_fd());
         let _ = setsid();
-        let _ = sigprocmask(SigmaskHow::SIG_BLOCK, Some(&SigSet::empty()), None);
+        let _ = sigprocmask(SigmaskHow::SIG_BLOCK, Some(&SigSet::all()), None);
 
         let mut buf = [0u8; 16];
         loop {
