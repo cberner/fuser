@@ -1,7 +1,6 @@
 use std::ffi::OsString;
 use std::fs::File;
 use std::io;
-use std::io::BufRead;
 use std::io::Read;
 use std::os::fd::AsFd;
 use std::os::fd::AsRawFd;
@@ -377,7 +376,15 @@ impl MountImpl {
         Ok(())
     }
 
+    #[cfg(target_os = "macos")]
     fn should_auto_unmount(&self) -> io::Result<bool> {
+        Ok(false)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn should_auto_unmount(&self) -> io::Result<bool> {
+        use std::io::BufRead;
+
         let etc_mtab = Path::new("/etc/mtab");
         let proc_mounts = Path::new("/proc/mounts");
 
@@ -439,8 +446,62 @@ impl MountImpl {
 
         Ok(false)
     }
+
+    #[cfg(any(
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "openbsd",
+        target_os = "netbsd",
+    ))]
+    fn should_auto_unmount(&self) -> io::Result<bool> {
+        let count = unsafe { nix::libc::getfsstat(std::ptr::null_mut(), 0, nix::libc::MNT_WAIT) };
+        if count < 0 {
+            return Err(io::Error::last_os_error());
+        }
+
+        let mut buf = Vec::with_capacity(count as usize);
+        let bufsize = std::mem::size_of::<nix::libc::statfs>() * (count as usize);
+        let count =
+            unsafe { nix::libc::getfsstat(buf.as_mut_ptr(), bufsize as _, nix::libc::MNT_WAIT) };
+        if count < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        unsafe {
+            buf.set_len(count as usize);
+        }
+
+        for mnt in &buf {
+            if unsafe { c_str_eq(mnt.f_fstypename.as_ptr(), b"fusefs") }
+                && unsafe { c_str_eq(mnt.f_mntfromname.as_ptr(), DEV_FUSE) }
+                && unsafe {
+                    c_str_eq(
+                        mnt.f_mntonname.as_ptr(),
+                        self.mountpoint.as_os_str().as_encoded_bytes(),
+                    )
+                }
+            {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
 }
 
+#[cfg_attr(
+    not(any(
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "openbsd",
+        target_os = "netbsd",
+    )),
+    expect(dead_code)
+)]
+unsafe fn c_str_eq(c_str: *const std::ffi::c_char, s: impl AsRef<[u8]>) -> bool {
+    unsafe { std::ffi::CStr::from_ptr(c_str).to_bytes() == s.as_ref() }
+}
+
+#[cfg_attr(not(target_os = "linux"), expect(dead_code))]
 fn decode_mtab_str(mut s: &[u8]) -> Option<OsString> {
     let mut out = Vec::with_capacity(s.len());
     loop {
