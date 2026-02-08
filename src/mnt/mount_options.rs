@@ -73,10 +73,6 @@ pub enum MountOption {
     to libfuse, and not part of the kernel ABI */
 }
 
-#[cfg_attr(
-    all(fuser_mount_impl = "direct-mount", fuser_mount_impl = "macos-no-mount"),
-    expect(dead_code)
-)]
 #[derive(PartialEq)]
 pub(crate) enum MountOptionGroup {
     KernelOption,
@@ -178,11 +174,18 @@ pub(crate) fn option_to_string(option: &MountOption) -> String {
 
 #[cfg_attr(
     not(any(
-        fuser_mount_impl = "pure-rust",
-        any(
-            fuser_mount_impl = "direct-mount",
-            not(fuser_mount_impl = "macos-no-mount")
+        all(target_os = "linux", fuser_mount_impl = "pure-rust"),
+        all(target_os = "linux", fuser_mount_impl = "direct-mount"),
+        all(
+            any(
+                target_os = "freebsd",
+                target_os = "dragonfly",
+                target_os = "openbsd",
+                target_os = "netbsd",
+            ),
+            fuser_mount_impl = "direct-mount"
         ),
+        all(target_os = "macos", fuser_mount_impl = "pure-rust"),
     )),
     expect(dead_code)
 )]

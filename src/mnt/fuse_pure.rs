@@ -28,7 +28,6 @@ use std::process::Stdio;
 use std::sync::Arc;
 
 use log::debug;
-use log::error;
 use nix::fcntl::FcntlArg;
 use nix::fcntl::FdFlag;
 use nix::fcntl::OFlag;
@@ -42,8 +41,11 @@ use crate::SessionACL;
 use crate::dev_fuse::DevFuse;
 use crate::mnt::is_mounted;
 use crate::mnt::mount_options::MountOption;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use crate::mnt::mount_options::MountOptionGroup;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use crate::mnt::mount_options::option_group;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use crate::mnt::mount_options::option_to_flag;
 use crate::mnt::mount_options::option_to_string;
 
@@ -395,7 +397,7 @@ fn fuse_mount_sys(
         Ok(dev_fuse) => dev_fuse,
         Err(error) => {
             if error.kind() == ErrorKind::NotFound {
-                error!("{} not found. Try 'modprobe fuse'", DevFuse::PATH);
+                log::error!("{} not found. Try 'modprobe fuse'", DevFuse::PATH);
             }
             return Err(error);
         }
