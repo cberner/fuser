@@ -73,7 +73,6 @@ pub enum MountOption {
     to libfuse, and not part of the kernel ABI */
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[derive(PartialEq)]
 pub(crate) enum MountOptionGroup {
     KernelOption,
@@ -173,7 +172,6 @@ pub(crate) fn option_to_string(option: &MountOption) -> String {
     }
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[cfg_attr(
     not(any(
         fuser_mount_impl = "macos-no-mount",
@@ -205,7 +203,6 @@ pub(crate) fn option_group(option: &MountOption) -> MountOptionGroup {
     }
 }
 
-#[cfg(target_os = "linux")]
 #[cfg_attr(
     not(any(
         fuser_mount_impl = "macos-no-mount",
