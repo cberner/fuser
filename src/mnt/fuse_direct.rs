@@ -8,30 +8,21 @@ use std::os::fd::AsFd;
 use std::os::fd::AsRawFd;
 use std::os::fd::RawFd;
 use std::os::unix::ffi::OsStringExt;
-use std::os::unix::fs::MetadataExt;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::exit;
 use std::sync::Arc;
 
-use log::error;
 use nix::fcntl::OFlag;
 use nix::fcntl::open;
-use nix::mount::MntFlags;
-use nix::mount::MsFlags;
-use nix::mount::mount;
-use nix::mount::umount2;
 use nix::sys::resource::Resource;
 use nix::sys::resource::getrlimit;
 use nix::sys::signal::SigSet;
 use nix::sys::signal::SigmaskHow;
 use nix::sys::signal::sigprocmask;
 use nix::sys::stat::Mode;
-use nix::sys::stat::SFlag;
 use nix::unistd::ForkResult;
-use nix::unistd::Gid;
-use nix::unistd::SysconfVar;
 use nix::unistd::Uid;
 use nix::unistd::close;
 use nix::unistd::dup2_stderr;
@@ -39,7 +30,6 @@ use nix::unistd::dup2_stdin;
 use nix::unistd::dup2_stdout;
 use nix::unistd::fork;
 use nix::unistd::setsid;
-use nix::unistd::sysconf;
 
 use crate::SessionACL;
 use crate::dev_fuse::DevFuse;
@@ -70,20 +60,56 @@ impl MountImpl {
         let dev_fd = dev.as_raw_fd();
 
         let uid = Uid::current();
-        let gid = Gid::current();
 
         let mut fsname: Option<&str> = None;
         let mut subtype: Option<&str> = None;
         let mut auto_unmount = false;
-        let mut flags = MsFlags::empty();
 
+        #[cfg(target_os = "linux")]
+        let mut flags = nix::mount::MsFlags::empty();
+        #[cfg(any(
+            target_os = "freebsd",
+            target_os = "dragonfly",
+            target_os = "openbsd",
+            target_os = "netbsd",
+            target_os = "macos",
+        ))]
+        let mut flags = nix::mount::MntFlags::empty();
+
+        #[cfg(not(target_os = "freebsd"))]
         if !uid.is_root() || !options.contains(&MountOption::Dev) {
             // Default to nodev
-            flags |= MsFlags::MS_NODEV;
+            #[cfg(target_os = "linux")]
+            {
+                flags |= nix::mount::MsFlags::MS_NODEV;
+            }
+            #[cfg(any(
+                target_os = "dragonfly",
+                target_os = "openbsd",
+                target_os = "netbsd",
+                target_os = "macos",
+            ))]
+            {
+                flags |= nix::mount::MntFlags::MNT_NODEV;
+            }
         }
+
         if !uid.is_root() || !options.contains(&MountOption::Suid) {
             // default to nosuid
-            flags |= MsFlags::MS_NOSUID;
+            #[cfg(target_os = "linux")]
+            {
+                flags |= nix::mount::MsFlags::MS_NOSUID;
+            }
+            #[cfg(any(
+                target_os = "freebsd",
+                target_os = "dragonfly",
+                target_os = "openbsd",
+                target_os = "netbsd",
+                target_os = "macos",
+            ))]
+            {
+                flags |= nix::mount::MntFlags::MNT_NOSUID;
+            }
         }
 
         let mut opts = Vec::new();
@@ -100,13 +126,60 @@ impl MountImpl {
             }
         }
 
+        Self::do_mount(&mountpoint, fsname, subtype, flags, options, acl, dev_fd)?;
+
+        let mut mnt = MountImpl {
+            mountpoint,
+            auto_unmount_socket: None,
+        };
+
+        if auto_unmount {
+            mnt.setup_auto_unmount()?;
+        }
+
+        Ok((dev, mnt))
+    }
+
+    #[cfg(target_os = "macos")]
+    fn do_mount(
+        _mountpoint: &Path,
+        _fsname: Option<&str>,
+        _subtype: Option<&str>,
+        _flags: nix::mount::MsFlags,
+        _options: &[MountOption],
+        _acl: SessionACL,
+        _dev_fd: RawFd,
+    ) -> io::Result<()> {
+        // macos-no-mount - Don't actually mount
+        Ok(())
+    }
+
+    #[cfg(target_os = "linux")]
+    fn do_mount(
+        mountpoint: &Path,
+        fsname: Option<&str>,
+        subtype: Option<&str>,
+        flags: nix::mount::MsFlags,
+        options: &[MountOption],
+        acl: SessionACL,
+        dev_fd: RawFd,
+    ) -> io::Result<()> {
+        use std::os::unix::fs::MetadataExt;
+
+        let mut opts = Vec::new();
+        for opt in options {
+            if option_group(opt) == MountOptionGroup::KernelOption {
+                write!(opts, "{},", option_to_string(opt))?;
+            }
+        }
+
         if let Some(opt) = acl.to_mount_option() {
             write!(opts, "{opt},")?;
         }
 
         let root_mode = mountpoint
             .metadata()
-            .map(|meta| meta.mode() & SFlag::S_IFMT.bits())?;
+            .map(|meta| meta.mode() & nix::sys::stat::SFlag::S_IFMT.bits())?;
 
         let old_len = opts.len();
         write!(
@@ -114,8 +187,8 @@ impl MountImpl {
             "fd={},rootmode={:o},user_id={},group_id={}",
             dev_fd,
             root_mode,
-            uid.as_raw(),
-            gid.as_raw(),
+            Uid::current().as_raw(),
+            nix::unistd::Gid::current().as_raw(),
         )?;
 
         let mut ty = subtype.map_or("fuse".into(), |subtype| format!("fuse.{subtype}"));
@@ -128,21 +201,21 @@ impl MountImpl {
             DEV_FUSE
         };
 
-        let pagesize = sysconf(SysconfVar::PAGE_SIZE)?
+        let pagesize = nix::unistd::sysconf(nix::unistd::SysconfVar::PAGE_SIZE)?
             .map_or(usize::MAX, |ps| ps.try_into().unwrap_or(usize::MAX))
             - 1;
 
         if opts.len() > pagesize {
-            error!(
+            log::error!(
                 "mount options too long: '{}'",
                 String::from_utf8_lossy(&opts)
             );
             return Err(nix::Error::EINVAL.into());
         }
 
-        let mut res = mount(
+        let mut res = nix::mount::mount(
             Some(source),
-            &mountpoint,
+            mountpoint,
             Some(ty.as_str()),
             flags,
             Some(opts.as_slice()),
@@ -158,9 +231,9 @@ impl MountImpl {
                     source = ty.as_str();
                 }
 
-                res = mount(
+                res = nix::mount::mount(
                     Some(source),
-                    &mountpoint,
+                    mountpoint,
                     Some(ty.as_str()),
                     flags,
                     Some(opts.as_slice()),
@@ -175,42 +248,96 @@ impl MountImpl {
                 "fd={},rootmode={:o},user_id={}",
                 dev_fd,
                 root_mode,
-                uid.as_raw(),
+                Uid::current().as_raw(),
             )?;
 
-            res = mount(
+            res = nix::mount::mount(
                 Some(source),
-                &mountpoint,
+                mountpoint,
                 Some(ty.as_str()),
                 flags,
                 Some(opts.as_slice()),
             );
         }
-        res.inspect_err(|err| error!("mount failed: {err}"))?;
+        res.inspect_err(|err| log::error!("mount failed: {err}"))?;
 
-        let mut mnt = MountImpl {
-            mountpoint,
-            auto_unmount_socket: None,
-        };
+        Ok(())
+    }
 
-        if auto_unmount {
-            mnt.setup_auto_unmount()?;
+    #[cfg(any(
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "openbsd",
+        target_os = "netbsd",
+    ))]
+    fn do_mount(
+        mountpoint: &Path,
+        fsname: Option<&str>,
+        subtype: Option<&str>,
+        flags: nix::mount::MntFlags,
+        options: &[MountOption],
+        acl: SessionACL,
+        dev_fd: RawFd,
+    ) -> io::Result<()> {
+        let mut nmount = nix::mount::Nmount::new();
+
+        if let Some(fsname) = fsname {
+            nmount.str_opt_owned("fsname=", fsname);
         }
 
-        Ok((dev, mnt))
+        if let Some(subtype) = subtype {
+            nmount.str_opt_owned("subtype=", subtype);
+        }
+
+        if !matches!(acl, SessionACL::Owner) {
+            nmount.str_opt_owned("allow_other", "");
+        }
+
+        for opt in options {
+            if option_group(opt) == MountOptionGroup::KernelOption {
+                nmount.str_opt_owned(option_to_string(opt).as_str(), "");
+            }
+        }
+
+        nmount
+            .str_opt(c"fstype", c"fusefs")
+            .str_opt_owned("fspath", mountpoint)
+            .str_opt(c"from", c"/dev/fuse")
+            .str_opt_owned("fd", dev_fd.to_string().as_str())
+            .nmount(flags)?;
+
+        Ok(())
     }
 
     pub(crate) fn umount_impl(&mut self) -> io::Result<()> {
         self.do_unmount(true)
     }
 
+    #[cfg(target_os = "linux")]
     fn do_unmount(&mut self, lazy: bool) -> io::Result<()> {
         let flags = if lazy {
-            MntFlags::MNT_DETACH
+            nix::mount::MntFlags::MNT_DETACH
         } else {
-            MntFlags::empty()
+            nix::mount::MntFlags::empty()
         };
-        umount2(&self.mountpoint, flags)?;
+        nix::mount::umount2(&self.mountpoint, flags)?;
+        Ok(())
+    }
+
+    #[cfg(any(
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "macos",
+    ))]
+    fn do_unmount(&mut self, lazy: bool) -> io::Result<()> {
+        let flags = if lazy {
+            nix::mount::MntFlags::MNT_FORCE
+        } else {
+            nix::mount::MntFlags::empty()
+        };
+        nix::mount::unmount(&self.mountpoint, flags)?;
         Ok(())
     }
 

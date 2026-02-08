@@ -73,6 +73,10 @@ pub enum MountOption {
     to libfuse, and not part of the kernel ABI */
 }
 
+#[cfg_attr(
+    all(fuser_mount_impl = "direct-mount", fuser_mount_impl = "macos-no-mount"),
+    expect(dead_code)
+)]
 #[derive(PartialEq)]
 pub(crate) enum MountOptionGroup {
     KernelOption,
@@ -174,9 +178,11 @@ pub(crate) fn option_to_string(option: &MountOption) -> String {
 
 #[cfg_attr(
     not(any(
-        fuser_mount_impl = "macos-no-mount",
         fuser_mount_impl = "pure-rust",
-        fuser_mount_impl = "direct-mount",
+        any(
+            fuser_mount_impl = "direct-mount",
+            not(fuser_mount_impl = "macos-no-mount")
+        ),
     )),
     expect(dead_code)
 )]
@@ -203,6 +209,7 @@ pub(crate) fn option_group(option: &MountOption) -> MountOptionGroup {
     }
 }
 
+#[cfg(target_os = "linux")]
 #[cfg_attr(
     not(any(
         fuser_mount_impl = "macos-no-mount",
@@ -234,6 +241,7 @@ pub(crate) fn option_to_flag(option: &MountOption) -> io::Result<nix::mount::MsF
 }
 
 #[cfg(target_os = "macos")]
+#[expect(dead_code)]
 pub(crate) fn option_to_flag(option: &MountOption) -> io::Result<nix::mount::MntFlags> {
     match option {
         MountOption::Dev => Ok(nix::mount::MntFlags::empty()), // There is no option for dev. It's the absence of NoDev
@@ -248,6 +256,49 @@ pub(crate) fn option_to_flag(option: &MountOption) -> io::Result<nix::mount::Mnt
         MountOption::NoAtime => Ok(nix::mount::MntFlags::MNT_NOATIME),
         MountOption::Async => Ok(nix::mount::MntFlags::empty()),
         MountOption::Sync => Ok(nix::mount::MntFlags::MNT_SYNCHRONOUS),
+        option => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("Invalid mount option for flag conversion: {option:?}"),
+        )),
+    }
+}
+
+#[cfg_attr(
+    any(
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "openbsd",
+        target_os = "netbsd"
+    ),
+    allow(dead_code)
+)]
+#[cfg(any(
+    target_os = "freebsd",
+    target_os = "dragonfly",
+    target_os = "openbsd",
+    target_os = "netbsd"
+))]
+pub(crate) fn option_to_flag(option: &MountOption) -> io::Result<nix::mount::MntFlags> {
+    match option {
+        MountOption::Dev => Ok(nix::mount::MntFlags::empty()),
+        #[cfg(target_os = "freebsd")]
+        MountOption::NoDev => Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "NoDev option is not supported on FreeBSD",
+        )),
+        #[cfg(not(target_os = "freebsd"))]
+        MountOption::NoDev => Ok(nix::mount::MntFlags::MNT_NODEV),
+        MountOption::Suid => Ok(nix::mount::MntFlags::empty()),
+        MountOption::NoSuid => Ok(nix::mount::MntFlags::MNT_NOSUID),
+        MountOption::RW => Ok(nix::mount::MntFlags::empty()),
+        MountOption::RO => Ok(nix::mount::MntFlags::MNT_RDONLY),
+        MountOption::Exec => Ok(nix::mount::MntFlags::empty()),
+        MountOption::NoExec => Ok(nix::mount::MntFlags::MNT_NOEXEC),
+        MountOption::Atime => Ok(nix::mount::MntFlags::empty()),
+        MountOption::NoAtime => Ok(nix::mount::MntFlags::MNT_NOATIME),
+        MountOption::Async => Ok(nix::mount::MntFlags::MNT_ASYNC),
+        MountOption::Sync => Ok(nix::mount::MntFlags::MNT_SYNCHRONOUS),
+        MountOption::DirSync => Ok(nix::mount::MntFlags::MNT_SYNCHRONOUS),
         option => Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!("Invalid mount option for flag conversion: {option:?}"),
