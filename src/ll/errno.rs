@@ -3,14 +3,20 @@ use std::ffi::CString;
 use std::ffi::NulError;
 use std::ffi::OsStr;
 use std::ffi::OsString;
+use std::io;
 use std::os::unix::ffi::OsStrExt;
 
 use bimap::BiHashMap;
 use dashmap::DashMap;
 use dashmap::mapref::one::Ref;
 use lazy_static::lazy_static;
+use libc::strerror_r;
 
 use crate::Errno;
+
+fn set_errno(value: i32) {
+    unsafe { *libc::__errno_location() = value };
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct LocaleId(CString);
@@ -26,6 +32,9 @@ impl TryFrom<&str> for LocaleId {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct Locale(libc::locale_t);
 
+unsafe impl Send for Locale {}
+unsafe impl Sync for Locale {}
+
 impl Locale {
     fn new(category: libc::c_int, locale: LocaleId) -> Result<Self, std::io::Error> {
         let inner = unsafe { libc::newlocale(category, locale.0.as_ptr(), std::ptr::null_mut()) };
@@ -34,11 +43,40 @@ impl Locale {
         }
         Ok(Self(inner))
     }
+
+    /// Sets the locale for the current thread.
+    /// SAFETY: this function stores a raw pointer to the previous locale, which may be
+    /// invalid when another Locale object is dropped. The locale guards must be dropped
+    /// in the correct initialization order.
+    unsafe fn activate(&self) -> LocaleActivationGuard<'_> {
+        let old_locale = unsafe { libc::uselocale(self.0) };
+        LocaleActivationGuard::new(self, old_locale)
+    }
 }
 
 impl Drop for Locale {
     fn drop(&mut self) {
         unsafe { libc::freelocale(self.0) };
+    }
+}
+
+struct LocaleActivationGuard<'a> {
+    _locale: &'a Locale,
+    old_locale: libc::locale_t,
+}
+
+impl<'a> LocaleActivationGuard<'a> {
+    fn new(locale: &'a Locale, old_locale: libc::locale_t) -> Self {
+        Self {
+            _locale: locale,
+            old_locale,
+        }
+    }
+}
+
+impl<'a> Drop for LocaleActivationGuard<'a> {
+    fn drop(&mut self) {
+        unsafe { libc::uselocale(self.old_locale) };
     }
 }
 
@@ -232,8 +270,20 @@ lazy_static! {
 type ErrnoLocaleMapping = BiHashMap<Errno, OsString>;
 type ErrnoMapping = DashMap<LocaleId, ErrnoLocaleMapping>;
 
-unsafe extern "C" {
-    fn strerror_l(errnum: i32, locale: libc::locale_t) -> *const libc::c_char;
+fn strerror_r_dynamic(errnum: i32) -> Result<OsString, io::Error> {
+    let mut buffer = vec![0i8; 1024];
+    set_errno(0);
+    while unsafe { strerror_r(errnum, buffer.as_mut_ptr(), buffer.len()) } != 0 {
+        let error = io::Error::last_os_error();
+        if error.raw_os_error().unwrap_or(0) == libc::ERANGE {
+            buffer.resize(buffer.len() + 1024, 0);
+            continue;
+        } else {
+            return Err(error);
+        }
+    }
+    let cstr = unsafe { CStr::from_ptr(buffer.as_ptr()) };
+    Ok(OsStr::from_bytes(cstr.to_bytes()).to_os_string())
 }
 
 fn populate_errno_mapping(
@@ -241,15 +291,17 @@ fn populate_errno_mapping(
     locale_id: &LocaleId,
 ) -> Result<(), std::io::Error> {
     let locale = Locale::new(libc::LC_MESSAGES, locale_id.clone())?;
+    let _locale_guard = unsafe { locale.activate() };
     for errno in ALL_RAW_ERRNOS.iter() {
         let errno = Errno::from_i32(*errno);
         if mapping.contains_left(&errno) {
             continue;
         }
-        let error_str = unsafe { strerror_l(errno.code(), locale.0) };
-        mapping.insert(errno, unsafe {
-            OsStr::from_bytes(CStr::from_ptr(error_str).to_bytes()).to_os_string()
-        });
+        let error_str = match strerror_r_dynamic(errno.code()) {
+            Ok(os_str) => os_str,
+            Err(_) => continue,
+        };
+        mapping.insert(errno, error_str);
     }
     Ok(())
 }
