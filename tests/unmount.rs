@@ -22,7 +22,7 @@ fn should_unmount_without_outstanding_handles() {
 fn should_prompt_unmount_retry_while_file_is_open_with_autounmount() {
     let mountpoint = tempfile::tempdir().unwrap();
     let mut cfg = Config::default();
-    cfg.acl = SessionACL::All;
+    cfg.acl = SessionACL::RootAndOwner;
     cfg.n_threads = Some(2);
     cfg.mount_options.push(MountOption::AutoUnmount);
     let session = fuser::spawn_mount2(HelloFS, &mountpoint, &cfg).unwrap();
