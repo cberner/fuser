@@ -100,6 +100,7 @@ pub(crate) fn check_option_conflicts(options: &[UnmountOption]) -> Result<(), io
     }
 }
 
+#[cfg(not(fuser_mount_impl = "macos-no-mount"))]
 pub(crate) fn to_fusermount_option(option: &UnmountOption) -> Option<String> {
     match option {
         UnmountOption::Force => None,

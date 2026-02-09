@@ -14,6 +14,7 @@ mod fuse3_sys;
 #[cfg(fuser_mount_impl = "pure-rust")]
 mod fuse_pure;
 
+#[cfg(not(fuser_mount_impl = "macos-no-mount"))]
 mod fusermount;
 
 pub(crate) mod mount_options;
@@ -91,14 +92,14 @@ impl MountImpl {
         }
     }
 
-    fn umount_impl(&mut self, flags: &[UnmountOption]) -> io::Result<()> {
+    fn umount_impl(&mut self, _flags: &[UnmountOption]) -> io::Result<()> {
         match self {
             #[cfg(fuser_mount_impl = "pure-rust")]
-            MountImpl::Pure(mount) => mount.umount_impl(flags),
+            MountImpl::Pure(mount) => mount.umount_impl(_flags),
             #[cfg(fuser_mount_impl = "libfuse2")]
-            MountImpl::Fuse2(mount) => mount.umount_impl(flags),
+            MountImpl::Fuse2(mount) => mount.umount_impl(_flags),
             #[cfg(fuser_mount_impl = "libfuse3")]
-            MountImpl::Fuse3(mount) => mount.umount_impl(flags),
+            MountImpl::Fuse3(mount) => mount.umount_impl(_flags),
             // This branch is needed because Rust does not consider & empty enum non-empty.
             #[cfg(fuser_mount_impl = "macos-no-mount")]
             _ => Ok(()),
