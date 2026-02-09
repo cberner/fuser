@@ -7,7 +7,6 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use log::debug;
 use log::error;
 
 use super::is_mounted;
