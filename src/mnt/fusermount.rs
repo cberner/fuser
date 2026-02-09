@@ -63,7 +63,7 @@ pub(crate) fn fuse_unmount_pure(
     #[cfg(target_os = "macos")]
     match nix::mount::unmount(mountpoint, nix_flags) {
         Ok(()) => return Ok(()),
-        Err(e) if e == nix::errno::Errno::EPERM => {}
+        Err(nix::errno::Errno::EPERM) => {}
         Err(e) => return Err(e.into()),
     }
     let mut builder = Command::new(detect_fusermount_bin());

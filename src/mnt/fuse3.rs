@@ -99,9 +99,8 @@ impl FuseSession {
         }
         // Do not allow the mount or device to persist if the file descriptor
         // cannot be cloned.
-        let device = self.try_clone_to_file().map_err(|e| {
+        let device = self.try_clone_to_file().inspect_err(|_| {
             unsafe { fuse_session_unmount(self.inner) };
-            e
         })?;
         self.state = Some(MountState {
             mountpoint: mnt.to_owned(),
@@ -143,7 +142,7 @@ impl FuseSession {
             return Err(err.into());
         }
         self.user_unmount_and_clear();
-        return Ok(());
+        Ok(())
     }
 
     fn mountpoint(&self) -> Option<&Path> {
@@ -182,14 +181,14 @@ impl FuseSession {
     fn is_alive(&self) -> bool {
         self.state
             .as_ref()
-            .map_or(false, |state| is_mounted(&state.device))
+            .is_some_and(|state| is_mounted(&state.device))
     }
 }
 
 impl Drop for FuseSession {
     fn drop(&mut self) {
         let flags = super::drop_umount_flags();
-        if let Err(err) = super::with_retry_on_busy_or_again(|| self.unmount(&flags)) {
+        if let Err(err) = super::with_retry_on_busy_or_again(|| self.unmount(flags)) {
             error!(
                 "Failed to unmount filesystem on mountpoint {:?}: {}",
                 self.mountpoint(),
