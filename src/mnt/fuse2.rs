@@ -7,6 +7,9 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use log::debug;
+use log::error;
+
 use super::is_mounted;
 use super::unmount_options::UnmountOption;
 use crate::SessionACL;
@@ -15,7 +18,6 @@ use crate::mnt::MountOption;
 use crate::mnt::fuse2_sys::*;
 use crate::mnt::fusermount;
 use crate::mnt::with_fuse_args;
-use log::{debug, error};
 
 /// Ensures that an os error is never 0/Success
 fn ensure_last_os_error() -> io::Error {

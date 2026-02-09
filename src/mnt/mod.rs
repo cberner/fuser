@@ -60,10 +60,11 @@ fn with_fuse_args<T, F: FnOnce(&mut fuse_args) -> T>(
     })
 }
 
-use crate::SessionACL;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
+
+use crate::SessionACL;
 
 #[derive(Debug)]
 enum MountImpl {

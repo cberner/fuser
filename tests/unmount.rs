@@ -1,11 +1,12 @@
 mod fixtures;
 
+use std::io::Read;
+use std::time::Duration;
+
 use fixtures::hello_fs::HelloFS;
 use fuser::Config;
 use fuser::MountOption;
 use fuser::SessionACL;
-use std::io::Read;
-use std::time::Duration;
 
 #[test_log::test]
 fn should_unmount_without_outstanding_handles() {

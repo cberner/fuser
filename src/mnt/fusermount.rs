@@ -1,16 +1,20 @@
-use crate::UnmountOption;
-use crate::ll::errno;
-use crate::mnt::unmount_options;
-use log::{debug, error};
-use regex::bytes::Regex;
 use std::env;
 use std::ffi::OsStr;
 use std::ffi::OsString;
+use std::io;
 use std::io::ErrorKind;
 use std::os::unix::ffi::OsStrExt;
+use std::path::Path;
 use std::process::Command;
 use std::process::Stdio;
-use std::{io, path::Path};
+
+use log::debug;
+use log::error;
+use regex::bytes::Regex;
+
+use crate::UnmountOption;
+use crate::ll::errno;
+use crate::mnt::unmount_options;
 
 pub(crate) const FUSERMOUNT_BIN: &str = "fusermount";
 pub(crate) const FUSERMOUNT3_BIN: &str = "fusermount3";

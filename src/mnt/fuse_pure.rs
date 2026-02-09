@@ -129,14 +129,14 @@ impl MountImpl {
     pub(crate) fn is_alive(&self) -> bool {
         self.state
             .as_ref()
-            .map_or(false, |state| is_mounted(&state.fuse_device))
+            .is_some_and(|state| is_mounted(&state.fuse_device))
     }
 }
 
 impl Drop for MountImpl {
     fn drop(&mut self) {
         let flags = super::drop_umount_flags();
-        if let Err(err) = super::with_retry_on_busy_or_again(|| self.umount_impl(&flags)) {
+        if let Err(err) = super::with_retry_on_busy_or_again(|| self.umount_impl(flags)) {
             error!(
                 "Failed to unmount filesystem on mountpoint {:?}: {}",
                 self.mountpoint(),

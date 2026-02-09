@@ -1,4 +1,5 @@
-use std::{error::Error, io};
+use std::error::Error;
+use std::io;
 
 fn main() {
     // Register rustc cfg for switching between mount implementations.
