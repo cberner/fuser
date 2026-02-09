@@ -3,6 +3,8 @@ use std::ffi::CString;
 use std::ffi::NulError;
 use std::ffi::OsStr;
 use std::ffi::OsString;
+#[cfg(not(any(target_os = "dragonfly", target_os = "vxworks", target_os = "rtems")))]
+use std::ffi::c_int;
 use std::io;
 use std::os::unix::ffi::OsStrExt;
 
@@ -13,9 +15,45 @@ use lazy_static::lazy_static;
 use libc::strerror_r;
 
 use crate::Errno;
+unsafe extern "C" {
+    #[cfg(not(any(target_os = "dragonfly", target_os = "vxworks", target_os = "rtems")))]
+    #[cfg_attr(
+        any(
+            target_os = "linux",
+            target_os = "emscripten",
+            target_os = "fuchsia",
+            target_os = "l4re",
+            target_os = "hurd",
+        ),
+        link_name = "__errno_location"
+    )]
+    #[cfg_attr(
+        any(
+            target_os = "netbsd",
+            target_os = "openbsd",
+            target_os = "android",
+            target_os = "redox",
+            target_os = "nuttx",
+            target_env = "newlib"
+        ),
+        link_name = "__errno"
+    )]
+    #[cfg_attr(
+        any(target_os = "solaris", target_os = "illumos"),
+        link_name = "___errno"
+    )]
+    #[cfg_attr(target_os = "nto", link_name = "__get_errno_ptr")]
+    #[cfg_attr(
+        any(target_os = "freebsd", target_vendor = "apple"),
+        link_name = "__error"
+    )]
+    #[cfg_attr(target_os = "haiku", link_name = "_errnop")]
+    #[cfg_attr(target_os = "aix", link_name = "_Errno")]
+    fn errno_location() -> *mut c_int;
+}
 
-fn set_errno(value: i32) {
-    unsafe { *libc::__errno_location() = value };
+pub(crate) fn set_errno(value: i32) {
+    unsafe { *errno_location() = value };
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
