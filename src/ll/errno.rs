@@ -74,7 +74,7 @@ impl<'a> LocaleActivationGuard<'a> {
     }
 }
 
-impl<'a> Drop for LocaleActivationGuard<'a> {
+impl Drop for LocaleActivationGuard<'_> {
     fn drop(&mut self) {
         unsafe { libc::uselocale(self.old_locale) };
     }
