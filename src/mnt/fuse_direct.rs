@@ -31,6 +31,7 @@ use nix::unistd::setsid;
 
 use crate::SessionACL;
 use crate::dev_fuse::DevFuse;
+use crate::mnt::is_mounted;
 use crate::mnt::mount_options::MountOption;
 use crate::mnt::mount_options::MountOptionGroup;
 use crate::mnt::mount_options::option_group;
@@ -43,6 +44,7 @@ const DEV_FUSE: &str = "/dev/fuse";
 pub(crate) struct MountImpl {
     mountpoint: PathBuf,
     auto_unmount_socket: Option<UnixStream>,
+    fuse_device: Arc<DevFuse>,
 }
 
 impl MountImpl {
@@ -128,6 +130,7 @@ impl MountImpl {
         let mut mnt = MountImpl {
             mountpoint,
             auto_unmount_socket: None,
+            fuse_device: dev.clone(),
         };
 
         if auto_unmount {
@@ -308,6 +311,17 @@ impl MountImpl {
     }
 
     pub(crate) fn umount_impl(&mut self) -> io::Result<()> {
+        if !is_mounted(&self.fuse_device) {
+            // If the filesystem has already been unmounted, avoid unmounting it again.
+            // Unmounting it a second time could cause a race with a newly mounted filesystem
+            // living at the same mountpoint
+            return Ok(());
+        }
+        if let Some(sock) = self.auto_unmount_socket.take() {
+            drop(sock);
+            // fusermount in auto-unmount mode, no more work to do.
+            return Ok(());
+        }
         self.do_unmount(true)
     }
 
