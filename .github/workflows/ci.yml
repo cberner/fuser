@@ -38,7 +38,7 @@ jobs:
       - name: Configure system policies
         id: system-policies
         run: |
-          sudo echo 'user_allow_other' | tee -a /etc/fuse.conf
+          echo 'user_allow_other' | sudo tee -a /etc/fuse.conf
 
       - name: Install packages
         run: |
