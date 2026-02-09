@@ -289,6 +289,7 @@ fn is_mount_salvageable(err: &io::Error) -> bool {
     }
 }
 
+#[cfg(not(fuser_mount_impl = "macos-no-mount"))]
 /// Warning: This will return true if the filesystem has been detached (lazy unmounted), but not
 /// yet destroyed by the kernel.
 fn is_mounted(fuse_device: &DevFuse) -> bool {
