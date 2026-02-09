@@ -21,7 +21,14 @@ pub(crate) struct MountEntry {
 impl MountEntry {
     /// Returns true if this is a FUSE mount at the specified mountpoint.
     pub(crate) fn is_fuse_mount_at(&self, mountpoint: &Path) -> bool {
-        self.fstype == "fuse" && self.mountpoint == mountpoint
+        let expected_fstype = if cfg!(target_os = "macos") {
+            "macfuse"
+        } else if cfg!(target_os = "freebsd") {
+            "fusefs"
+        } else {
+            "fuse"
+        };
+        self.fstype == expected_fstype && self.mountpoint == mountpoint
     }
 }
 
@@ -40,11 +47,13 @@ impl fmt::Display for MountEntry {
 pub(crate) async fn read_mounts() -> anyhow::Result<Vec<MountEntry>> {
     let content = command_output(["mount"]).await?;
 
-    if !cfg!(target_os = "linux") {
-        bail!("mount parsing is only implemented on Linux")
+    if cfg!(target_os = "linux") {
+        parse_mount_output_on_linux(&content)
+    } else if cfg!(target_os = "macos") || cfg!(target_os = "freebsd") {
+        parse_mount_output_on_bsd(&content)
+    } else {
+        bail!("mount parsing is only implemented on Linux and macOS")
     }
-
-    parse_mount_output_on_linux(&content)
 }
 
 /// Waits for a FUSE mount at the specified mountpoint to appear in mount output.
@@ -147,7 +156,8 @@ pub(crate) async fn assert_single_fuse_mount(mountpoint: &Path) -> anyhow::Resul
     Ok(())
 }
 
-/// Parses the output of the `mount` command.
+/// Parses the output of the `mount` command on Linux.
+/// Format: device on mountpoint type fstype (options...)
 fn parse_mount_output_on_linux(content: &str) -> anyhow::Result<Vec<MountEntry>> {
     let mut entries = Vec::new();
     for line in content.lines() {
@@ -169,11 +179,42 @@ fn parse_mount_output_on_linux(content: &str) -> anyhow::Result<Vec<MountEntry>>
     Ok(entries)
 }
 
+/// Parses the output of the `mount` command on macOS.
+/// Format: device on mountpoint (fstype, options...)
+fn parse_mount_output_on_bsd(content: &str) -> anyhow::Result<Vec<MountEntry>> {
+    let mut entries = Vec::new();
+    for line in content.lines() {
+        // Format: device on mountpoint (fstype, options...)
+        let Some((device, rest)) = line.split_once(" on ") else {
+            bail!("Failed to parse mount line: missing ' on ': {}", line);
+        };
+        // Find the last occurrence of " (" to separate mountpoint from options
+        let Some(paren_pos) = rest.rfind(" (") else {
+            bail!(
+                "Failed to parse mount line: missing ' (' for options: {}",
+                line
+            );
+        };
+        let mountpoint = &rest[..paren_pos];
+        let options_part = &rest[paren_pos + 2..]; // Skip " ("
+        // Remove trailing ")" and get the first option which is the fstype
+        let options_part = options_part.trim_end_matches(')');
+        let fstype = options_part.split(',').next().unwrap_or("").trim();
+        entries.push(MountEntry {
+            device: device.to_owned(),
+            mountpoint: PathBuf::from(mountpoint),
+            fstype: fstype.to_owned(),
+        });
+    }
+    Ok(entries)
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
     use crate::mount_util::MountEntry;
+    use crate::mount_util::parse_mount_output_on_bsd;
     use crate::mount_util::parse_mount_output_on_linux;
 
     #[test]
@@ -206,6 +247,35 @@ sysfs on /sys type sysfs (rw,nosuid,nodev,noexec,relatime)
                     device: "sysfs".to_owned(),
                     mountpoint: PathBuf::from("/sys"),
                     fstype: "sysfs".to_owned()
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn test_parse_mount_output_on_bsd() {
+        let content = r#"/dev/disk3s1s1 on / (apfs, sealed, local, read-only, journaled)
+devfs on /dev (devfs, local, nobrowse)
+map auto_home on /System/Volumes/Data/home (autofs, automounted, nobrowse)
+"#;
+        let entries = parse_mount_output_on_bsd(content).unwrap();
+        assert_eq!(
+            entries,
+            vec![
+                MountEntry {
+                    device: "/dev/disk3s1s1".to_owned(),
+                    mountpoint: PathBuf::from("/"),
+                    fstype: "apfs".to_owned()
+                },
+                MountEntry {
+                    device: "devfs".to_owned(),
+                    mountpoint: PathBuf::from("/dev"),
+                    fstype: "devfs".to_owned()
+                },
+                MountEntry {
+                    device: "map auto_home".to_owned(),
+                    mountpoint: PathBuf::from("/System/Volumes/Data/home"),
+                    fstype: "autofs".to_owned()
                 },
             ]
         );

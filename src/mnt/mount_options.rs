@@ -15,6 +15,10 @@ pub struct Config {
     pub acl: SessionACL,
     /// Number of event loop threads. If unspecified, one thread is used.
     pub n_threads: Option<usize>,
+    /// Use `FUSE_DEV_IOC_CLONE` to give each worker thread its own fd.
+    /// This enables more efficient request processing
+    /// when multiple threads are used. Requires Linux 4.5+.
+    pub clone_fd: bool,
 }
 
 /// Mount options accepted by the FUSE filesystem type
@@ -137,7 +141,7 @@ fn conflicts_with(option: &MountOption) -> Vec<MountOption> {
 }
 
 // Format option to be passed to libfuse or kernel
-#[cfg_attr(fuser_mount_impl = "macos-no-mount", expect(dead_code))]
+#[allow(dead_code)]
 pub(crate) fn option_to_string(option: &MountOption) -> String {
     match option {
         MountOption::FSName(name) => format!("fsname={name}"),
@@ -210,6 +214,7 @@ pub(crate) fn parse_options_from_args(args: &[&OsStr]) -> io::Result<Config> {
         mount_options: out,
         acl,
         n_threads: None,
+        clone_fd: false,
     })
 }
 

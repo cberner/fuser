@@ -6,7 +6,7 @@ pub(crate) struct fuse_backing_map {
 }
 
 pub(crate) const FUSE_DEV_IOC_MAGIC: u8 = 229;
-#[expect(dead_code)]
+#[cfg_attr(not(target_os = "linux"), expect(dead_code))]
 pub(crate) const FUSE_DEV_IOC_CLONE: u8 = 0;
 pub(crate) const FUSE_DEV_IOC_BACKING_OPEN: u8 = 1;
 pub(crate) const FUSE_DEV_IOC_BACKING_CLOSE: u8 = 2;

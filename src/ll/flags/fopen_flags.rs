@@ -22,8 +22,10 @@ bitflags! {
         const FOPEN_PARALLEL_DIRECT_WRITES = 1 << 6;
         /// the file is fd-backed (via the backing_id field)
         const FOPEN_PASSTHROUGH = 1 << 7;
+        /// purge cached attributes on open
         #[cfg(target_os = "macos")]
         const FOPEN_PURGE_ATTR = 1 << 30;
+        /// purge unified buffer cache on open
         #[cfg(target_os = "macos")]
         const FOPEN_PURGE_UBC = 1 << 31;
     }
