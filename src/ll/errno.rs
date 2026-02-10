@@ -163,80 +163,80 @@ const ALL_RAW_ERRNOS: &[libc::c_int] = &[
     libc::EWOULDBLOCK,
     libc::ENOMSG,
     libc::EIDRM,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::ECHRNG,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::EL2NSYNC,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::EL3HLT,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::EL3RST,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::ELNRNG,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::EUNATCH,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::ENOCSI,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::EL2HLT,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::EBADE,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::EBADR,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::EXFULL,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::ENOANO,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::EBADRQC,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::EBADSLT,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::EDEADLOCK,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::EBFONT,
     libc::ENOSTR,
     libc::ENODATA,
     libc::ETIME,
     libc::ENOSR,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::ENONET,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::ENOPKG,
     libc::EREMOTE,
     libc::ENOLINK,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::EADV,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::ESRMNT,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::ECOMM,
     libc::EPROTO,
     libc::EMULTIHOP,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::EDOTDOT,
     libc::EBADMSG,
     libc::EOVERFLOW,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::ENOTUNIQ,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::EBADFD,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::EREMCHG,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::ELIBACC,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::ELIBBAD,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::ELIBSCN,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::ELIBMAX,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::ELIBEXEC,
     libc::EILSEQ,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::ERESTART,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::ESTRPIPE,
     libc::EUSERS,
     libc::ENOTSOCK,
@@ -268,35 +268,35 @@ const ALL_RAW_ERRNOS: &[libc::c_int] = &[
     libc::EALREADY,
     libc::EINPROGRESS,
     libc::ESTALE,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::EUCLEAN,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::ENOTNAM,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::ENAVAIL,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::EISNAM,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::EREMOTEIO,
     libc::EDQUOT,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::ENOMEDIUM,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::EMEDIUMTYPE,
     libc::ECANCELED,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::ENOKEY,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::EKEYEXPIRED,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::EKEYREVOKED,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::EKEYREJECTED,
     libc::EOWNERDEAD,
     libc::ENOTRECOVERABLE,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::ERFKILL,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     libc::EHWPOISON,
     libc::ENOTSUP,
 ];

@@ -526,6 +526,13 @@ pub(crate) fn option_group(option: &MountOption) -> MountOptionGroup {
     }
 }
 
+#[cfg(not(any(
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "dragonfly",
+    target_os = "openbsd",
+    target_os = "netbsd"
+)))]
 pub(crate) fn option_to_flag(option: &MountOption) -> io::Result<nix::mount::MsFlags> {
     match option {
         MountOption::Dev => Ok(nix::mount::MsFlags::empty()), // There is no option for dev. It's the absence of NoDev
