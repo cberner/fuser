@@ -727,8 +727,10 @@ mod op {
         pub(crate) fn file_handle(&self) -> FileHandle {
             FileHandle(self.arg.fh)
         }
-        pub(crate) fn offset(&self) -> i64 {
-            self.arg.offset
+        pub(crate) fn offset(&self) -> Result<u64, Errno> {
+            let offset = self.arg.offset as u64;
+            validate_off_t("fuse_write_in.arg.offset", offset)?;
+            Ok(offset)
         }
         pub(crate) fn data(&self) -> &'a [u8] {
             self.data
@@ -1510,8 +1512,10 @@ mod op {
         pub(crate) fn file_handle(&self) -> FileHandle {
             FileHandle(self.arg.fh)
         }
-        pub(crate) fn offset(&self) -> i64 {
-            self.arg.offset
+        pub(crate) fn offset(&self) -> Result<u64, Errno> {
+            let offset = self.arg.offset as u64;
+            validate_off_t("fuse_lseek_in.arg.offset", offset)?;
+            Ok(offset)
         }
         /// TODO: Make this return an enum
         pub(crate) fn whence(&self) -> i32 {
@@ -1525,7 +1529,7 @@ mod op {
         pub(crate) inode: INodeNo,
         /// The value set by the [`Open`] method. See [`FileHandle`].
         pub(crate) file_handle: FileHandle,
-        pub(crate) offset: i64,
+        pub(crate) offset: u64,
     }
     #[derive(Debug)]
     pub(crate) struct CopyFileRange<'a> {
@@ -1534,20 +1538,24 @@ mod op {
     }
     impl CopyFileRange<'_> {
         /// File and offset to copy data from
-        pub(crate) fn src(&self) -> CopyFileRangeFile {
-            CopyFileRangeFile {
+        pub(crate) fn src(&self) -> Result<CopyFileRangeFile, Errno> {
+            let offset = self.arg.off_in as u64;
+            validate_off_t("fuse_copy_file_range_in.arg.off_in", offset)?;
+            Ok(CopyFileRangeFile {
                 inode: INodeNo(self.header.nodeid),
                 file_handle: FileHandle(self.arg.fh_in),
-                offset: self.arg.off_in,
-            }
+                offset,
+            })
         }
         /// File and offset to copy data to
-        pub(crate) fn dest(&self) -> CopyFileRangeFile {
-            CopyFileRangeFile {
+        pub(crate) fn dest(&self) -> Result<CopyFileRangeFile, Errno> {
+            let offset = self.arg.off_out as u64;
+            validate_off_t("fuse_copy_file_range_in.arg.off_out", offset)?;
+            Ok(CopyFileRangeFile {
                 inode: INodeNo(self.arg.nodeid_out),
                 file_handle: FileHandle(self.arg.fh_out),
-                offset: self.arg.off_out,
-            }
+                offset,
+            })
         }
         /// Number of bytes to copy
         pub(crate) fn len(&self) -> u64 {
@@ -1970,7 +1978,7 @@ impl fmt::Display for Operation<'_> {
             ),
             Operation::Write(x) => write!(
                 f,
-                "WRITE fh {:?}, offset {}, size {}, write flags {:#x}",
+                "WRITE fh {:?}, offset {:?}, size {}, write flags {:#x}",
                 x.file_handle(),
                 x.offset(),
                 x.data().len(),
@@ -2084,7 +2092,7 @@ impl fmt::Display for Operation<'_> {
             Operation::Rename2(x) => write!(f, "RENAME2 from {:?}, to {:?}", x.from(), x.to()),
             Operation::Lseek(x) => write!(
                 f,
-                "LSEEK fh {:?}, offset {}, whence {}",
+                "LSEEK fh {:?}, offset {:?}, whence {}",
                 x.file_handle(),
                 x.offset(),
                 x.whence()

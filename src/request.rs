@@ -251,7 +251,7 @@ impl<'a> RequestWithSender<'a> {
                     self.request_header(),
                     self.request.nodeid(),
                     x.file_handle(),
-                    x.offset(),
+                    x.offset()?,
                     x.data(),
                     x.write_flags(),
                     x.flags(),
@@ -500,13 +500,13 @@ impl<'a> RequestWithSender<'a> {
                     self.request_header(),
                     self.request.nodeid(),
                     x.file_handle(),
-                    x.offset(),
+                    x.offset()?,
                     x.whence(),
                     self.reply(),
                 );
             }
             ll::Operation::CopyFileRange(x) => {
-                let (i, o) = (x.src(), x.dest());
+                let (i, o) = (x.src()?, x.dest()?);
                 filesystem.copy_file_range(
                     self.request_header(),
                     i.inode,
