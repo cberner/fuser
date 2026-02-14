@@ -1,6 +1,6 @@
 # FUSE for Rust - Changelog
 
-## 0.17 - Unreleased
+## 0.17.0 - 2026-02-14
 
 Major changes:
 * Change many integer-based public API parameters to strongly-typed newtypes and bitflags. 
