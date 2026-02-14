@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::ffi::OsStr;
 use std::io;
 use std::io::ErrorKind;
 
@@ -74,7 +73,8 @@ pub enum MountOption {
 }
 
 impl MountOption {
-    pub(crate) fn from_str(s: &str) -> MountOption {
+    #[cfg(test)]
+    fn from_str(s: &str) -> MountOption {
         match s {
             "auto_unmount" => MountOption::AutoUnmount,
             "default_permissions" => MountOption::DefaultPermissions,
@@ -165,63 +165,8 @@ pub(crate) fn option_to_string(option: &MountOption) -> String {
     }
 }
 
-/// Parses mount command args.
-///
-/// Input: `"-o", "suid", "-o", "ro,nodev,noexec", "-osync"`
-/// Output Ok([`Suid`, `RO`, `NoDev`, `NoExec`, `Sync`])
-pub(crate) fn parse_options_from_args(args: &[&OsStr]) -> io::Result<Config> {
-    let err = |x| io::Error::new(ErrorKind::InvalidInput, x);
-    let args: Option<Vec<_>> = args.iter().map(|x| x.to_str()).collect();
-    let args = args.ok_or_else(|| err("Error parsing args: Invalid UTF-8".to_owned()))?;
-    let mut it = args.iter();
-    let mut out = vec![];
-    let mut acl = None;
-    loop {
-        let opt = match it.next() {
-            None => break,
-            Some(&"-o") => *it.next().ok_or_else(|| {
-                err("Error parsing args: Expected option, reached end of args".to_owned())
-            })?,
-            Some(x) if x.starts_with("-o") => &x[2..],
-            Some(x) => return Err(err(format!("Error parsing args: expected -o, got {x}"))),
-        };
-        for x in opt.split(',') {
-            match x {
-                "allow_root" => {
-                    if acl.is_some() {
-                        return Err(err(
-                            "allow_root option conflicts with previous ACL".to_owned()
-                        ));
-                    }
-                    acl = Some(SessionACL::RootAndOwner);
-                }
-                "allow_other" => {
-                    if acl.is_some() {
-                        return Err(err(
-                            "allow_other option conflicts with previous ACL".to_owned()
-                        ));
-                    }
-                    acl = Some(SessionACL::All);
-                }
-                x => {
-                    out.push(MountOption::from_str(x));
-                }
-            }
-        }
-    }
-    let acl = acl.unwrap_or(SessionACL::default());
-    Ok(Config {
-        mount_options: out,
-        acl,
-        n_threads: None,
-        clone_fd: false,
-    })
-}
-
 #[cfg(test)]
 mod test {
-    use std::os::unix::prelude::OsStrExt;
-
     use crate::mnt::mount_options::*;
 
     #[test]
@@ -266,29 +211,5 @@ mod test {
         ] {
             assert_eq!(*x, MountOption::from_str(option_to_string(x).as_ref()));
         }
-    }
-
-    #[test]
-    fn test_parse_options() {
-        use crate::mnt::mount_options::MountOption::*;
-
-        assert_eq!(parse_options_from_args(&[]).unwrap(), Config::default());
-
-        let o: Vec<_> = "-o suid -o ro,nodev,noexec -osync"
-            .split(' ')
-            .map(OsStr::new)
-            .collect();
-        let out = parse_options_from_args(o.as_ref()).unwrap();
-        assert_eq!(
-            out,
-            Config {
-                mount_options: vec![Suid, RO, NoDev, NoExec, Sync],
-                ..Config::default()
-            }
-        );
-
-        assert!(parse_options_from_args(&[OsStr::new("-o")]).is_err());
-        assert!(parse_options_from_args(&[OsStr::new("not o")]).is_err());
-        assert!(parse_options_from_args(&[OsStr::from_bytes(b"-o\xc3\x28")]).is_err());
     }
 }
