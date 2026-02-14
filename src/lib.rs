@@ -50,7 +50,6 @@ pub use crate::ll::request::Version;
 pub use crate::mnt::mount_options::Config;
 pub use crate::mnt::mount_options::MountOption;
 use crate::mnt::mount_options::check_option_conflicts;
-use crate::mnt::mount_options::parse_options_from_args;
 pub use crate::notify::Notifier;
 pub use crate::notify::PollHandle;
 pub use crate::notify::PollNotifier;
@@ -1046,23 +1045,6 @@ pub trait Filesystem: Send + Sync + 'static {
 /// Mount the given filesystem to the given mountpoint. This function will
 /// not return until the filesystem is unmounted.
 ///
-/// Note that you need to lead each option with a separate `"-o"` string.
-/// # Errors
-/// Returns an error if the options are incorrect, or if the fuse device can't be mounted,
-/// and any final error when the session comes to an end.
-#[deprecated(note = "use mount2() instead")]
-pub fn mount<FS: Filesystem, P: AsRef<Path>>(
-    filesystem: FS,
-    mountpoint: P,
-    options: &[&OsStr],
-) -> io::Result<()> {
-    let options = parse_options_from_args(options)?;
-    mount2(filesystem, mountpoint, &options)
-}
-
-/// Mount the given filesystem to the given mountpoint. This function will
-/// not return until the filesystem is unmounted.
-///
 /// NOTE: This will eventually replace `mount()`, once the API is stable
 /// # Errors
 /// Returns an error if the options are incorrect, or if the fuse device can't be mounted,
@@ -1074,23 +1056,6 @@ pub fn mount2<FS: Filesystem, P: AsRef<Path>>(
 ) -> io::Result<()> {
     check_option_conflicts(options)?;
     Session::new(filesystem, mountpoint.as_ref(), options).and_then(|se| se.run())
-}
-
-/// Mount the given filesystem to the given mountpoint. This function spawns
-/// a background thread to handle filesystem operations while being mounted
-/// and therefore returns immediately. The returned handle should be stored
-/// to reference the mounted filesystem. If it's dropped, the filesystem will
-/// be unmounted.
-/// # Errors
-/// Returns an error if the options are incorrect, or if the fuse device can't be mounted.
-#[deprecated(note = "use spawn_mount2() instead")]
-pub fn spawn_mount<'a, FS: Filesystem + Send + 'static + 'a, P: AsRef<Path>>(
-    filesystem: FS,
-    mountpoint: P,
-    options: &[&OsStr],
-) -> io::Result<BackgroundSession> {
-    let options = parse_options_from_args(options)?;
-    Session::new(filesystem, mountpoint.as_ref(), &options).and_then(session::Session::spawn)
 }
 
 /// Mount the given filesystem to the given mountpoint. This function spawns

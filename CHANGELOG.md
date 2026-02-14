@@ -23,6 +23,7 @@ Minor changes:
 * Remove remaining `osxfuse` support and improve `macfuse` compatibility
 * The path to the `fusermount` binary can be specified with the `FUSERMOUNT_PATH` environment variable
 * `allow_root` or `allow_other` must be enabled when using `auto_unmount`
+* Remove deprecated `mount` and `spawn_mount` -- use `mount2` and `spawn_mount2` instead
 * Update and expand documentation
 
 Internal changes:
