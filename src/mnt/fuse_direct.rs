@@ -20,7 +20,9 @@ use nix::sys::signal::SigSet;
 use nix::sys::signal::SigmaskHow;
 use nix::sys::signal::sigprocmask;
 use nix::sys::stat::Mode;
+use nix::sys::wait::waitpid;
 use nix::unistd::ForkResult;
+use nix::unistd::Pid;
 use nix::unistd::Uid;
 use nix::unistd::close;
 use nix::unistd::dup2_stderr;
@@ -44,6 +46,7 @@ const DEV_FUSE: &str = "/dev/fuse";
 pub(crate) struct MountImpl {
     mountpoint: PathBuf,
     auto_unmount_socket: Option<UnixStream>,
+    auto_unmount_pid: Option<Pid>,
     fuse_device: Arc<DevFuse>,
 }
 
@@ -130,6 +133,7 @@ impl MountImpl {
         let mut mnt = MountImpl {
             mountpoint,
             auto_unmount_socket: None,
+            auto_unmount_pid: None,
             fuse_device: dev.clone(),
         };
 
@@ -319,6 +323,7 @@ impl MountImpl {
         }
         if let Some(sock) = self.auto_unmount_socket.take() {
             drop(sock);
+            self.wait_for_auto_unmount_child()?;
             // fusermount in auto-unmount mode, no more work to do.
             return Ok(());
         }
@@ -356,16 +361,36 @@ impl MountImpl {
     fn setup_auto_unmount(&mut self) -> io::Result<()> {
         let (tx, rx) = UnixStream::pair()?;
 
-        if let ForkResult::Child = unsafe { fork() }? {
-            exit(match self.do_auto_unmount(rx) {
-                Ok(()) => 0,
-                Err(err) => err.raw_os_error().unwrap_or(1),
-            });
+        match unsafe { fork() }? {
+            ForkResult::Child => {
+                exit(match self.do_auto_unmount(rx) {
+                    Ok(()) => 0,
+                    Err(err) => err.raw_os_error().unwrap_or(1),
+                });
+            }
+            ForkResult::Parent { child } => {
+                self.auto_unmount_pid = Some(child);
+            }
         }
 
         self.auto_unmount_socket = Some(tx);
 
         Ok(())
+    }
+
+    fn wait_for_auto_unmount_child(&mut self) -> io::Result<()> {
+        let Some(child) = self.auto_unmount_pid.take() else {
+            return Ok(());
+        };
+
+        loop {
+            match waitpid(child, None) {
+                Ok(_) => return Ok(()),
+                Err(nix::errno::Errno::EINTR) => continue,
+                Err(nix::errno::Errno::ECHILD) => return Ok(()),
+                Err(err) => return Err(err.into()),
+            }
+        }
     }
 
     fn do_auto_unmount(&mut self, mut pipe: UnixStream) -> io::Result<()> {
