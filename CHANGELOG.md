@@ -1,5 +1,10 @@
 # FUSE for Rust - Changelog
 
+## 0.18.0 - Unreleased
+* Remove deprecated feature flags `abi-*`
+* Rename `mount2()` to `mount()`
+* Rename `spawn_mount2()` to `spawn_mount()`
+
 ## 0.17.0 - 2026-02-14
 
 Major changes:

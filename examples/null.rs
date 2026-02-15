@@ -20,5 +20,5 @@ fn main() {
     let args = Args::parse();
     env_logger::init();
     let cfg = args.common_args.config();
-    fuser::mount2(NullFS, &args.common_args.mount_point, &cfg).unwrap();
+    fuser::mount(NullFS, &args.common_args.mount_point, &cfg).unwrap();
 }

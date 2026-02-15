@@ -2200,7 +2200,7 @@ fn main() {
     }
 
     cfg.n_threads = Some(args.n_threads);
-    let result = fuser::mount2(
+    let result = fuser::mount(
         SimpleFS::new(args.data_dir, args.direct_io, args.suid),
         &args.mount_point,
         &cfg,

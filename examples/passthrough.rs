@@ -262,5 +262,5 @@ fn main() {
     cfg.mount_options
         .extend([MountOption::FSName("passthrough".to_string())]);
     let fs = PassthroughFs::new();
-    fuser::mount2(fs, &args.common_args.mount_point, &cfg).unwrap();
+    fuser::mount(fs, &args.common_args.mount_point, &cfg).unwrap();
 }
