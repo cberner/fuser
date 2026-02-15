@@ -1049,7 +1049,7 @@ pub trait Filesystem: Send + Sync + 'static {
 /// # Errors
 /// Returns an error if the options are incorrect, or if the fuse device can't be mounted,
 /// and any final error when the session comes to an end.
-pub fn mount2<FS: Filesystem, P: AsRef<Path>>(
+pub fn mount<FS: Filesystem, P: AsRef<Path>>(
     filesystem: FS,
     mountpoint: P,
     options: &Config,
@@ -1067,7 +1067,7 @@ pub fn mount2<FS: Filesystem, P: AsRef<Path>>(
 /// NOTE: This is the corresponding function to mount2.
 /// # Errors
 /// Returns an error if the options are incorrect, or if the fuse device can't be mounted.
-pub fn spawn_mount2<'a, FS: Filesystem + Send + 'static + 'a, P: AsRef<Path>>(
+pub fn spawn_mount<'a, FS: Filesystem + Send + 'static + 'a, P: AsRef<Path>>(
     filesystem: FS,
     mountpoint: P,
     options: &Config,
