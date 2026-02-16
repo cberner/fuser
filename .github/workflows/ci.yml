@@ -35,6 +35,11 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-compile-v1-${{ matrix.libfuse }}-${{ matrix.features }}-${{ hashFiles('**/Cargo.toml', '.github/workflows/*.yml') }}
 
+      - name: Configure system policies
+        id: system-policies
+        run: |
+          echo 'user_allow_other' | sudo tee -a /etc/fuse.conf
+
       - name: Install packages
         run: |
           sudo apt update
