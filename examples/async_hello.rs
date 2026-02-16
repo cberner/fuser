@@ -158,7 +158,7 @@ fn main() {
     let mut cfg = args.common_args.config();
     cfg.mount_options
         .extend([MountOption::RO, MountOption::FSName("hello".to_string())]);
-    fuser::mount2(
+    fuser::mount(
         TokioAdapter::new(HelloFS),
         &args.common_args.mount_point,
         &cfg,
