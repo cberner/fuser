@@ -56,7 +56,7 @@ async fn run_mount_tests_inner(libfuse: Libfuse) -> anyhow::Result<()> {
     run_test(
         &[Feature::DirectMount],
         Unmount::Auto,
-        libfuse.fusermount(),
+        Fusermount::False,
         1,
         false,
     )

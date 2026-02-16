@@ -20,7 +20,11 @@ use nix::sys::signal::SigSet;
 use nix::sys::signal::SigmaskHow;
 use nix::sys::signal::sigprocmask;
 use nix::sys::stat::Mode;
+use nix::sys::wait::WaitPidFlag;
+use nix::sys::wait::WaitStatus;
+use nix::sys::wait::waitpid;
 use nix::unistd::ForkResult;
+use nix::unistd::Pid;
 use nix::unistd::Uid;
 use nix::unistd::close;
 use nix::unistd::dup2_stderr;
@@ -43,8 +47,14 @@ const DEV_FUSE: &str = "/dev/fuse";
 #[derive(Debug)]
 pub(crate) struct MountImpl {
     mountpoint: PathBuf,
-    auto_unmount_socket: Option<UnixStream>,
+    auto_unmount_daemon: Option<AutoUnmountDaemon>,
     fuse_device: Arc<DevFuse>,
+}
+
+#[derive(Debug)]
+struct AutoUnmountDaemon {
+    socket: UnixStream,
+    pid: Pid,
 }
 
 impl MountImpl {
@@ -129,7 +139,7 @@ impl MountImpl {
 
         let mut mnt = MountImpl {
             mountpoint,
-            auto_unmount_socket: None,
+            auto_unmount_daemon: None,
             fuse_device: dev.clone(),
         };
 
@@ -311,17 +321,36 @@ impl MountImpl {
     }
 
     pub(crate) fn umount_impl(&mut self) -> io::Result<()> {
+        if let Some(AutoUnmountDaemon { socket, pid }) = self.auto_unmount_daemon.take() {
+            // signal the daemon to perform the unmount
+            drop(socket);
+
+            // wait for the daemon to exit - on error, just fallback to
+            // unmounting directly
+            if let Ok(status) = waitpid(pid, Some(WaitPidFlag::WEXITED)) {
+                match status {
+                    // exited with return code 0 (success)
+                    WaitStatus::Exited(_, 0) => return Ok(()),
+
+                    // On non-zero exit status, the daemon failed to unmount,
+                    // and on signal, the daemon crashed or was otherwise
+                    // killed. In either case, lets try to unmount ourselves
+                    // if we can.
+                    WaitStatus::Exited(_, _) | WaitStatus::Signaled(_, _, _) => {}
+
+                    // With `WEXITED`, this branch can't actually happen
+                    _ => return Ok(()),
+                }
+            }
+        }
+
         if !is_mounted(&self.fuse_device) {
             // If the filesystem has already been unmounted, avoid unmounting it again.
             // Unmounting it a second time could cause a race with a newly mounted filesystem
             // living at the same mountpoint
             return Ok(());
         }
-        if let Some(sock) = self.auto_unmount_socket.take() {
-            drop(sock);
-            // fusermount in auto-unmount mode, no more work to do.
-            return Ok(());
-        }
+
         self.do_unmount(true)
     }
 
@@ -356,14 +385,17 @@ impl MountImpl {
     fn setup_auto_unmount(&mut self) -> io::Result<()> {
         let (tx, rx) = UnixStream::pair()?;
 
-        if let ForkResult::Child = unsafe { fork() }? {
-            exit(match self.do_auto_unmount(rx) {
-                Ok(()) => 0,
-                Err(err) => err.raw_os_error().unwrap_or(1),
-            });
-        }
+        let pid = match unsafe { fork() }? {
+            ForkResult::Child => {
+                exit(match self.do_auto_unmount(rx) {
+                    Ok(()) => 0,
+                    Err(err) => err.raw_os_error().unwrap_or(1),
+                });
+            }
+            ForkResult::Parent { child } => child,
+        };
 
-        self.auto_unmount_socket = Some(tx);
+        self.auto_unmount_daemon = Some(AutoUnmountDaemon { socket: tx, pid });
 
         Ok(())
     }
@@ -402,10 +434,10 @@ impl MountImpl {
         let etc_mtab = Path::new("/etc/mtab");
         let proc_mounts = Path::new("/proc/mounts");
 
-        let mtab_path = if etc_mtab.try_exists()? {
-            etc_mtab
-        } else if proc_mounts.try_exists()? {
+        let mtab_path = if proc_mounts.try_exists()? {
             proc_mounts
+        } else if etc_mtab.try_exists()? {
+            etc_mtab
         } else {
             return Err(io::ErrorKind::NotFound.into());
         };
