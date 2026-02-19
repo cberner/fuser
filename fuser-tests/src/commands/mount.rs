@@ -44,6 +44,25 @@ async fn run_mount_tests_inner(libfuse: Libfuse) -> anyhow::Result<()> {
     run_test(&[], Unmount::Auto, libfuse.fusermount(), 1, false).await?;
     test_no_user_allow_other(&[], &libfuse).await?;
 
+    // Tests without libfuse feature (direct mount syscall implementation)
+    run_test(
+        &[Feature::DirectMount],
+        Unmount::Manual,
+        Fusermount::False,
+        1,
+        false,
+    )
+    .await?;
+    run_test(
+        &[Feature::DirectMount],
+        Unmount::Auto,
+        Fusermount::False,
+        1,
+        false,
+    )
+    .await?;
+    test_no_user_allow_other(&[Feature::DirectMount], &libfuse).await?;
+
     // Tests with libfuse
     run_test(
         &[libfuse.feature()],
@@ -65,6 +84,22 @@ async fn run_mount_tests_inner(libfuse: Libfuse) -> anyhow::Result<()> {
     // Multi-threaded tests
     run_test(&[], Unmount::Auto, libfuse.fusermount(), 2, false).await?;
     run_test(&[], Unmount::Auto, libfuse.fusermount(), 2, true).await?;
+    run_test(
+        &[Feature::DirectMount],
+        Unmount::Auto,
+        Fusermount::False,
+        2,
+        false,
+    )
+    .await?;
+    run_test(
+        &[Feature::DirectMount],
+        Unmount::Auto,
+        Fusermount::False,
+        2,
+        true,
+    )
+    .await?;
 
     if let Libfuse::Libfuse3 = libfuse {
         run_allow_root_test()

@@ -1,7 +1,7 @@
 fn main() {
     // Register rustc cfg for switching between mount implementations.
     println!(
-        "cargo::rustc-check-cfg=cfg(fuser_mount_impl, values(\"pure-rust\", \"libfuse2\", \"libfuse3\", \"macos-no-mount\"))"
+        "cargo::rustc-check-cfg=cfg(fuser_mount_impl, values(\"direct-mount\", \"pure-rust\", \"libfuse2\", \"libfuse3\", \"macos-no-mount\"))"
     );
 
     let target_os =
@@ -12,7 +12,11 @@ fn main() {
         "linux" | "freebsd" | "dragonfly" | "openbsd" | "netbsd"
     ) && cfg!(not(feature = "libfuse"))
     {
-        println!("cargo::rustc-cfg=fuser_mount_impl=\"pure-rust\"");
+        if cfg!(feature = "direct-mount") {
+            println!("cargo::rustc-cfg=fuser_mount_impl=\"direct-mount\"");
+        } else {
+            println!("cargo::rustc-cfg=fuser_mount_impl=\"pure-rust\"");
+        }
     } else if target_os == "macos" {
         if cfg!(feature = "macos-no-mount") {
             println!("cargo::rustc-cfg=fuser_mount_impl=\"macos-no-mount\"");
