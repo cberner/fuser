@@ -95,4 +95,8 @@ impl ChannelSender {
     pub(crate) fn open_backing(&self, fd: BorrowedFd<'_>) -> std::io::Result<BackingId> {
         BackingId::create(&self.0, fd)
     }
+
+    pub(crate) unsafe fn wrap_backing(&self, id: u32) -> BackingId {
+        unsafe { BackingId::wrap_raw(&self.0, id) }
+    }
 }

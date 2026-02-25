@@ -35,7 +35,15 @@ pub struct BackingId {
 }
 
 impl BackingId {
-    pub(crate) fn create(channel: &Arc<DevFuse>, fd: impl AsFd) -> std::io::Result<Self> {
+    /// Creates a new backing file reference for the given file descriptor.
+    ///
+    /// Usually, you will want to use [`ReplyOpen::open_backing()`](crate::ReplyOpen::open_backing)
+    /// instead, since this method will return a raw `backing_id` value instead of a managed
+    /// `BackingId` wrapper. As such you must manage the lifetime of the backing file yourself.
+    ///
+    /// This method is useful if you want to open a backing file reference without access to a reply
+    /// object.
+    pub fn create_raw(fuse_dev: impl AsFd, fd: impl AsFd) -> std::io::Result<u32> {
         if !cfg!(target_os = "linux") {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
@@ -48,11 +56,37 @@ impl BackingId {
             flags: 0,
             padding: 0,
         };
-        let id = unsafe { fuse_dev_ioc_backing_open(channel.as_raw_fd(), &map) }?;
+        let id = unsafe { fuse_dev_ioc_backing_open(fuse_dev.as_fd().as_raw_fd(), &map) }?;
+
+        Ok(id as u32)
+    }
+
+    pub(crate) fn create(channel: &Arc<DevFuse>, fd: impl AsFd) -> std::io::Result<Self> {
         Ok(Self {
             channel: Arc::downgrade(channel),
-            backing_id: id as u32,
+            backing_id: Self::create_raw(channel, fd)?,
         })
+    }
+
+    pub(crate) unsafe fn wrap_raw(channel: &Arc<DevFuse>, id: u32) -> Self {
+        Self {
+            channel: Arc::downgrade(channel),
+            backing_id: id,
+        }
+    }
+
+    /// Converts this backing file reference into the raw `backing_id` value as returned by the kernel.
+    ///
+    /// This method transfers ownership of the backing file to the caller, who must invoke the
+    /// `FUSE_DEV_IOC_BACKING_CLOSE` themselves once they wish to close the backing file.
+    ///
+    /// The returned ID may subsequently be reopened using
+    /// [`ReplyOpen::wrap_backing()`](crate::ReplyOpen::wrap_backing).
+    pub fn into_raw(mut self) -> u32 {
+        let id = self.backing_id;
+        drop(std::mem::take(&mut self.channel));
+        std::mem::forget(self);
+        id
     }
 }
 
