@@ -69,6 +69,17 @@ impl ReplySender {
             ReplySender::Sync(_) => unreachable!(),
         }
     }
+
+    /// Wraps a raw backing file ID
+    pub(crate) unsafe fn wrap_backing(&self, id: u32) -> BackingId {
+        match self {
+            ReplySender::Channel(sender) => unsafe { sender.wrap_backing(id) },
+            #[cfg(test)]
+            ReplySender::Assert(_) => unreachable!(),
+            #[cfg(test)]
+            ReplySender::Sync(_) => unreachable!(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -335,6 +346,24 @@ impl ReplyOpen {
         self.reply.sender.as_ref().unwrap().open_backing(fd.as_fd())
     }
 
+    /// Wraps a raw FUSE `backing_id` value, returning a `BackingId`. Once you have the backing ID,
+    /// you can pass it as the 3rd parameter of [`ReplyOpen::opened_passthrough()`]. This is done in
+    /// two separate steps because it may make sense to reuse backing IDs (to avoid having to
+    /// repeatedly reopen the underlying file or potentially keep thousands of fds open).
+    ///
+    /// This function takes ownership of the given backing ID value, automatically closing it once
+    /// the returned `BackingId` is dropped. You may reobtain ownership of the backing ID by calling
+    /// [`BackingId::into_raw()`].
+    ///
+    /// # Safety
+    ///
+    /// The given ID must be open and belong to this FUSE session, and may not be closed while the
+    /// returned `BackingId` instance is still live.
+    pub unsafe fn wrap_backing(&self, id: u32) -> BackingId {
+        // TODO: assert passthrough capability is enabled.
+        unsafe { self.reply.sender.as_ref().unwrap().wrap_backing(id) }
+    }
+
     /// Reply to a request with an opened backing id. Call [`ReplyOpen::open_backing()`]
     /// to get one of these.
     pub fn opened_passthrough(self, fh: ll::FileHandle, flags: FopenFlags, backing_id: &BackingId) {
@@ -472,6 +501,24 @@ impl ReplyCreate {
     /// repeatedly reopen the underlying file or potentially keep thousands of fds open).
     pub fn open_backing(&self, fd: impl std::os::fd::AsFd) -> std::io::Result<BackingId> {
         self.reply.sender.as_ref().unwrap().open_backing(fd.as_fd())
+    }
+
+    /// Wraps a raw FUSE `backing_id` value, returning a `BackingId`. Once you have the backing ID,
+    /// you can pass it as the 3rd parameter of [`ReplyOpen::opened_passthrough()`]. This is done in
+    /// two separate steps because it may make sense to reuse backing IDs (to avoid having to
+    /// repeatedly reopen the underlying file or potentially keep thousands of fds open).
+    ///
+    /// This function takes ownership of the given backing ID value, automatically closing it once
+    /// the returned `BackingId` is dropped. You may reobtain ownership of the backing ID by calling
+    /// [`BackingId::into_raw()`].
+    ///
+    /// # Safety
+    ///
+    /// The given ID must be open and belong to this FUSE session, and may not be closed while the
+    /// returned `BackingId` instance is still live.
+    pub unsafe fn wrap_backing(&self, id: u32) -> BackingId {
+        // TODO: assert passthrough capability is enabled.
+        unsafe { self.reply.sender.as_ref().unwrap().wrap_backing(id) }
     }
 
     /// Reply to a request with an opened backing id. Call `ReplyCreate::open_backing()` to get one of
