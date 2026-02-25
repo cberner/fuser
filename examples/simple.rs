@@ -73,9 +73,7 @@ struct Args {
     #[clap(long, default_value = "/tmp/fuser")]
     data_dir: String,
 
-    // TODO: make positional like other examples.
     /// Act as a client, and mount FUSE at given path
-    #[clap(long, default_value = "")]
     mount_point: String,
 
     /// Mount FUSE with direct IO
