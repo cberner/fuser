@@ -339,8 +339,7 @@ impl ReplyOpen {
 
     /// Registers a fd for passthrough, returning a `BackingId`.  Once you have the backing ID,
     /// you can pass it as the 3rd parameter of [`ReplyOpen::opened_passthrough()`]. This is done in
-    /// two separate steps because it may make sense to reuse backing IDs (to avoid having to
-    /// repeatedly reopen the underlying file or potentially keep thousands of fds open).
+    /// two separate steps because you must reuse backing IDs for the same inode for all open file handles.
     pub fn open_backing(&self, fd: impl std::os::fd::AsFd) -> std::io::Result<BackingId> {
         // TODO: assert passthrough capability is enabled.
         self.reply.sender.as_ref().unwrap().open_backing(fd.as_fd())
@@ -348,8 +347,7 @@ impl ReplyOpen {
 
     /// Wraps a raw FUSE `backing_id` value, returning a `BackingId`. Once you have the backing ID,
     /// you can pass it as the 3rd parameter of [`ReplyOpen::opened_passthrough()`]. This is done in
-    /// two separate steps because it may make sense to reuse backing IDs (to avoid having to
-    /// repeatedly reopen the underlying file or potentially keep thousands of fds open).
+    /// two separate steps because you must reuse backing IDs for the same inode for all open file handles.
     ///
     /// This function takes ownership of the given backing ID value, automatically closing it once
     /// the returned `BackingId` is dropped. You may reobtain ownership of the backing ID by calling
@@ -366,6 +364,9 @@ impl ReplyOpen {
 
     /// Reply to a request with an opened backing id. Call [`ReplyOpen::open_backing()`]
     /// to get one of these.
+    ///
+    /// Note that you must reuse the given `BackingId` for all future [`ReplyOpen::opened_passthrough()`]
+    /// invocations as long as the passed file handle stays open!
     pub fn opened_passthrough(self, fh: ll::FileHandle, flags: FopenFlags, backing_id: &BackingId) {
         // TODO: assert passthrough capability is enabled.
         let flags = flags | FopenFlags::FOPEN_PASSTHROUGH;
@@ -497,16 +498,14 @@ impl ReplyCreate {
 
     /// Registers a fd for passthrough, returning a `BackingId`.  Once you have the backing ID,
     /// you can pass it as the 6th parameter of `ReplyCreate::created_passthrough()`.  This is done in
-    /// two separate steps because it may make sense to reuse backing IDs (to avoid having to
-    /// repeatedly reopen the underlying file or potentially keep thousands of fds open).
+    /// two separate steps because you must reuse backing IDs for the same inode for all open file handles.
     pub fn open_backing(&self, fd: impl std::os::fd::AsFd) -> std::io::Result<BackingId> {
         self.reply.sender.as_ref().unwrap().open_backing(fd.as_fd())
     }
 
     /// Wraps a raw FUSE `backing_id` value, returning a `BackingId`. Once you have the backing ID,
-    /// you can pass it as the 3rd parameter of [`ReplyOpen::opened_passthrough()`]. This is done in
-    /// two separate steps because it may make sense to reuse backing IDs (to avoid having to
-    /// repeatedly reopen the underlying file or potentially keep thousands of fds open).
+    /// you can pass it as the 3rd parameter of [`ReplyCreate::created_passthrough()`]. This is done in
+    /// two separate steps because you must reuse backing IDs for the same inode for all open file handles.
     ///
     /// This function takes ownership of the given backing ID value, automatically closing it once
     /// the returned `BackingId` is dropped. You may reobtain ownership of the backing ID by calling
@@ -521,8 +520,11 @@ impl ReplyCreate {
         unsafe { self.reply.sender.as_ref().unwrap().wrap_backing(id) }
     }
 
-    /// Reply to a request with an opened backing id. Call `ReplyCreate::open_backing()` to get one of
+    /// Reply to a request with an opened backing id. Call [`ReplyCreate::open_backing()`] to get one of
     /// these.
+    ///
+    /// Note that you must reuse the given `BackingId` for all future [`ReplyOpen::opened_passthrough()`]
+    /// invocations as long as the passed file handle stays open!
     pub fn created_passthrough(
         self,
         ttl: &Duration,
