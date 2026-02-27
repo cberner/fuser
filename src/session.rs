@@ -41,6 +41,7 @@ use crate::ll::flags::init_flags::InitFlags;
 use crate::ll::fuse_abi as abi;
 use crate::mnt::Mount;
 use crate::mnt::mount_options::Config;
+use crate::mnt::mount_options::check_option_conflicts;
 use crate::notify::Notifier;
 use crate::read_buf::FuseReadBuf;
 use crate::reply::Reply;
@@ -155,6 +156,8 @@ impl<FS: Filesystem> Session<FS> {
         mountpoint: P,
         options: &Config,
     ) -> io::Result<Session<FS>> {
+        check_option_conflicts(options)?;
+
         let mountpoint = mountpoint.as_ref();
         info!("Mounting {}", mountpoint.display());
         // If AutoUnmount is requested, but not AllowRoot or AllowOther, return an error
@@ -240,7 +243,7 @@ impl<FS: Filesystem> Session<FS> {
     /// may run concurrent by spawning threads.
     /// # Errors
     /// Returns any final error when the session comes to an end.
-    pub(crate) fn run(self) -> io::Result<()> {
+    pub fn run(self) -> io::Result<()> {
         let Session {
             filesystem,
             ch,

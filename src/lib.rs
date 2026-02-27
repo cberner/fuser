@@ -49,7 +49,6 @@ pub use crate::ll::request::LockOwner;
 pub use crate::ll::request::Version;
 pub use crate::mnt::mount_options::Config;
 pub use crate::mnt::mount_options::MountOption;
-use crate::mnt::mount_options::check_option_conflicts;
 pub use crate::notify::Notifier;
 pub use crate::notify::PollHandle;
 pub use crate::notify::PollNotifier;
@@ -1054,8 +1053,7 @@ pub fn mount<FS: Filesystem, P: AsRef<Path>>(
     mountpoint: P,
     options: &Config,
 ) -> io::Result<()> {
-    check_option_conflicts(options)?;
-    Session::new(filesystem, mountpoint.as_ref(), options).and_then(|se| se.run())
+    Session::new(filesystem, mountpoint.as_ref(), options).and_then(session::Session::run)
 }
 
 /// Mount the given filesystem to the given mountpoint. This function spawns
@@ -1072,6 +1070,5 @@ pub fn spawn_mount<'a, FS: Filesystem + Send + 'static + 'a, P: AsRef<Path>>(
     mountpoint: P,
     options: &Config,
 ) -> io::Result<BackgroundSession> {
-    check_option_conflicts(options)?;
     Session::new(filesystem, mountpoint.as_ref(), options).and_then(session::Session::spawn)
 }
