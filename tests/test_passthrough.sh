@@ -2,8 +2,8 @@
 
 # Run like:
 #
-#   cargo build --example passthrough
-#   sudo tests/test_passthrough.sh target/debug/examples/passthrough
+#   cargo build --example passthrough[_fork]
+#   sudo tests/test_passthrough.sh target/debug/examples/passthrough[_fork]
 
 set -eux
 
@@ -24,7 +24,7 @@ if [ "$(id -u)" != 0 ]; then
 fi
 
 mnt="$(mktemp -d)"
-trap 'set +e; umount "${mnt}"; wait %1; rmdir "${mnt}"' TERM INT EXIT
+trap 'set +e; umount "${mnt}" && wait %1 && rmdir "${mnt}"' TERM INT EXIT
 sudo "${examples_passthrough}" --auto-unmount "${mnt}" &
 
 for x in $(seq 10); do

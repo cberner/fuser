@@ -85,3 +85,6 @@ name = "ioctl"
 
 [[example]]
 name = "passthrough"
+
+[[example]]
+name = "passthrough_fork"

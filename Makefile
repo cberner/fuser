@@ -63,8 +63,9 @@ mount_tests:
 	 fuser:mount_tests_libfuse3 bash -c "cd /code/fuser && cargo run -p fuser-tests -- linux-mount-libfuse3"
 
 test_passthrough:
-	cargo build --example passthrough
+	cargo build --example passthrough --example passthrough_fork
 	sudo tests/test_passthrough.sh target/debug/examples/passthrough
+	sudo tests/test_passthrough.sh target/debug/examples/passthrough_fork
 
 test: pre mount_tests pjdfs_tests xfstests
 	cargo test
