@@ -1,4 +1,2 @@
-group_imports       = "StdExternalCrate"
-imports_granularity = "Item"
 max_width           = 100
 style_edition       = "2024"
