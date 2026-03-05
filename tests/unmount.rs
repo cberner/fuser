@@ -15,7 +15,7 @@ fn should_prompt_unmount_retry_while_file_is_open_without_autounmount() {
     let mut cfg = Config::default();
     cfg.acl = SessionACL::RootAndOwner;
     cfg.n_threads = Some(2);
-    let session = fuser::spawn_mount2(HelloFS, &mountpoint, &cfg).unwrap();
+    let session = fuser::spawn_mount(HelloFS, &mountpoint, &cfg).unwrap();
     let hello_file = mountpoint.path().join("hello.txt");
 
     let (handle_open_done_tx, handle_open_done_rx) = std::sync::mpsc::channel::<()>();
@@ -67,7 +67,7 @@ fn should_prompt_unmount_retry_while_file_is_open_with_autounmount() {
     cfg.acl = SessionACL::RootAndOwner;
     cfg.n_threads = Some(2);
     cfg.mount_options.push(MountOption::AutoUnmount);
-    let session = fuser::spawn_mount2(HelloFS, &mountpoint, &cfg).unwrap();
+    let session = fuser::spawn_mount(HelloFS, &mountpoint, &cfg).unwrap();
     let hello_file = mountpoint.path().join("hello.txt");
 
     let (handle_open_done_tx, handle_open_done_rx) = std::sync::mpsc::channel::<()>();
