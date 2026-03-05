@@ -220,5 +220,5 @@ fn main() {
             .collect(),
         next_thread_index: AtomicUsize::new(0),
     };
-    fuser::mount2(fs, &args.common_args.mount_point, &cfg).unwrap();
+    fuser::mount(fs, &args.common_args.mount_point, &cfg).unwrap();
 }

@@ -201,5 +201,5 @@ fn main() {
 
     let cfg = args.common_args.config();
     let fs = FiocFS::new();
-    fuser::mount2(fs, &args.common_args.mount_point, &cfg).unwrap();
+    fuser::mount(fs, &args.common_args.mount_point, &cfg).unwrap();
 }

@@ -1510,7 +1510,7 @@ impl Filesystem for SimpleFS {
         _req: &Request,
         ino: INodeNo,
         fh: FileHandle,
-        offset: i64,
+        offset: u64,
         data: &[u8],
         _write_flags: WriteFlags,
         _flags: OpenFlags,
@@ -1518,7 +1518,6 @@ impl Filesystem for SimpleFS {
         reply: ReplyWrite,
     ) {
         debug!("write() called with {:?} size={:?}", ino, data.len());
-        assert!(offset >= 0);
         if !Self::check_file_handle_write(fh.into()) {
             reply.error(Errno::EACCES);
             return;
@@ -1527,14 +1526,22 @@ impl Filesystem for SimpleFS {
         let path = self.content_path(ino);
         match OpenOptions::new().write(true).open(path) {
             Ok(mut file) => {
-                file.seek(SeekFrom::Start(offset as u64)).unwrap();
+                file.seek(SeekFrom::Start(offset)).unwrap();
                 file.write_all(data).unwrap();
 
                 let mut attrs = self.get_inode(ino).unwrap();
                 attrs.last_metadata_changed = time_now();
                 attrs.last_modified = time_now();
-                if data.len() + offset as usize > attrs.size as usize {
-                    attrs.size = (data.len() + offset as usize) as u64;
+                let Ok(offset_usize): Result<usize, _> = offset.try_into() else {
+                    reply.error(Errno::EFBIG);
+                    return;
+                };
+                let Some(end_offset) = data.len().checked_add(offset_usize) else {
+                    reply.error(Errno::EFBIG);
+                    return;
+                };
+                if end_offset > attrs.size as usize {
+                    attrs.size = end_offset as u64;
                 }
                 // if flags & FUSE_WRITE_KILL_PRIV as i32 != 0 {
                 //     clear_suid_sgid(&mut attrs);
@@ -1938,10 +1945,10 @@ impl Filesystem for SimpleFS {
         _req: &Request,
         src_inode: INodeNo,
         src_fh: FileHandle,
-        src_offset: i64,
+        src_offset: u64,
         dest_inode: INodeNo,
         dest_fh: FileHandle,
-        dest_offset: i64,
+        dest_offset: u64,
         size: u64,
         _flags: fuser::CopyFileRangeFlags,
         reply: ReplyWrite,
@@ -1963,22 +1970,30 @@ impl Filesystem for SimpleFS {
             Ok(file) => {
                 let file_size = file.metadata().unwrap().len();
                 // Could underflow if file length is less than local_start
-                let read_size = min(size, file_size.saturating_sub(src_offset as u64));
+                let read_size = min(size, file_size.saturating_sub(src_offset));
 
                 let mut data = vec![0; read_size as usize];
-                file.read_exact_at(&mut data, src_offset as u64).unwrap();
+                file.read_exact_at(&mut data, src_offset).unwrap();
 
                 let dest_path = self.content_path(dest_inode);
                 match OpenOptions::new().write(true).open(dest_path) {
                     Ok(mut file) => {
-                        file.seek(SeekFrom::Start(dest_offset as u64)).unwrap();
+                        file.seek(SeekFrom::Start(dest_offset)).unwrap();
                         file.write_all(&data).unwrap();
 
                         let mut attrs = self.get_inode(dest_inode).unwrap();
                         attrs.last_metadata_changed = time_now();
                         attrs.last_modified = time_now();
-                        if data.len() + dest_offset as usize > attrs.size as usize {
-                            attrs.size = (data.len() + dest_offset as usize) as u64;
+                        let Ok(dest_offset_usize): Result<usize, _> = dest_offset.try_into() else {
+                            reply.error(Errno::EFBIG);
+                            return;
+                        };
+                        let Some(end_offset) = data.len().checked_add(dest_offset_usize) else {
+                            reply.error(Errno::EFBIG);
+                            return;
+                        };
+                        if end_offset > attrs.size as usize {
+                            attrs.size = end_offset as u64;
                         }
                         self.write_inode(&attrs);
 
@@ -2185,7 +2200,7 @@ fn main() {
     }
 
     cfg.n_threads = Some(args.n_threads);
-    let result = fuser::mount2(
+    let result = fuser::mount(
         SimpleFS::new(args.data_dir, args.direct_io, args.suid),
         &args.mount_point,
         &cfg,
