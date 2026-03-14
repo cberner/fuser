@@ -84,8 +84,6 @@ mod access_flags;
 mod bsd_file_flags;
 mod channel;
 mod dev_fuse;
-/// Experimental APIs
-#[cfg(feature = "experimental")]
 pub mod experimental;
 mod forget_one;
 mod ll;

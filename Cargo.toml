@@ -53,7 +53,7 @@ pkg-config = "0.3.14"
 
 [features]
 default = []
-experimental = ["async-trait", "tokio"]
+experimental-async = ["async-trait", "tokio"]
 libfuse = []
 libfuse2 = ["libfuse"]
 libfuse3 = ["libfuse"]
@@ -66,7 +66,7 @@ macos-no-mount = []
 
 [[example]]
 name = "async_hello"
-required-features = ["experimental"]
+required-features = ["experimental-async"]
 
 [[example]]
 name = "poll"

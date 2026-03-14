@@ -638,7 +638,7 @@ pub(crate) struct fuse_fallocate_in {
 }
 
 #[repr(C)]
-#[derive(Debug, FromBytes, KnownLayout, Immutable)]
+#[derive(Debug, Clone, FromBytes, KnownLayout, Immutable)]
 pub(crate) struct fuse_in_header {
     pub(crate) len: u32,
     pub(crate) opcode: u32,

@@ -26,24 +26,29 @@ pub(crate) async fn run_experimental_tests(libfuse: Libfuse) -> anyhow::Result<(
     fuse_conf_write_user_allow_other().await?;
 
     // Tests without libfuse feature (pure Rust implementation)
-    run_test(&[Feature::Experimental], Unmount::Manual, Fusermount::False).await?;
     run_test(
-        &[Feature::Experimental],
-        Unmount::Auto,
-        libfuse.fusermount(),
-    )
-    .await?;
-    test_no_user_allow_other(&[Feature::Experimental], &libfuse).await?;
-
-    // Tests with libfuse
-    run_test(
-        &[libfuse.feature(), Feature::Experimental],
+        &[Feature::ExperimentalAsync],
         Unmount::Manual,
         Fusermount::False,
     )
     .await?;
     run_test(
-        &[libfuse.feature(), Feature::Experimental],
+        &[Feature::ExperimentalAsync],
+        Unmount::Auto,
+        libfuse.fusermount(),
+    )
+    .await?;
+    test_no_user_allow_other(&[Feature::ExperimentalAsync], &libfuse).await?;
+
+    // Tests with libfuse
+    run_test(
+        &[libfuse.feature(), Feature::ExperimentalAsync],
+        Unmount::Manual,
+        Fusermount::False,
+    )
+    .await?;
+    run_test(
+        &[libfuse.feature(), Feature::ExperimentalAsync],
         Unmount::Auto,
         libfuse.fusermount(),
     )
@@ -193,8 +198,11 @@ async fn run_allow_root_test() -> anyhow::Result<()> {
     let mount_dir = CanonicalTempDir::for_user("fusertest1").await?;
     eprintln!("Mount dir: {}", mount_dir.path().display());
 
-    let async_hello_exe =
-        cargo_build_example("async_hello", &[Feature::Libfuse3, Feature::Experimental]).await?;
+    let async_hello_exe = cargo_build_example(
+        "async_hello",
+        &[Feature::Libfuse3, Feature::ExperimentalAsync],
+    )
+    .await?;
 
     // Run the async_hello example as fusertest1 with --allow-root
     let run_command = format!(

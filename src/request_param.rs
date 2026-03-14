@@ -5,7 +5,7 @@ use crate::ll;
 use crate::ll::fuse_abi::fuse_in_header;
 
 /// FUSE request parameters.
-#[derive(Debug, RefCastCustom)]
+#[derive(Debug, RefCastCustom, Clone)]
 #[repr(transparent)]
 pub struct Request {
     header: fuse_in_header,

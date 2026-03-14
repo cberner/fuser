@@ -6,7 +6,7 @@ use std::fmt;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Feature {
     /// Experimental async API.
-    Experimental,
+    ExperimentalAsync,
     /// Use libfuse2 for mounting.
     Libfuse2,
     /// Use libfuse3 for mounting.
@@ -17,7 +17,7 @@ impl Feature {
     /// Returns the feature name as used in Cargo.toml.
     fn as_str(&self) -> &'static str {
         match self {
-            Feature::Experimental => "experimental",
+            Feature::ExperimentalAsync => "experimental-async",
             Feature::Libfuse2 => "libfuse2",
             Feature::Libfuse3 => "libfuse3",
         }
