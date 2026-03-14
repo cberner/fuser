@@ -49,7 +49,7 @@ impl<T: AsyncFilesystem> TokioAdapter<T> {
 }
 
 /// Helper macro to call an async method on the inner filesystem, this is just a thin wrapper around
-/// `self.wrap()`, but it makes the code a lot cleaner and easier to maintain.
+/// `self.wrap()`, to reduce boilerplate in the `Filesystem` implementation for `TokioAdapter`.
 macro_rules! call_fut {
     ($self:ident, $req:ident, $method:ident ( $($arg:expr),* )) => {{
         let inner = $self.inner.clone();
@@ -60,9 +60,7 @@ macro_rules! call_fut {
 
 /// Adapter to allow running an [`AsyncFilesystem`] with tokio's runtime. Each method just needs to wrap a
 /// cooresponding method on the inner filesystem with `self.wrap()`. This will execute the async method of the inner
-/// filesystem on the tokio runtime, and allow you to write your filesystem using async/await. Currently because
-/// the FUSE calls are blocking, we have to spawn a blocking task for each reply, but down the road we may be
-/// implement an Async File Descriptor to avoid this.
+/// filesystem on the tokio runtime, and allow you to write your filesystem using async/await.
 impl<T: AsyncFilesystem + Send + Sync + 'static> Filesystem for TokioAdapter<T> {
     fn lookup(&self, req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
         let name_owned = name.to_owned();
@@ -103,10 +101,9 @@ impl<T: AsyncFilesystem + Send + Sync + 'static> Filesystem for TokioAdapter<T> 
     }
 }
 
-/// Experimental Async API, this allows you to write your filesystem using async/await, with the only blocking being
-/// the actual FUSE calls. This is still very much a work in progress, and may be removed or changed without
-/// a major version bump. This can be mapped 1:1 to the sync API, but each method will need to be tested thoroughly
-/// as time goes on.
+/// Experimental Async API, this allows you to write your filesystem using async/await, This is still very much a work
+/// in progress, and may be removed or changed without a major version bump. This can be mapped 1:1 to the sync API,
+/// but each method will need to be tested thoroughly as time goes on.
 #[async_trait::async_trait]
 pub trait AsyncFilesystem: Send + Sync + 'static {
     /// Look up a directory entry by name and get its attributes.
