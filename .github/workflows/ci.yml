@@ -35,6 +35,14 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-compile-v1-${{ matrix.libfuse }}-${{ matrix.features }}-${{ hashFiles('**/Cargo.toml', '.github/workflows/*.yml') }}
 
+      - name: Non ASCII characters
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          if grep -P -n "[^\x00-\x7F]" -r --include="*.rs" --include="*.toml" .; then
+          echo "Non-ASCII characters detected"
+          exit 1
+          fi
+
       - name: Install packages
         run: |
           sudo apt update
