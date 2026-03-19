@@ -244,7 +244,43 @@ impl<T: AsyncFilesystem + Send + Sync + 'static> Filesystem for TokioAdapter<T> 
             }
         });
     }
-}
+
+    fn flush(
+            &self,
+            _req: &Request,
+            _ino: INodeNo,
+            _fh: FileHandle,
+            _lock_owner: LockOwner,
+            reply: crate::ReplyEmpty,
+        ) {
+            reply.error(Errno::ENOSYS);
+    }
+
+    fn ioctl(
+            &self,
+            req: &Request,
+            ino: INodeNo,
+            fh: FileHandle,
+            flags: crate::IoctlFlags,
+            cmd: u32,
+            in_data: &[u8],
+            out_size: u32,
+            reply: crate::ReplyIoctl,
+        
+        ) {
+            reply.error(Errno::ENOSYS);
+        }
+
+        fn getxattr(&self, _req: &Request, ino: INodeNo, name: &OsStr, size: u32, reply: crate::ReplyXattr) {
+            reply.error(Errno::ENOSYS);
+        }
+
+        fn listxattr(&self, _req: &Request, ino: INodeNo, size: u32, reply: crate::ReplyXattr) {
+            reply.error(Errno::ENOSYS);
+        }
+
+    }
+
 
 /// Experimental async API. Expect this to change in the future
 #[async_trait::async_trait]
