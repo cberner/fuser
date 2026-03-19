@@ -121,22 +121,53 @@ impl GetAttrResponse {
     }
 }
 
+#[derive(Debug)]
+enum Runtime {
+    /// Use the runtime provided by the user
+    External(tokio::runtime::Handle),
+    /// Use an internal runtime
+    Internal(tokio::runtime::Runtime),
+}
+
 /// Adapter to allow running an [`AsyncFilesystem`] with tokio's runtime.
 #[derive(Debug)]
 pub struct TokioAdapter<T: AsyncFilesystem> {
     inner: Arc<T>,
-    runtime: tokio::runtime::Runtime,
+    runtime: Runtime,
 }
 
 impl<T: AsyncFilesystem> TokioAdapter<T> {
+
+    /// Create a new adapter with an internal tokio runtime.
     pub fn new(inner: T) -> Self {
         Self {
             inner: Arc::new(inner),
-            runtime: tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-                .unwrap(),
+            runtime: Runtime::Internal(
+                tokio::runtime::Builder::new_multi_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap(),
+            ),
         }
+    }
+
+    /// Use an existing tokio runtime. This is useful if you want to run the filesystem 
+    /// in an existing application that already uses a tokio runtime.
+    pub fn with_runtime(inner: T, runtime_handle: tokio::runtime::Handle) -> Self {
+        Self {
+            inner: Arc::new(inner),
+            runtime: Runtime::External(runtime_handle),
+        }
+    }
+
+    fn spawn<F>(&self, fut: F)
+    where
+        F: std::future::Future<Output = ()> + Send + 'static,
+    {
+        match &self.runtime {
+            Runtime::External(handle) => handle.spawn(fut),
+            Runtime::Internal(rt) => rt.spawn(fut),
+        };
     }
 }
 
@@ -145,7 +176,7 @@ impl<T: AsyncFilesystem + Send + Sync + 'static> Filesystem for TokioAdapter<T> 
         let context: RequestContext = req.into();
         let name = name.to_os_string();
         let inner = self.inner.clone();
-        self.runtime.spawn(async move {
+        self.spawn(async move {
             match inner.lookup(&context, parent, &name).await {
                 Ok(LookupResponse {
                     ttl,
@@ -160,7 +191,7 @@ impl<T: AsyncFilesystem + Send + Sync + 'static> Filesystem for TokioAdapter<T> 
     fn getattr(&self, req: &Request, ino: INodeNo, fh: Option<FileHandle>, reply: ReplyAttr) {
         let context: RequestContext = req.into();
         let inner = self.inner.clone();
-        self.runtime.spawn(async move {
+        self.spawn(async move {
             match inner.getattr(&context, ino, fh).await {
                 Ok(GetAttrResponse { ttl, attr }) => reply.attr(&ttl, &attr),
                 Err(e) => reply.error(e),
@@ -181,7 +212,7 @@ impl<T: AsyncFilesystem + Send + Sync + 'static> Filesystem for TokioAdapter<T> 
     ) {
         let context: RequestContext = req.into();
         let inner = self.inner.clone();
-        self.runtime.spawn(async move {
+        self.spawn(async move {
             let mut buf = vec![];
             match inner
                 .read(&context, ino, fh, offset, size, flags, lock_owner, &mut buf)
@@ -203,7 +234,7 @@ impl<T: AsyncFilesystem + Send + Sync + 'static> Filesystem for TokioAdapter<T> 
     ) {
         let context: RequestContext = req.into();
         let inner = self.inner.clone();
-        self.runtime.spawn(async move {
+        self.spawn(async move {
             let builder = DirEntListBuilder {
                 entries: &mut reply,
             };
