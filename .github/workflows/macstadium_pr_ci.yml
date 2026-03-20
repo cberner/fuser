@@ -1,7 +1,6 @@
 name: MacStadium CI
 
-on:
-  pull_request:
+on: []
 
 permissions:
   contents: read

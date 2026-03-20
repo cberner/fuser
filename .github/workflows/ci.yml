@@ -1,10 +1,6 @@
 name: CI
 
-on:
-  pull_request:
-  push: # required for actions/cache to work
-    branches:
-      - master
+on: []
 
 jobs:
   compile:

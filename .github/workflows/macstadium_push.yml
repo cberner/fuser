@@ -1,9 +1,6 @@
 name: MacStadium CI
 
-on:
-  push:
-    branches:
-      - master
+on: []
 
 permissions:
   contents: read
