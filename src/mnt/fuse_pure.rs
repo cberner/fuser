@@ -103,7 +103,7 @@ impl MountImpl {
     }
 }
 
-fn fuse_mount_pure(
+pub(super) fn fuse_mount_pure(
     mountpoint: &OsStr,
     options: &[MountOption],
     acl: SessionACL,
@@ -129,7 +129,7 @@ fn fuse_mount_pure(
     fuse_mount_fusermount(mountpoint, options, acl)
 }
 
-fn fuse_unmount_pure(mountpoint: &CStr) {
+pub(super) fn fuse_unmount_pure(mountpoint: &CStr) {
     #[cfg(target_os = "linux")]
     {
         if nix::mount::umount2(mountpoint, nix::mount::MntFlags::MNT_DETACH).is_ok() {

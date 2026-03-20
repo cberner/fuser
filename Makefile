@@ -3,7 +3,7 @@ INTERACTIVE ?= i
 
 
 build: pre
-	cargo build --examples --features=experimental
+	RUSTFLAGS="-A unused" cargo build --examples --features=async,experimental
 
 format:
 	cargo fmt --all

@@ -7,6 +7,10 @@ fn main() {
     let target_os =
         std::env::var("CARGO_CFG_TARGET_OS").expect("CARGO_CFG_TARGET_OS should be set");
 
+    if cfg!(feature = "async") && !matches!(target_os.as_str(), "linux" | "macos") {
+        panic!("async mount implementation is only supported on Linux and macOS");
+    }
+
     if matches!(
         target_os.as_str(),
         "linux" | "freebsd" | "dragonfly" | "openbsd" | "netbsd"

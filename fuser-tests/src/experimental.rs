@@ -91,21 +91,22 @@ async fn run_test_inner(
 
     eprintln!("Mount dir: {}", mount_path.display());
 
-    let async_hello_exe = cargo_build_example("async_hello", features).await?;
+    let async_hello_experimental_exe =
+        cargo_build_example("async_hello_experimental", features).await?;
 
-    // Run the async_hello example
-    eprintln!("Starting async_hello filesystem...");
+    // Run the async_hello_experimental example
+    eprintln!("Starting async_hello_experimental filesystem...");
     let mut run_args = vec![mount_path_str];
     if matches!(unmount, Unmount::Auto) {
         run_args.push("--auto-unmount");
     }
 
-    let fuse_process = Command::new(&async_hello_exe)
+    let fuse_process = Command::new(&async_hello_experimental_exe)
         .args(&run_args)
         .env(Fusermount::ENV_VAR, fusermount.as_path())
         .kill_on_drop(true)
         .spawn()
-        .context("Failed to start async_hello example")?;
+        .context("Failed to start async_hello_experimental example")?;
 
     wait_for_fuse_mount(mount_dir.path()).await?;
 
@@ -193,20 +194,23 @@ async fn run_allow_root_test() -> anyhow::Result<()> {
     let mount_dir = CanonicalTempDir::for_user("fusertest1").await?;
     eprintln!("Mount dir: {}", mount_dir.path().display());
 
-    let async_hello_exe =
-        cargo_build_example("async_hello", &[Feature::Libfuse3, Feature::Experimental]).await?;
+    let async_hello_experimental_exe = cargo_build_example(
+        "async_hello_experimental",
+        &[Feature::Libfuse3, Feature::Experimental],
+    )
+    .await?;
 
-    // Run the async_hello example as fusertest1 with --allow-root
+    // Run the async_hello_experimental example as fusertest1 with --allow-root
     let run_command = format!(
         "{} {} --allow-root",
-        async_hello_exe.display(),
+        async_hello_experimental_exe.display(),
         mount_dir.path().display()
     );
     let mut fuse_process = Command::new("su")
         .args(["fusertest1", "-c", &run_command])
         .kill_on_drop(true)
         .spawn()
-        .context("Failed to start async_hello example")?;
+        .context("Failed to start async_hello_experimental example")?;
 
     wait_for_fuse_mount(mount_dir.path()).await?;
 

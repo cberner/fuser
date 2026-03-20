@@ -83,14 +83,21 @@ pub use crate::session::SessionUnmounter;
 mod access_flags;
 mod bsd_file_flags;
 mod channel;
+#[cfg(feature = "async")]
+mod channel_async;
 mod dev_fuse;
-/// Experimental APIs
-#[cfg(feature = "experimental")]
-pub mod experimental;
+#[cfg(feature = "async")]
+mod dev_fuse_async;
 mod forget_one;
+#[cfg(feature = "async")]
+pub mod lib_async;
 mod ll;
 mod mnt;
 mod notify;
+// #[cfg(feature = "async")]
+// mod notify_async;
+#[cfg(feature = "experimental")]
+pub mod experimental;
 mod open_flags;
 mod passthrough;
 mod poll_events;
@@ -100,6 +107,8 @@ mod reply;
 mod request;
 mod request_param;
 mod session;
+// #[cfg(feature = "async")]
+// mod session_async;
 mod time;
 
 /// We generally support async reads
