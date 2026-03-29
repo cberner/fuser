@@ -58,6 +58,7 @@ pub(crate) struct MountImpl {
     auto_unmount_socket: Option<UnixStream>,
     fuse_device: Arc<DevFuse>,
 }
+
 impl MountImpl {
     pub(crate) fn new(
         mountpoint: &Path,
@@ -488,7 +489,7 @@ fn fuse_mount_sys(
 
     match result {
         Ok(()) => Ok(Some(file)),
-        Err(nix::errno::Errno::EPERM) => Ok(None), // Retry with fusermount
+        Err(nix::errno::Errno::EPERM) | Err(nix::errno::Errno::EINVAL) => Ok(None), // Retry with fusermount
         Err(e) => Err(Error::new(
             ErrorKind::Other,
             format!(

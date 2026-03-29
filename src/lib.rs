@@ -32,6 +32,8 @@ use serde::Serialize;
 pub use crate::access_flags::AccessFlags;
 pub use crate::bsd_file_flags::BsdFileFlags;
 use crate::forget_one::ForgetOne;
+#[cfg(feature = "async")]
+pub use crate::lib_async::{AsyncFilesystem, mount_async};
 pub use crate::ll::Errno;
 pub use crate::ll::Generation;
 pub use crate::ll::RequestId;
@@ -43,6 +45,8 @@ pub use crate::ll::flags::ioctl_flags::IoctlFlags;
 pub use crate::ll::flags::poll_flags::PollFlags;
 pub use crate::ll::flags::write_flags::WriteFlags;
 pub use crate::ll::fuse_abi::consts;
+#[cfg(feature = "async")]
+pub use crate::ll::reply_async;
 pub use crate::ll::request::FileHandle;
 pub use crate::ll::request::INodeNo;
 pub use crate::ll::request::LockOwner;
@@ -79,6 +83,8 @@ use crate::session::MAX_WRITE_SIZE;
 pub use crate::session::Session;
 pub use crate::session::SessionACL;
 pub use crate::session::SessionUnmounter;
+#[cfg(feature = "async")]
+pub use crate::session_async::{AsyncSession, AsyncSessionBuilder};
 
 mod access_flags;
 mod bsd_file_flags;
@@ -88,16 +94,14 @@ mod channel_async;
 mod dev_fuse;
 #[cfg(feature = "async")]
 mod dev_fuse_async;
+#[cfg(feature = "experimental")]
+pub mod experimental;
 mod forget_one;
 #[cfg(feature = "async")]
 pub mod lib_async;
 mod ll;
 mod mnt;
 mod notify;
-// #[cfg(feature = "async")]
-// mod notify_async;
-#[cfg(feature = "experimental")]
-pub mod experimental;
 mod open_flags;
 mod passthrough;
 mod poll_events;
@@ -107,8 +111,8 @@ mod reply;
 mod request;
 mod request_param;
 mod session;
-// #[cfg(feature = "async")]
-// mod session_async;
+#[cfg(feature = "async")]
+mod session_async;
 mod time;
 
 /// We generally support async reads

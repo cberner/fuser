@@ -1,4 +1,7 @@
+use crate::dev_fuse_async::set_nonblocking;
+use log::error;
 use std::os::fd::AsFd;
+use std::os::fd::AsRawFd;
 use std::os::fd::BorrowedFd;
 use std::sync::Arc;
 
@@ -47,13 +50,13 @@ impl AsyncChannel {
     /// - ENOENT: Operation interrupted. According to FUSE, this is safe to retry.
     /// - EINTR: Interrupted system call, retry.
     /// - EAGAIN: Explicitly instructed to try again.
-    pub(crate) async fn receive_retrying(&self, buffer: &mut [u8]) -> tokio::io::Result<usize> {
+    pub(crate) async fn receive_retrying(&self, buffer: &mut [u8]) -> Result<usize, Errno> {
         loop {
             match self.receive(buffer).await {
                 Ok(size) => return Ok(size),
                 Err(e) => match nix::errno::Errno::from_raw(e.raw_os_error().unwrap_or(0)) {
                     Errno::ENOENT | Errno::EINTR | Errno::EAGAIN => continue,
-                    _ => return Err(e),
+                    errno => return Err(errno),
                 },
             }
         }
@@ -78,8 +81,6 @@ impl AsyncChannel {
     #[cfg(target_os = "linux")]
     pub(crate) async fn clone_fd(&self) -> tokio::io::Result<AsyncChannel> {
         // FUSE_DEV_IOC_CLONE requires a fresh /dev/fuse fd as the target.
-
-        use std::os::fd::AsRawFd;
         let new_dev = AsyncDevFuse::open().await?;
         let mut source_fd = self.0.0.as_raw_fd() as u32;
 
@@ -89,6 +90,10 @@ impl AsyncChannel {
             crate::ll::ioctl::fuse_dev_ioc_clone(new_dev.as_raw_fd(), &mut source_fd)
                 .map_err(tokio::io::Error::from)?;
         }
+
+        // Set the new fd to non-blocking mode, which is required for async operation
+        set_nonblocking(new_dev.0.get_ref())
+            .map_err(|e| tokio::io::Error::new(e.kind(), format!("set_nonblocking: {e}")))?;
 
         Ok(AsyncChannel::new(Arc::new(new_dev)))
     }
@@ -104,8 +109,11 @@ impl AsyncChannelSender {
     pub(crate) async fn send(&self, bufs: &[std::io::IoSlice<'_>]) -> tokio::io::Result<()> {
         loop {
             let mut guard = self.0.0.writable().await?;
+
             match guard.try_io(|inner| {
-                nix::sys::uio::writev(inner.get_ref(), bufs).map_err(tokio::io::Error::from)
+                nix::sys::uio::writev(inner.get_ref(), bufs)
+                    .inspect_err(|e| error!("Error writing to FUSE device: {e:?}"))
+                    .map_err(tokio::io::Error::from)
             }) {
                 Ok(rc) => {
                     debug_assert_eq!(bufs.iter().map(|b| b.len()).sum::<usize>(), rc?);
@@ -114,13 +122,5 @@ impl AsyncChannelSender {
                 Err(_would_block) => continue,
             }
         }
-    }
-}
-
-/// Converts an [`tokio::io::Error`] into a [`nix::errno::Errno`], using the raw OS error code if available
-pub(crate) fn errno_from_io(err: tokio::io::Error) -> nix::errno::Errno {
-    match err.raw_os_error() {
-        Some(code) => nix::errno::Errno::from_raw(code),
-        None => nix::errno::Errno::EIO,
     }
 }

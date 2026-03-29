@@ -106,14 +106,11 @@ pub(crate) enum MountOptionGroup {
     Fusermount,
 }
 
-pub(crate) fn check_option_conflicts(options: &Config) -> Result<(), io::Error> {
+pub(crate) fn check_option_conflicts(config: &Config) -> Result<(), io::Error> {
+    let options = &config.mount_options;
     let mut options_set = HashSet::new();
-    options_set.extend(options.mount_options.iter().cloned());
-    let conflicting: HashSet<MountOption> = options
-        .mount_options
-        .iter()
-        .flat_map(conflicts_with)
-        .collect();
+    options_set.extend(options.iter().cloned());
+    let conflicting: HashSet<MountOption> = options.iter().flat_map(conflicts_with).collect();
     let intersection: Vec<MountOption> = conflicting.intersection(&options_set).cloned().collect();
     if intersection.is_empty() {
         Ok(())

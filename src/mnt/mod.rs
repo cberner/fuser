@@ -198,22 +198,15 @@ impl AsyncMount {
         acl: SessionACL,
     ) -> tokio::io::Result<Self> {
         self.mount_point = mountpoint.to_path_buf();
-        let uninit_mount = fuse_async_pure::AsyncMountImpl::new(mountpoint)?;
-        self.mount_impl = Some(uninit_mount.mount_impl(options, acl).await?);
-
-        return Ok(self);
-    }
-
-    /// Non-blocking unmount. Prefer this over [`Drop`] for async mounts, since [`Drop`] will block the
-    /// current thread.
-    pub(crate) async fn umount(mut self) -> tokio::io::Result<()> {
-        match self.mount_impl.take() {
-            Some(mut mount) => {
-                info!("Unmounting {}", self.mount_point.display());
-                mount.umount_impl().await
-            }
-            None => Ok(()),
-        }
+        let init_mount = fuse_async_pure::AsyncMountImpl::new(mountpoint)
+            .map_err(|e| tokio::io::Error::new(e.kind(), format!("AsyncMountImpl::new: {e}")))?;
+        self.mount_impl = Some(
+            init_mount
+                .mount_impl(options, acl)
+                .await
+                .map_err(|e| tokio::io::Error::new(e.kind(), format!("mount_impl: {e}")))?,
+        );
+        Ok(self)
     }
 
     /// Get a reference to the underlying [`AsyncDevFuse`]. This will return `None` if the filesystem is
@@ -225,8 +218,7 @@ impl AsyncMount {
 
 #[cfg(feature = "async")]
 impl Drop for AsyncMount {
-    /// RAII unmount. Note that this will block the current thread, so it's recommended to call
-    /// [`AsyncMount::umount`] explicitly instead of relying on this.
+    /// RAII unmount
     fn drop(&mut self) {
         // Mount was either unmounted explicitly, taken, or never mounted at all, so nothing to do.
         let Some(mount) = self.mount_impl.take() else {

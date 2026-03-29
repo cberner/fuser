@@ -56,9 +56,11 @@ impl AsyncMountImpl {
             fuse_pure::fuse_mount_pure(mountpoint.as_os_str(), &options, acl)
         })
         .await
-        .map_err(|_err| io::Error::other("blocking task panicked"))??;
+        .map_err(|_err| io::Error::other("blocking task panicked"))?
+        .map_err(|e| io::Error::new(e.kind(), format!("fuse_mount_pure: {e}")))?;
 
-        let async_device = AsyncDevFuse::from_file(device.0)?;
+        let async_device = AsyncDevFuse::from_file(device.0)
+            .map_err(|e| io::Error::new(e.kind(), format!("AsyncDevFuse::from_file: {e}")))?;
         let file = Arc::new(async_device);
         let (tx, rx) = tokio::sync::oneshot::channel();
 
@@ -71,6 +73,9 @@ impl AsyncMountImpl {
             .transpose()?;
         self.unmount_tx = Some(tx);
 
+        // Spawn a background task to wait for unmount signal and perform unmounting. This allows us to unmount
+        // from a sync context (i.e. drop) by sending a signal to this task, which will then perform
+        // the async unmounting logic.
         tokio::spawn(async {
             // Wait for unmount signal
             let Ok(mut mount) = rx.await else {

@@ -7,7 +7,11 @@ pub(crate) mod ioctl;
 pub(crate) mod ioslice_concat;
 pub(crate) mod notify;
 pub(crate) mod reply;
+#[cfg(feature = "async")]
+pub mod reply_async;
 pub(crate) mod request;
+#[cfg(feature = "async")]
+pub(crate) mod request_async;
 
 use std::num::NonZeroI32;
 use std::time::SystemTime;
@@ -261,6 +265,11 @@ impl From<std::io::Error> for Errno {
     fn from(err: std::io::Error) -> Self {
         let errno = err.raw_os_error().unwrap_or(0);
         Errno::from_i32(errno)
+    }
+}
+impl From<nix::errno::Errno> for Errno {
+    fn from(err: nix::errno::Errno) -> Self {
+        Errno::from_i32(err as i32)
     }
 }
 impl From<std::io::ErrorKind> for Errno {

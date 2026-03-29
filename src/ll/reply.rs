@@ -1,5 +1,7 @@
 #![allow(refining_impl_trait)]
 
+#[cfg(feature = "async")]
+use std::future::Future;
 use std::io::IoSlice;
 use std::os::unix::prelude::OsStrExt;
 use std::path::Path;
@@ -13,6 +15,8 @@ use zerocopy::IntoBytes;
 
 use crate::FileType;
 use crate::PollEvents;
+#[cfg(feature = "async")]
+use crate::channel_async::AsyncChannelSender;
 use crate::ll::Errno;
 use crate::ll::FileHandle;
 use crate::ll::Generation;
@@ -32,7 +36,7 @@ pub(crate) trait Response {
         None
     }
 
-    fn payload(&self) -> impl IosliceConcat;
+    fn payload(&self) -> impl IosliceConcat + Send;
 
     fn with_iovec<F: FnOnce(&[IoSlice<'_>]) -> T, T>(&self, unique: RequestId, f: F) -> T {
         let payload = self.payload();
@@ -46,6 +50,32 @@ pub(crate) trait Response {
         };
         let v = ([IoSlice::new(header.as_bytes())], payload);
         IosliceConcat::with_ioslice(&v, f)
+    }
+
+    #[cfg(feature = "async")]
+    fn send_reply<'a>(
+        &'a self,
+        sender: &'a AsyncChannelSender,
+        unique: RequestId,
+    ) -> impl Future<Output = Result<(), tokio::io::Error>> + Send + 'a
+    where
+        Self: Sync,
+    {
+        async move {
+            let payload = self.payload();
+            let payload_len = payload.sum_len();
+            let header = abi::fuse_out_header {
+                unique: unique.0,
+                error: self.errno().map_or(0, |e| -e.0.get()),
+                len: (size_of::<abi::fuse_out_header>() + payload_len)
+                    .try_into()
+                    .expect("Too much data"),
+            };
+            let mut iov = SmallVec::<[IoSlice<'_>; 4]>::new();
+            iov.push(IoSlice::new(header.as_bytes()));
+            iov.extend(payload.iter_slices());
+            sender.send(iov.as_slice()).await
+        }
     }
 }
 
@@ -86,6 +116,13 @@ pub(crate) struct ResponseStruct<S: IntoBytes + Immutable>(pub(crate) S);
 impl<S: IntoBytes + Immutable> Response for ResponseStruct<S> {
     fn payload(&self) -> [IoSlice<'_>; 1] {
         [IoSlice::new(self.0.as_bytes())]
+    }
+}
+
+#[cfg(feature = "async")]
+impl<S: IntoBytes + Immutable> IosliceConcat for ResponseStruct<S> {
+    fn iter_slices(&self) -> impl Iterator<Item = IoSlice<'_>> + '_ {
+        std::iter::once(IoSlice::new(self.0.as_bytes()))
     }
 }
 
@@ -459,6 +496,9 @@ impl DirEntList {
             typ: mode_from_kind_and_perm(ent.kind, 0) >> 12,
         };
         self.0.push([header.as_bytes(), name])
+    }
+    pub(crate) fn as_bytes(&self) -> &[u8] {
+        &self.0.buf
     }
 }
 
