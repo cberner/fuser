@@ -243,6 +243,33 @@ impl ReplyEntry {
         ));
     }
 
+    /// Reply to a request with the given entry.
+    ///
+    /// Use this function instead of `ReplyEntry::entry` if the
+    /// entry TTL needs to be different from the attribute TTL.
+    ///
+    /// * `attr_ttl` - Time-to-live for the file attributes. Controls how long the
+    ///   kernel will cache inode metadata (e.g., size, permissions, timestamps)
+    ///   before issuing a new `GETATTR` request.
+    /// * `entry_ttl` - Time-to-live for the directory entry (name-to-inode mapping).
+    ///   Controls how long the kernel will cache the existence of this
+    ///   path without issuing a new `LOOKUP` request.
+    pub fn entry_with_ttls(
+        self,
+        attr_ttl: &Duration,
+        entry_ttl: &Duration,
+        attr: &FileAttr,
+        generation: Generation,
+    ) {
+        self.reply.send_ll(&ll::ResponseStruct::new_entry(
+            attr.ino,
+            generation,
+            &attr.into(),
+            *attr_ttl,
+            *entry_ttl,
+        ));
+    }
+
     /// Reply to a request with the given error code
     pub fn error(self, err: Errno) {
         self.reply.error(err);
