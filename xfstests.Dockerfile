@@ -16,7 +16,7 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --de
 ENV PATH=/root/.cargo/bin:$PATH
 
 RUN mkdir -p /code && cd /code && git clone https://github.com/fleetfs/fuse-xfstests && cd fuse-xfstests \
-  && git checkout c123d014fcca48cf340be78d6712eff80ee4e8d6 && make
+  && git checkout fleetfs-xfs-v2026.03.20 && make
 
 ADD . /code/fuser/
 
