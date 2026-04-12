@@ -187,6 +187,8 @@ jobs:
             cargo test --all --all-targets -- --skip=mnt::test::mount_unmount
             sudo cargo run -p fuser-tests -- bsd-mount
             sudo ./tests/bsd_pjdfs.sh
+            # Clean up root-owned files so cross-platform-actions rsync teardown doesn't fail
+            sudo rm -rf target
 
   test:
     runs-on: ubuntu-22.04
