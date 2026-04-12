@@ -265,7 +265,7 @@ fn fuse_mount_fusermount(
     let fusermount_bin = detect_fusermount_bin();
 
     if fusermount_bin.ends_with(MOUNT_FUSEFS_BIN) {
-        return fuse_mount_mount_fusefs(&fusermount_bin, mountpoint, options);
+        return fuse_mount_mount_fusefs(&fusermount_bin, mountpoint, options, acl);
     }
 
     let (child_socket, receive_socket) = UnixStream::pair()?;
@@ -349,6 +349,7 @@ fn fuse_mount_mount_fusefs(
     fusermount_bin: &str,
     mountpoint: &OsStr,
     options: &[MountOption],
+    acl: SessionACL,
 ) -> Result<(DevFuse, Option<UnixStream>), Error> {
     let fuse_device = DevFuse::open()?;
 
@@ -356,9 +357,10 @@ fn fuse_mount_mount_fusefs(
 
     let mut builder = Command::new(fusermount_bin);
     builder.stdout(Stdio::piped()).stderr(Stdio::piped());
-    if !options.is_empty() {
+    let mut options_strs: Vec<String> = options.iter().map(option_to_string).collect();
+    options_strs.extend(acl.to_mount_option().map(|s| s.to_owned()));
+    if !options_strs.is_empty() {
         builder.arg("-o");
-        let options_strs: Vec<String> = options.iter().map(option_to_string).collect();
         builder.arg(options_strs.join(","));
     }
 
