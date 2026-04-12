@@ -154,6 +154,42 @@ jobs:
       - name: Lint
         run: INTERACTIVE="" make pre
 
+  freebsd-ci:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: FreeBSD CI
+        uses: cross-platform-actions/action@v1.0.0
+        with:
+          operating_system: freebsd
+          version: '14.3'
+          shell: bash
+          run: |
+            sudo kldload fusefs
+            sudo pkg install -y rust bash
+            # PJDFS setup
+            # /etc/fuse.conf isn't used on FreeBSD, but simple.rs uses it
+            echo user_allow_other | sudo tee /etc/fuse.conf
+            sudo pkg install -y automake autoconf git
+            cd /tmp
+            git clone https://github.com/fleetfs/pjdfstest
+            cd pjdfstest
+            git checkout d3beed6f5f15c204a8af3df2f518241931a42e94
+            autoreconf -ifs
+            ./configure
+            make pjdfstest
+            cd $GITHUB_WORKSPACE
+            cargo build --all --all-targets
+            cargo doc --all --no-deps
+            cargo test --all --all-targets -- --skip=mnt::test::mount_unmount
+            cargo test --all --all-targets -- --skip=mnt::test::mount_unmount
+            sudo cargo run -p fuser-tests -- bsd-mount
+            sudo ./tests/bsd_pjdfs.sh
+            # Clean up root-owned files so cross-platform-actions rsync teardown doesn't fail
+            sudo rm -rf target
+
   test:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
