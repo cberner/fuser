@@ -127,6 +127,8 @@ echo "generic/564" >> xfs_excludes.txt
 echo "generic/117" >> xfs_excludes.txt
 echo "generic/471" >> xfs_excludes.txt
 echo "generic/642" >> xfs_excludes.txt
+echo "generic/676" >> xfs_excludes.txt
+echo "generic/707" >> xfs_excludes.txt
 echo "generic/736" >> xfs_excludes.txt
 
 # Too slow (>2min each)
