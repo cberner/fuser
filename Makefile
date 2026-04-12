@@ -1,5 +1,6 @@
 VERSION = $(shell git describe --tags --always --dirty)
 INTERACTIVE ?= i
+XFSTESTS_RANGE ?=
 
 
 build: pre
@@ -19,7 +20,7 @@ xfstests:
 	# Additional permissions are needed to be able to mount FUSE
 	docker run --rm -$(INTERACTIVE)t --cap-add SYS_ADMIN --cap-add IPC_OWNER --device /dev/fuse --security-opt apparmor:unconfined \
 	 --memory=2g --kernel-memory=200m \
-	 -v "$(shell pwd)/logs:/code/logs" fuser:xfstests bash -c "cd /code/fuser && ./xfstests.sh"
+	 -v "$(shell pwd)/logs:/code/logs" fuser:xfstests bash -c "cd /code/fuser && ./xfstests.sh $(XFSTESTS_RANGE)"
 
 pjdfs_tests: pjdfs_tests_fuse2 pjdfs_tests_fuse3 pjdfs_tests_pure
 

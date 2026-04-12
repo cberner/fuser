@@ -159,7 +159,7 @@ jobs:
     timeout-minutes: 120
     strategy:
       matrix:
-        test_group: [mount_tests, pjdfs_tests, xfstests]
+        test_group: [mount_tests, pjdfs_tests, "xfstests XFSTESTS_RANGE=generic/0*", "xfstests XFSTESTS_RANGE=generic/1*", "xfstests XFSTESTS_RANGE=generic/2*", "xfstests XFSTESTS_RANGE=generic/3*", "xfstests XFSTESTS_RANGE=generic/4*", "xfstests XFSTESTS_RANGE=generic/5*", "xfstests XFSTESTS_RANGE=generic/6*", "xfstests XFSTESTS_RANGE=generic/7*"]
 
     steps:
       # https://github.com/marketplace/actions/maximize-build-disk-space-only-remove-unwanted-software
