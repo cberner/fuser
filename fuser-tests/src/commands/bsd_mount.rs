@@ -8,13 +8,24 @@ use crate::ansi::green;
 use crate::canonical_temp_dir::CanonicalTempDir;
 use crate::cargo::cargo_build_example;
 use crate::command_utils::command_success;
+use crate::features::Feature;
 use crate::mount_util::wait_for_fuse_mount;
 
 pub(crate) async fn run_bsd_mount_tests() -> anyhow::Result<()> {
+    // Run tests using pure-rust (fusermount) implementation
+    run_bsd_mount_tests_with_features(&[]).await?;
+
+    // Run tests using direct-mount (direct mount syscall) implementation
+    run_bsd_mount_tests_with_features(&[Feature::DirectMount]).await?;
+
+    Ok(())
+}
+
+async fn run_bsd_mount_tests_with_features(features: &[Feature]) -> anyhow::Result<()> {
     let mount_dir = CanonicalTempDir::new()?;
     let mount_path = mount_dir.path();
 
-    let hello_exe = cargo_build_example("hello", &[]).await?;
+    let hello_exe = cargo_build_example("hello", features).await?;
 
     eprintln!("Starting hello filesystem...");
     let mut fuse_process = Command::new(&hello_exe)
