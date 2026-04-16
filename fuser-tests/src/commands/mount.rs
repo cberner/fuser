@@ -244,7 +244,7 @@ async fn test_no_user_allow_other(features: &[Feature], libfuse: &Libfuse) -> an
 
     // Run the simple example as fusertestnoallow
     let run_command = format!(
-        "{} --auto-unmount -vvv --data-dir {} --mount-point {}",
+        "{} --auto-unmount -vvv --data-dir {} {}",
         simple_exe.display(),
         data_dir.path().display(),
         mount_dir.path().display()

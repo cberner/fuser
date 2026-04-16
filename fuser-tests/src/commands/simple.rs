@@ -32,7 +32,6 @@ pub(crate) async fn run_simple_tests() -> anyhow::Result<()> {
             "-vvv",
             "--data-dir",
             data_dir.path().to_str().unwrap(),
-            "--mount-point",
             mount_dir.path().to_str().unwrap(),
         ])
         .env(Fusermount::ENV_VAR, Fusermount::False.as_path())
