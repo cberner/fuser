@@ -105,8 +105,12 @@ pub mod consts {
     // Lock flags
     pub const FUSE_LK_FLOCK: u32 = 1 << 0;
 
-    // IOCTL constant
+    // IOCTL constants
     pub const FUSE_IOCTL_MAX_IOV: u32 = 256; // maximum of in_iovecs + out_iovecs
+    pub const FUSE_IOCTL_COMPAT: u32 = 1 << 0;
+    pub const FUSE_IOCTL_UNRESTRICTED: u32 = 1 << 1;
+    pub const FUSE_IOCTL_RETRY: u32 = 1 << 2;
+    pub const FUSE_IOCTL_DIR: u32 = 1 << 4;
 
     // The read buffer is required to be at least 8k, but may be much larger
     pub const FUSE_MIN_READ_BUFFER: usize = 8192;
@@ -589,7 +593,7 @@ pub(crate) struct fuse_ioctl_in {
 }
 
 #[repr(C)]
-#[derive(Debug, KnownLayout, Immutable)]
+#[derive(Debug, IntoBytes, KnownLayout, Immutable)]
 pub(crate) struct fuse_ioctl_iovec {
     pub(crate) base: u64,
     pub(crate) len: u64,

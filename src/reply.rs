@@ -655,10 +655,62 @@ impl ReplyIoctl {
             .send_ll(&ll::ResponseIoctl::new_ioctl(result, &[IoSlice::new(data)]));
     }
 
+    /// Ask the kernel to retry the ioctl with the given userspace
+    /// iovecs.
+    ///
+    /// This is the FUSE_IOCTL_RETRY mechanism: when the size encoded
+    /// in an ioctl's `cmd` is too small to describe its real input or
+    /// output buffer (typically because the struct embeds a flexible
+    /// array, or the buffer is otherwise dynamically sized), the
+    /// driver responds with the iovecs describing what it actually
+    /// wants. The kernel re-issues the ioctl with
+    /// `FUSE_IOCTL_UNRESTRICTED` set; the new request's `in_data` is
+    /// the concatenation of `in_iovs` and the new `out_size` covers
+    /// `out_iovs`.
+    ///
+    /// `in_iovs` and `out_iovs` describe ranges in the *caller's*
+    /// userspace memory. The starting pointer is typically the `arg`
+    /// value passed to [`Filesystem::ioctl`](crate::Filesystem::ioctl),
+    /// plus any offset into the struct.
+    ///
+    /// The total number of entries (in_iovs + out_iovs) must be at
+    /// most [`FUSE_IOCTL_MAX_IOV`](crate::consts::FUSE_IOCTL_MAX_IOV).
+    pub fn retry(self, in_iovs: &[IoctlIovec], out_iovs: &[IoctlIovec]) {
+        let mut payload: Vec<u8> = Vec::with_capacity(
+            (in_iovs.len() + out_iovs.len()) * std::mem::size_of::<IoctlIovec>(),
+        );
+        for iov in in_iovs.iter().chain(out_iovs.iter()) {
+            payload.extend_from_slice(&iov.base.to_ne_bytes());
+            payload.extend_from_slice(&iov.len.to_ne_bytes());
+        }
+        let in_count = in_iovs.len().try_into().expect("Too many in_iovs");
+        let out_count = out_iovs.len().try_into().expect("Too many out_iovs");
+        self.reply.send_ll(&ll::ResponseIoctl::new_retry(
+            in_count,
+            out_count,
+            &[IoSlice::new(&payload)],
+        ));
+    }
+
     /// Reply to a request with the given error code
     pub fn error(self, err: Errno) {
         self.reply.error(err);
     }
+}
+
+/// Userspace memory range, used by [`ReplyIoctl::retry`] to describe
+/// the buffers the FUSE driver wants the kernel to copy on retry.
+///
+/// Mirrors the kernel's `struct fuse_ioctl_iovec`. `base` is a raw
+/// pointer-as-u64 in the caller's address space; `len` is the byte
+/// length.
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct IoctlIovec {
+    /// User-space pointer (as a `u64`) marking the start of the range.
+    pub base: u64,
+    /// Length of the range in bytes.
+    pub len: u64,
 }
 
 ///
@@ -1256,6 +1308,53 @@ mod test {
         });
         let reply = ReplyXattr::new(ll::RequestId(0xdeadbeef), sender);
         reply.data(&[0x11, 0x22, 0x33, 0x44]);
+    }
+
+    #[test]
+    fn reply_ioctl() {
+        // fuse_out_header(16) + fuse_ioctl_out(16) + 4-byte payload.
+        // Header length = 36 = 0x24.
+        let sender = ReplySender::Assert(AssertSender {
+            expected: vec![
+                0x24, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xef, 0xbe, 0xad, 0xde, 0x00, 0x00,
+                0x00, 0x00, // fuse_out_header
+                0x00, 0x00, 0x00, 0x00, // result = 0
+                0x00, 0x00, 0x00, 0x00, // flags = 0
+                0x01, 0x00, 0x00, 0x00, // in_iovs = 1
+                0x01, 0x00, 0x00, 0x00, // out_iovs = 1 (one IoSlice)
+                0xde, 0xad, 0xbe, 0xef, // payload
+            ],
+        });
+        let reply: ReplyIoctl = Reply::new(ll::RequestId(0xdeadbeef), sender);
+        reply.ioctl(0, &[0xde, 0xad, 0xbe, 0xef]);
+    }
+
+    #[test]
+    fn reply_ioctl_retry() {
+        // Retry with one in_iov and one out_iov, both pointing at
+        // the same address with len=0x1000. Header length = 16 (out
+        // header) + 16 (fuse_ioctl_out) + 2*16 (two iovecs) = 64 = 0x40.
+        let sender = ReplySender::Assert(AssertSender {
+            expected: vec![
+                0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xef, 0xbe, 0xad, 0xde, 0x00, 0x00,
+                0x00, 0x00, // fuse_out_header
+                0x00, 0x00, 0x00, 0x00, // result = 0
+                0x04, 0x00, 0x00, 0x00, // flags = FUSE_IOCTL_RETRY (1 << 2)
+                0x01, 0x00, 0x00, 0x00, // in_iovs = 1
+                0x01, 0x00, 0x00, 0x00, // out_iovs = 1
+                // in_iov: base = 0xdeadbeef00, len = 0x1000
+                0x00, 0xef, 0xbe, 0xad, 0xde, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, // out_iov: base = 0xdeadbeef00, len = 0x1000
+                0x00, 0xef, 0xbe, 0xad, 0xde, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00,
+            ],
+        });
+        let reply: ReplyIoctl = Reply::new(ll::RequestId(0xdeadbeef), sender);
+        let iov = IoctlIovec {
+            base: 0xdead_beef_00,
+            len: 0x1000,
+        };
+        reply.retry(&[iov], &[iov]);
     }
 
     #[test]

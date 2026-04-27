@@ -1359,6 +1359,14 @@ mod op {
         pub(crate) fn out_size(&self) -> u32 {
             self.arg.out_size
         }
+        /// The userspace pointer the ioctl was called with. The
+        /// driver can hand portions of this address range back to
+        /// the kernel through [`crate::ReplyIoctl::retry`] when the
+        /// real input/output buffer doesn't fit the size encoded in
+        /// `cmd`.
+        pub(crate) fn arg_ptr(&self) -> u64 {
+            self.arg.arg
+        }
     }
 
     /// Poll.
