@@ -167,6 +167,7 @@ impl Filesystem for FiocFS {
         _fh: FileHandle,
         _flags: IoctlFlags,
         cmd: u32,
+        _arg: u64,
         in_data: &[u8],
         _out_size: u32,
         reply: ReplyIoctl,

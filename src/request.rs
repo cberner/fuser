@@ -423,15 +423,13 @@ impl<'a> RequestWithSender<'a> {
             }
 
             ll::Operation::IoCtl(x) => {
-                if x.unrestricted() {
-                    return Err(Errno::ENOSYS);
-                }
                 filesystem.ioctl(
                     self.request_header(),
                     self.request.nodeid(),
                     x.file_handle(),
                     x.flags(),
                     x.command(),
+                    x.arg_ptr(),
                     x.in_data(),
                     x.out_size(),
                     self.reply(),

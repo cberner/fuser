@@ -65,6 +65,7 @@ pub use crate::reply::ReplyDirectory;
 pub use crate::reply::ReplyDirectoryPlus;
 pub use crate::reply::ReplyEmpty;
 pub use crate::reply::ReplyEntry;
+pub use crate::reply::IoctlIovec;
 pub use crate::reply::ReplyIoctl;
 pub use crate::reply::ReplyLock;
 pub use crate::reply::ReplyLseek;
@@ -911,6 +912,15 @@ pub trait Filesystem: Send + Sync + 'static {
     }
 
     /// control device
+    ///
+    /// `arg` is the userspace pointer the ioctl was issued with
+    /// (`fuse_ioctl_in.arg`); use it together with
+    /// [`ReplyIoctl::retry`] to describe variable-size buffers that
+    /// don't fit the size encoded in `cmd` (e.g.
+    /// `BTRFS_IOC_TREE_SEARCH_V2`). On the retry pass `flags` will
+    /// contain [`IoctlFlags::FUSE_IOCTL_UNRESTRICTED`] and
+    /// `in_data` / `out_size` will reflect the iovec ranges
+    /// returned from the previous call.
     fn ioctl(
         &self,
         _req: &Request,
@@ -918,13 +928,14 @@ pub trait Filesystem: Send + Sync + 'static {
         fh: FileHandle,
         flags: IoctlFlags,
         cmd: u32,
+        arg: u64,
         in_data: &[u8],
         out_size: u32,
         reply: ReplyIoctl,
     ) {
         warn!(
             "[Not Implemented] ioctl(ino: {ino:#x?}, fh: {fh}, flags: {flags}, \
-            cmd: {cmd}, in_data.len(): {}, out_size: {out_size})",
+            cmd: {cmd}, arg: {arg:#x}, in_data.len(): {}, out_size: {out_size})",
             in_data.len()
         );
         reply.error(Errno::ENOSYS);

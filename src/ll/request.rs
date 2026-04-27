@@ -1342,9 +1342,6 @@ mod op {
         pub(crate) fn in_data(&self) -> &[u8] {
             &self.data[..self.arg.in_size as usize]
         }
-        pub(crate) fn unrestricted(&self) -> bool {
-            self.flags().contains(IoctlFlags::FUSE_IOCTL_UNRESTRICTED)
-        }
         /// The value set by the [`Open`] method. See [`FileHandle`].
         pub(crate) fn file_handle(&self) -> FileHandle {
             FileHandle(self.arg.fh)
@@ -1358,6 +1355,14 @@ mod op {
         }
         pub(crate) fn out_size(&self) -> u32 {
             self.arg.out_size
+        }
+        /// The userspace pointer the ioctl was called with. The
+        /// driver can hand portions of this address range back to
+        /// the kernel through [`crate::ReplyIoctl::retry`] when the
+        /// real input/output buffer doesn't fit the size encoded in
+        /// `cmd`.
+        pub(crate) fn arg_ptr(&self) -> u64 {
+            self.arg.arg
         }
     }
 

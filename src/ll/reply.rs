@@ -267,6 +267,28 @@ impl<'a> ResponseIoctl<'a> {
         };
         ResponseIoctl { out, iovs }
     }
+
+    /// Build a "retry with these iovecs" response. The kernel will
+    /// re-issue the ioctl with `FUSE_IOCTL_UNRESTRICTED` set and the
+    /// requested user-space ranges concatenated into `in_data` /
+    /// `out`. `payload` must be the host-endian serialisation of
+    /// `[fuse_ioctl_iovec; in_iovs] ++ [fuse_ioctl_iovec; out_iovs]`.
+    pub(crate) fn new_retry(
+        in_iovs: u32,
+        out_iovs: u32,
+        payload: &'a [IoSlice<'a>],
+    ) -> Self {
+        let out = abi::fuse_ioctl_out {
+            result: 0,
+            flags: abi::consts::FUSE_IOCTL_RETRY,
+            in_iovs,
+            out_iovs,
+        };
+        ResponseIoctl {
+            out,
+            iovs: payload,
+        }
+    }
 }
 
 impl Response for ResponseIoctl<'_> {
