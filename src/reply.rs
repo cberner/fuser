@@ -675,16 +675,37 @@ impl ReplyIoctl {
     ///
     /// The total number of entries (in_iovs + out_iovs) must be at
     /// most [`FUSE_IOCTL_MAX_IOV`](crate::consts::FUSE_IOCTL_MAX_IOV).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `in_iovs.len() + out_iovs.len() > FUSE_IOCTL_MAX_IOV`.
+    /// The kernel rejects oversized iovec arrays at runtime, so the
+    /// panic surfaces the same bug eagerly with a clearer message.
     pub fn retry(self, in_iovs: &[IoctlIovec], out_iovs: &[IoctlIovec]) {
+        let total = in_iovs.len() + out_iovs.len();
+        let max = crate::consts::FUSE_IOCTL_MAX_IOV as usize;
+        assert!(
+            total <= max,
+            "ReplyIoctl::retry: in_iovs ({}) + out_iovs ({}) = {} exceeds \
+             FUSE_IOCTL_MAX_IOV ({max})",
+            in_iovs.len(),
+            out_iovs.len(),
+            total,
+        );
+
         let mut payload: Vec<u8> = Vec::with_capacity(
-            (in_iovs.len() + out_iovs.len()) * std::mem::size_of::<IoctlIovec>(),
+            total * std::mem::size_of::<IoctlIovec>(),
         );
         for iov in in_iovs.iter().chain(out_iovs.iter()) {
             payload.extend_from_slice(&iov.base.to_ne_bytes());
             payload.extend_from_slice(&iov.len.to_ne_bytes());
         }
-        let in_count = in_iovs.len().try_into().expect("Too many in_iovs");
-        let out_count = out_iovs.len().try_into().expect("Too many out_iovs");
+        // Bounded by FUSE_IOCTL_MAX_IOV (256) above — the casts are
+        // infallible and clippy is wrong about them.
+        #[allow(clippy::cast_possible_truncation)]
+        let in_count = in_iovs.len() as u32;
+        #[allow(clippy::cast_possible_truncation)]
+        let out_count = out_iovs.len() as u32;
         self.reply.send_ll(&ll::ResponseIoctl::new_retry(
             in_count,
             out_count,
@@ -1355,6 +1376,19 @@ mod test {
             len: 0x1000,
         };
         reply.retry(&[iov], &[iov]);
+    }
+
+    #[test]
+    #[should_panic(expected = "exceeds FUSE_IOCTL_MAX_IOV")]
+    fn reply_ioctl_retry_panics_on_too_many_iovs() {
+        // Sender doesn't matter — we panic before any bytes are sent.
+        let (tx, _rx) = sync_channel::<()>(1);
+        let reply: ReplyIoctl =
+            Reply::new(ll::RequestId(0xdeadbeef), ReplySender::Sync(tx));
+        // 257 in_iovs + 0 out_iovs > FUSE_IOCTL_MAX_IOV (256).
+        let iov = IoctlIovec { base: 0, len: 0 };
+        let too_many = vec![iov; 257];
+        reply.retry(&too_many, &[]);
     }
 
     #[test]

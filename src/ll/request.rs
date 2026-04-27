@@ -1342,9 +1342,6 @@ mod op {
         pub(crate) fn in_data(&self) -> &[u8] {
             &self.data[..self.arg.in_size as usize]
         }
-        pub(crate) fn unrestricted(&self) -> bool {
-            self.flags().contains(IoctlFlags::FUSE_IOCTL_UNRESTRICTED)
-        }
         /// The value set by the [`Open`] method. See [`FileHandle`].
         pub(crate) fn file_handle(&self) -> FileHandle {
             FileHandle(self.arg.fh)
