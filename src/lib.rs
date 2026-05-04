@@ -31,7 +31,7 @@ use serde::Serialize;
 
 pub use crate::access_flags::AccessFlags;
 pub use crate::bsd_file_flags::BsdFileFlags;
-use crate::forget_one::ForgetOne;
+pub use crate::forget_one::ForgetOne;
 pub use crate::ll::Errno;
 pub use crate::ll::Generation;
 pub use crate::ll::RequestId;
