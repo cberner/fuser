@@ -128,6 +128,12 @@ pub struct Session<FS: Filesystem> {
     pub(crate) filesystem: FilesystemHolder<FS>,
     /// Communication channel to the kernel driver
     pub(crate) ch: Channel,
+    /// Extra channels over pre-cloned /dev/fuse fds. When non-empty, `run()`
+    /// spawns one worker per channel (plus the primary) instead of calling
+    /// `clone_fd()` on Linux. Set by `Session::from_fds` for callers that
+    /// received pre-cloned fds from a privileged helper (CSI driver, etc.)
+    /// since opening /dev/fuse requires CAP_SYS_ADMIN.
+    pub(crate) extra_channels: Vec<Channel>,
     /// Handle to the mount.  Dropping this unmounts.
     mount: UmountOnDrop,
     /// Whether to restrict access to owner, root + owner, or unrestricted
@@ -179,6 +185,7 @@ impl<FS: Filesystem> Session<FS> {
                 fs: Some(filesystem),
             },
             ch,
+            extra_channels: Vec::new(),
             mount: UmountOnDrop {
                 mount: Arc::new(Mutex::new(Some(mount))),
             },
@@ -201,12 +208,31 @@ impl<FS: Filesystem> Session<FS> {
         acl: SessionACL,
         config: Config,
     ) -> io::Result<Self> {
-        let ch = Channel::new(Arc::new(DevFuse(File::from(fd))));
+        Self::from_fds(filesystem, fd, Vec::new(), acl, config)
+    }
+
+    /// Wrap a primary /dev/fuse fd plus a set of pre-cloned fds. Each extra
+    /// fd must already be bound to the same FUSE connection as `primary_fd`
+    /// (typically via `FUSE_DEV_IOC_CLONE` issued by a privileged helper).
+    /// The worker count is `1 + extra_fds.len()`; `config.n_threads` is
+    /// ignored. Lets an unprivileged process benefit from multi-fd
+    /// parallelism without opening `/dev/fuse` itself.
+    pub fn from_fds(
+        filesystem: FS,
+        primary_fd: OwnedFd,
+        extra_fds: Vec<OwnedFd>,
+        acl: SessionACL,
+        config: Config,
+    ) -> io::Result<Self> {
+        let to_channel = |fd: OwnedFd| Channel::new(Arc::new(DevFuse(File::from(fd))));
+        let ch = to_channel(primary_fd);
+        let extra_channels = extra_fds.into_iter().map(to_channel).collect();
         let mut session = Session {
             filesystem: FilesystemHolder {
                 fs: Some(filesystem),
             },
             ch,
+            extra_channels,
             mount: UmountOnDrop {
                 mount: Arc::new(Mutex::new(None)),
             },
@@ -247,6 +273,7 @@ impl<FS: Filesystem> Session<FS> {
         let Session {
             filesystem,
             ch,
+            extra_channels,
             mount: _do_not_umount_yet,
             allowed,
             session_owner,
@@ -254,7 +281,14 @@ impl<FS: Filesystem> Session<FS> {
             config,
         } = self;
 
-        let n_threads = config.n_threads.unwrap_or(1);
+        // Externally supplied pre-cloned fds take precedence over config.n_threads
+        // and config.clone_fd: the caller has already decided the worker count.
+        let use_extras = !extra_channels.is_empty();
+        let n_threads = if use_extras {
+            1 + extra_channels.len()
+        } else {
+            config.n_threads.unwrap_or(1)
+        };
 
         if !cfg!(target_os = "linux") && n_threads != 1 {
             // TODO: check whether it works on macOS/FreeBSD and enable if it works.
@@ -271,19 +305,23 @@ impl<FS: Filesystem> Session<FS> {
 
         let mut channels = Vec::with_capacity(n_threads);
 
-        for _ in 0..n_threads_minus_one {
-            if config.clone_fd {
-                #[cfg(target_os = "linux")]
-                {
-                    channels.push(ch.clone_fd()?);
-                    continue;
+        if use_extras {
+            channels.extend(extra_channels);
+        } else {
+            for _ in 0..n_threads_minus_one {
+                if config.clone_fd {
+                    #[cfg(target_os = "linux")]
+                    {
+                        channels.push(ch.clone_fd()?);
+                        continue;
+                    }
+                    #[cfg(not(target_os = "linux"))]
+                    {
+                        return Err(io::Error::other("clone_fd is only supported on Linux"));
+                    }
+                } else {
+                    channels.push(ch.clone());
                 }
-                #[cfg(not(target_os = "linux"))]
-                {
-                    return Err(io::Error::other("clone_fd is only supported on Linux"));
-                }
-            } else {
-                channels.push(ch.clone());
             }
         }
         channels.push(ch);
