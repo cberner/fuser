@@ -184,7 +184,6 @@ jobs:
             cargo build --all --all-targets
             cargo doc --all --no-deps
             cargo test --all --all-targets -- --skip=mnt::test::mount_unmount
-            cargo test --all --all-targets -- --skip=mnt::test::mount_unmount
             sudo cargo run -p fuser-tests -- bsd-mount
             sudo ./tests/bsd_pjdfs.sh
             # Clean up root-owned files so cross-platform-actions rsync teardown doesn't fail
