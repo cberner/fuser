@@ -402,7 +402,7 @@ impl Reply for ReplyCreate {
 impl ReplyCreate {
     /// Reply to a request with a newly created file entry and its newly open file handle
     /// # Panics
-    /// When attempting to use kernel passthrough. Use `opened_passthrough()` instead.
+    /// When attempting to use kernel passthrough. Use `created_passthrough()` instead.
     pub fn created(self, ttl: &Duration, attr: &FileAttr, generation: u64, fh: u64, flags: u32) {
         let flags = FopenFlags::from_bits_retain(flags);
         assert!(!flags.contains(FopenFlags::FOPEN_PASSTHROUGH));
@@ -413,6 +413,41 @@ impl ReplyCreate {
             ll::FileHandle(fh),
             flags,
             0,
+        ));
+    }
+
+    /// Registers a fd for passthrough, returning a `BackingId`.  Mirrors
+    /// `ReplyOpen::open_backing()` for the CREATE path so the kernel
+    /// can be told about the backing fd while the same FUSE request is
+    /// being answered — saving the userspace round-trip the first
+    /// WRITE to the freshly-created file would otherwise pay.
+    #[cfg(feature = "abi-7-40")]
+    pub fn open_backing(&self, fd: impl std::os::fd::AsFd) -> std::io::Result<BackingId> {
+        self.reply.sender.as_ref().unwrap().open_backing(fd.as_fd())
+    }
+
+    /// Reply to a request with a newly created file entry and an opened
+    /// backing id, so the kernel handles subsequent reads/writes on the
+    /// returned fh via FUSE passthrough.  Call `ReplyCreate::open_backing()`
+    /// to obtain the `BackingId`.
+    #[cfg(feature = "abi-7-40")]
+    pub fn created_passthrough(
+        self,
+        ttl: &Duration,
+        attr: &FileAttr,
+        generation: u64,
+        fh: u64,
+        flags: u32,
+        backing_id: &BackingId,
+    ) {
+        let flags = FopenFlags::from_bits_retain(flags) | FopenFlags::FOPEN_PASSTHROUGH;
+        self.reply.send_ll(&ll::Response::new_create(
+            ttl,
+            &attr.into(),
+            ll::Generation(generation),
+            ll::FileHandle(fh),
+            flags,
+            backing_id.backing_id,
         ));
     }
 
