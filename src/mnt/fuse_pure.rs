@@ -144,7 +144,6 @@ fn fuse_unmount_pure(mountpoint: &CStr) -> io::Result<()> {
     builder.stdout(Stdio::piped()).stderr(Stdio::piped());
     builder
         .arg("-u")
-        .arg("-q")
         // TODO: Some systems do not support lazy unmounting and may return errors
         .arg("-z")
         .arg("--")
