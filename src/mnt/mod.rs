@@ -200,20 +200,32 @@ fn libc_umount(mnt: &CStr) -> nix::Result<()> {
 }
 
 fn unmount_flags() -> nix::mount::MntFlags {
-    if cfg!(target_os = "linux") {
+    #[cfg(target_os = "linux")]
+    {
         // FIXME: Only supported on Linux 2.4.11+, procfs may be needed to determine version
         nix::mount::MntFlags::MNT_DETACH
-    } else if cfg!(any(
+    }
+    #[cfg(any(
         target_os = "macos",
         target_os = "freebsd",
         target_os = "dragonfly",
         target_os = "openbsd",
         target_os = "netbsd"
-    )) {
+    ))]
+    {
         // fuse_unmount_pure uses MNT_FORCE to terminate requests and unmount the filesystem on MacOS, the unmount API of BSD systems resemble MacOS as well.
         // This does not completely prevent failing with EBUSY though.
         nix::mount::MntFlags::MNT_FORCE
-    } else {
+    }
+    #[cfg(not(any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "openbsd",
+        target_os = "netbsd"
+    )))]
+    {
         nix::mount::MntFlags::empty()
     }
 }

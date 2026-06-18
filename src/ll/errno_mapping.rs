@@ -121,9 +121,33 @@ const ALL_RAW_ERRNOS: &[libc::c_int] = &[
     libc::EDEADLOCK,
     #[cfg(target_os = "linux")]
     libc::EBFONT,
+    #[cfg(not(any(
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "openbsd",
+        target_os = "netbsd"
+    )))]
     libc::ENOSTR,
+    #[cfg(not(any(
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "openbsd",
+        target_os = "netbsd"
+    )))]
     libc::ENODATA,
+    #[cfg(not(any(
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "openbsd",
+        target_os = "netbsd"
+    )))]
     libc::ETIME,
+    #[cfg(not(any(
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "openbsd",
+        target_os = "netbsd"
+    )))]
     libc::ENOSR,
     #[cfg(target_os = "linux")]
     libc::ENONET,

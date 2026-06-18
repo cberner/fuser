@@ -30,7 +30,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use log::debug;
-use log::error;
 use nix::fcntl::FcntlArg;
 use nix::fcntl::FdFlag;
 use nix::fcntl::OFlag;
@@ -45,9 +44,6 @@ use crate::SessionACL;
 use crate::dev_fuse::DevFuse;
 use crate::mnt::is_mounted;
 use crate::mnt::mount_options::MountOption;
-use crate::mnt::mount_options::MountOptionGroup;
-use crate::mnt::mount_options::option_group;
-use crate::mnt::mount_options::option_to_flag;
 use crate::mnt::mount_options::option_to_string;
 
 const FUSERMOUNT_BIN: &str = "fusermount";
@@ -417,6 +413,9 @@ fn fuse_mount_sys(
     options: &[MountOption],
     acl: SessionACL,
 ) -> Result<Option<DevFuse>, Error> {
+    use crate::mnt::mount_options::MountOptionGroup;
+    use crate::mnt::mount_options::option_group;
+    use crate::mnt::mount_options::option_to_flag;
     use std::os::unix::fs::PermissionsExt;
 
     let mountpoint_mode = File::open(mountpoint)?.metadata()?.permissions().mode();
@@ -428,7 +427,7 @@ fn fuse_mount_sys(
         Ok(dev_fuse) => dev_fuse,
         Err(error) => {
             if error.kind() == ErrorKind::NotFound {
-                error!("{} not found. Try 'modprobe fuse'", DevFuse::PATH);
+                log::error!("{} not found. Try 'modprobe fuse'", DevFuse::PATH);
             }
             return Err(error);
         }
