@@ -143,6 +143,7 @@ fn fuse_unmount_pure(mountpoint: &CStr) -> io::Result<()> {
         // TODO: Some systems do not support lazy unmounting and may return errors
         .arg("-z")
         .arg("--")
+        .env("LC_MESSAGES", "C")
         .arg(OsStr::new(&mountpoint.to_string_lossy().into_owned()));
     let output = builder.output()?;
     debug!(

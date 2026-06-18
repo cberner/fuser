@@ -1,18 +1,60 @@
 //! Module responsible for parsing error strings returned by standard output of utility binaries.
 //!
+use bimap::BiHashMap;
+use dashmap::DashMap;
+use dashmap::mapref::one::Ref;
+use lazy_static::lazy_static;
+use libc::strerror_r;
 use std::ffi::CStr;
 use std::ffi::CString;
 use std::ffi::NulError;
 use std::ffi::OsStr;
 use std::ffi::OsString;
+use std::io;
 use std::os::unix::ffi::OsStrExt;
 
-use bimap::BiHashMap;
-use dashmap::DashMap;
-use dashmap::mapref::one::Ref;
-use lazy_static::lazy_static;
-
 use crate::Errno;
+
+unsafe extern "C" {
+    #[cfg(not(any(target_os = "dragonfly", target_os = "vxworks", target_os = "rtems")))]
+    #[cfg_attr(
+        any(
+            target_os = "linux",
+            target_os = "emscripten",
+            target_os = "fuchsia",
+            target_os = "l4re",
+            target_os = "hurd",
+        ),
+        link_name = "__errno_location"
+    )]
+    #[cfg_attr(
+        any(
+            target_os = "netbsd",
+            target_os = "openbsd",
+            target_os = "android",
+            target_os = "redox",
+            target_os = "nuttx",
+            target_env = "newlib"
+        ),
+        link_name = "__errno"
+    )]
+    #[cfg_attr(
+        any(target_os = "solaris", target_os = "illumos"),
+        link_name = "___errno"
+    )]
+    #[cfg_attr(target_os = "nto", link_name = "__get_errno_ptr")]
+    #[cfg_attr(
+        any(target_os = "freebsd", target_vendor = "apple"),
+        link_name = "__error"
+    )]
+    #[cfg_attr(target_os = "haiku", link_name = "_errnop")]
+    #[cfg_attr(target_os = "aix", link_name = "_Errno")]
+    fn errno_location() -> *mut libc::c_int;
+}
+
+pub(crate) fn set_errno(value: i32) {
+    unsafe { *errno_location() = value };
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct LocaleId(CString);
@@ -36,11 +78,45 @@ impl Locale {
         }
         Ok(Self(inner))
     }
+
+    /// Sets the locale for the current thread.
+    /// SAFETY: this function stores a raw pointer to the previous locale, which may be
+    /// invalid when another Locale object is dropped. The locale guards must be dropped
+    /// in the correct initialization order.
+    unsafe fn activate(&self) -> LocaleActivationGuard<'_> {
+        let old_locale = unsafe { libc::uselocale(self.0) };
+        LocaleActivationGuard::new(self, old_locale)
+    }
+
+    fn with_activate<R>(&self, f: impl FnOnce() -> R) -> R {
+        let _guard = unsafe { self.activate() };
+        f()
+    }
 }
 
 impl Drop for Locale {
     fn drop(&mut self) {
         unsafe { libc::freelocale(self.0) };
+    }
+}
+
+struct LocaleActivationGuard<'a> {
+    _locale: &'a Locale,
+    old_locale: libc::locale_t,
+}
+
+impl<'a> LocaleActivationGuard<'a> {
+    fn new(locale: &'a Locale, old_locale: libc::locale_t) -> Self {
+        Self {
+            _locale: locale,
+            old_locale,
+        }
+    }
+}
+
+impl Drop for LocaleActivationGuard<'_> {
+    fn drop(&mut self) {
+        unsafe { libc::uselocale(self.old_locale) };
     }
 }
 
@@ -258,25 +334,40 @@ lazy_static! {
 type ErrnoLocaleMapping = BiHashMap<Errno, OsString>;
 type ErrnoMapping = DashMap<LocaleId, ErrnoLocaleMapping>;
 
-unsafe extern "C" {
-    fn strerror_l(errnum: i32, locale: libc::locale_t) -> *const libc::c_char;
+fn strerror_r_dynamic(errnum: i32) -> Result<OsString, io::Error> {
+    let mut buffer = vec![0i8; 1024];
+    set_errno(0);
+    while unsafe { strerror_r(errnum, buffer.as_mut_ptr(), buffer.len()) } != 0 {
+        let error = io::Error::last_os_error();
+        if error.raw_os_error().unwrap_or(0) == libc::ERANGE {
+            buffer.resize(buffer.len() + 1024, 0);
+            continue;
+        } else {
+            return Err(error);
+        }
+    }
+    let cstr = unsafe { CStr::from_ptr(buffer.as_ptr()) };
+    Ok(OsStr::from_bytes(cstr.to_bytes()).to_os_string())
 }
 
 fn populate_errno_mapping(
     mapping: &mut ErrnoLocaleMapping,
     locale_id: &LocaleId,
 ) -> Result<(), std::io::Error> {
-    let locale = Locale::new(libc::LC_MESSAGES, locale_id.clone())?;
-    for errno in ALL_RAW_ERRNOS.iter() {
-        let errno = Errno::from_i32(*errno);
-        if mapping.contains_left(&errno) {
-            continue;
+    let locale = Locale::new(libc::LC_MESSAGES_MASK, locale_id.clone())?;
+    locale.with_activate(|| {
+        for errno in ALL_RAW_ERRNOS.iter() {
+            let errno = Errno::from_i32(*errno);
+            if mapping.contains_left(&errno) {
+                continue;
+            }
+            let error_str = match strerror_r_dynamic(errno.code()) {
+                Ok(os_str) => os_str,
+                Err(_) => continue,
+            };
+            mapping.insert(errno, error_str);
         }
-        let error_str = unsafe { strerror_l(errno.code(), locale.0) };
-        mapping.insert(errno, unsafe {
-            OsStr::from_bytes(CStr::from_ptr(error_str).to_bytes()).to_os_string()
-        });
-    }
+    });
     Ok(())
 }
 
@@ -339,5 +430,18 @@ mod tests {
             .expect("locale should be valid")
             .expect("errno should be present");
         assert_eq!(errno, Errno::EPERM);
+    }
+
+    #[ignore = "German locale needs to be installed"]
+    #[test]
+    fn test_get_errno_message_in_german() {
+        let errno = Errno::ENOENT;
+        let message = get_errno_message(
+            errno,
+            &"de_DE.utf8".try_into().expect("locale should be valid"),
+        )
+        .expect("locale should be valid")
+        .expect("message should be present");
+        assert_eq!(message, "Datei oder Verzeichnis nicht gefunden");
     }
 }
