@@ -199,7 +199,6 @@ fn libc_umount(mnt: &CStr) -> nix::Result<()> {
     }
 }
 
-#[cfg_attr(fuser_mount_impl = "libfuse3", expect(dead_code))]
 fn unmount_flags() -> nix::mount::MntFlags {
     if cfg!(target_os = "linux") {
         // FIXME: Only supported on Linux 2.4.11+, procfs may be needed to determine version
@@ -257,6 +256,7 @@ fn is_mounted(fuse_device: &DevFuse) -> bool {
 /// - EINTR: Interrupted system call, retry immediately.
 /// - EBUSY: Resource busy due to other processes using the filesystem, wait for the interval and retry.
 /// - Other errors, return immediately.
+#[cfg_attr(fuser_mount_impl = "libfuse3", expect(dead_code))]
 fn retry_on_unmount_errors<T, F>(mut callback: F, interval: Duration) -> io::Result<T>
 where
     F: FnMut() -> io::Result<T>,
