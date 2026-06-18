@@ -16,6 +16,7 @@ mod fuse_pure;
 pub(crate) mod mount_options;
 
 use std::io;
+use std::time::Duration;
 
 #[cfg(any(test, fuser_mount_impl = "libfuse2", fuser_mount_impl = "libfuse3"))]
 use fuse2_sys::fuse_args;
@@ -165,8 +166,16 @@ impl Drop for Mount {
     }
 }
 
-#[cfg_attr(fuser_mount_impl = "macos-no-mount", expect(dead_code))]
+#[cfg_attr(
+    any(fuser_mount_impl = "macos-no-mount", fuser_mount_impl = "libfuse3"),
+    expect(dead_code)
+)]
 fn libc_umount(mnt: &CStr) -> nix::Result<()> {
+    let flags = unmount_flags();
+    #[cfg(target_os = "linux")]
+    {
+        nix::mount::umount2(mnt, flags)
+    }
     #[cfg(any(
         target_os = "macos",
         target_os = "freebsd",
@@ -175,10 +184,10 @@ fn libc_umount(mnt: &CStr) -> nix::Result<()> {
         target_os = "netbsd"
     ))]
     {
-        nix::mount::unmount(mnt, nix::mount::MntFlags::empty())
+        nix::mount::unmount(mnt, flags)
     }
-
     #[cfg(not(any(
+        target_os = "linux",
         target_os = "macos",
         target_os = "freebsd",
         target_os = "dragonfly",
@@ -187,6 +196,26 @@ fn libc_umount(mnt: &CStr) -> nix::Result<()> {
     )))]
     {
         nix::mount::umount(mnt)
+    }
+}
+
+#[cfg_attr(fuser_mount_impl = "libfuse3", expect(dead_code))]
+fn unmount_flags() -> nix::mount::MntFlags {
+    if cfg!(target_os = "linux") {
+        // FIXME: Only supported on Linux 2.4.11+, procfs may be needed to determine version
+        nix::mount::MntFlags::MNT_DETACH
+    } else if cfg!(any(
+        target_os = "macos",
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "openbsd",
+        target_os = "netbsd"
+    )) {
+        // fuse_unmount_pure uses MNT_FORCE to terminate requests and unmount the filesystem on MacOS, the unmount API of BSD systems resemble MacOS as well.
+        // This does not completely prevent failing with EBUSY though.
+        nix::mount::MntFlags::MNT_FORCE
+    } else {
+        nix::mount::MntFlags::empty()
     }
 }
 
@@ -219,6 +248,32 @@ fn is_mounted(fuse_device: &DevFuse) -> bool {
                 panic!("Poll failed with error {err}")
             }
         };
+    }
+}
+
+/// Retry a callback on unmount errors.
+///
+/// This function will retry the callback on the following errors:
+/// - EINTR: Interrupted system call, retry immediately.
+/// - EBUSY: Resource busy due to other processes using the filesystem, wait for the interval and retry.
+/// - Other errors, return immediately.
+fn retry_on_unmount_errors<T, F>(mut callback: F, interval: Duration) -> io::Result<T>
+where
+    F: FnMut() -> io::Result<T>,
+{
+    loop {
+        match callback() {
+            Ok(result) => return Ok(result),
+            // Interrupted system call, retry immediately.
+            Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
+            // On EBUSY, wait for the interval and retry.
+            Err(err) if err.kind() == io::ErrorKind::ResourceBusy => {
+                std::thread::sleep(interval);
+                continue;
+            }
+            // Other errors, return immediately.
+            Err(err) => return Err(err),
+        }
     }
 }
 

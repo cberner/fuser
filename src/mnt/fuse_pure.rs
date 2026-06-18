@@ -7,6 +7,7 @@ use std::env;
 use std::ffi::CStr;
 use std::ffi::CString;
 use std::ffi::OsStr;
+use std::ffi::OsString;
 use std::fs::File;
 use std::io;
 use std::io::Error;
@@ -26,6 +27,7 @@ use std::path::Path;
 use std::process::Command;
 use std::process::Stdio;
 use std::sync::Arc;
+use std::time::Duration;
 
 use log::debug;
 use log::error;
@@ -37,6 +39,7 @@ use nix::sys::socket::ControlMessageOwned;
 use nix::sys::socket::MsgFlags;
 use nix::sys::socket::SockaddrStorage;
 use nix::sys::socket::recvmsg;
+use regex::bytes::Regex;
 
 use crate::SessionACL;
 use crate::dev_fuse::DevFuse;
@@ -78,28 +81,34 @@ impl MountImpl {
     }
 
     pub(crate) fn umount_impl(&mut self) -> io::Result<()> {
-        if !is_mounted(&self.fuse_device) {
-            // If the filesystem has already been unmounted, avoid unmounting it again.
-            // Unmounting it a second time could cause a race with a newly mounted filesystem
-            // living at the same mountpoint
-            return Ok(());
-        }
-        if let Some(sock) = mem::take(&mut self.auto_unmount_socket) {
-            drop(sock);
-            // fusermount in auto-unmount mode, no more work to do.
-            return Ok(());
-        }
-        if let Err(err) = crate::mnt::libc_umount(&self.mountpoint) {
-            if err == nix::errno::Errno::EPERM {
-                // Linux always returns EPERM for non-root users.  We have to let the
-                // library go through the setuid-root "fusermount -u" to unmount.
-                fuse_unmount_pure(&self.mountpoint);
-                return Ok(());
-            } else {
-                return Err(err.into());
-            }
-        }
-        Ok(())
+        super::retry_on_unmount_errors(
+            || {
+                if !is_mounted(&self.fuse_device) {
+                    // If the filesystem has already been unmounted, avoid unmounting it again.
+                    // Unmounting it a second time could cause a race with a newly mounted filesystem
+                    // living at the same mountpoint
+                    return Ok(());
+                }
+                if let Some(sock) = mem::take(&mut self.auto_unmount_socket) {
+                    // fusermount in auto-unmount mode, no more work to do.
+                    // On Linux 2.4.11+, the detached mode is used.
+                    drop(sock);
+                    return Ok(());
+                }
+                if let Err(err) = crate::mnt::libc_umount(&self.mountpoint) {
+                    if err == nix::errno::Errno::EPERM {
+                        // Linux always returns EPERM for non-root users.  We have to let the
+                        // library go through the setuid-root "fusermount -u" to unmount.
+                        fuse_unmount_pure(&self.mountpoint)?;
+                        return Ok(());
+                    } else {
+                        return Err(err.into());
+                    }
+                }
+                Ok(())
+            },
+            Duration::from_secs(1),
+        )
     }
 }
 
@@ -129,33 +138,56 @@ fn fuse_mount_pure(
     fuse_mount_fusermount(mountpoint, options, acl)
 }
 
-fn fuse_unmount_pure(mountpoint: &CStr) {
-    #[cfg(target_os = "linux")]
-    {
-        if nix::mount::umount2(mountpoint, nix::mount::MntFlags::MNT_DETACH).is_ok() {
-            return;
-        }
-    }
-    #[cfg(target_os = "macos")]
-    {
-        if nix::mount::unmount(mountpoint, nix::mount::MntFlags::MNT_FORCE).is_ok() {
-            return;
-        }
-    }
-
+/// Lazily unmount via the fusermount binary, which has the setuid bit set to allow running as root.
+fn fuse_unmount_pure(mountpoint: &CStr) -> io::Result<()> {
     let mut builder = Command::new(detect_fusermount_bin());
     builder.stdout(Stdio::piped()).stderr(Stdio::piped());
     builder
         .arg("-u")
         .arg("-q")
+        // TODO: Some systems do not support lazy unmounting and may return errors
         .arg("-z")
         .arg("--")
         .arg(OsStr::new(&mountpoint.to_string_lossy().into_owned()));
-
-    if let Ok(output) = builder.output() {
-        debug!("fusermount: {}", String::from_utf8_lossy(&output.stdout));
-        debug!("fusermount: {}", String::from_utf8_lossy(&output.stderr));
+    let output = builder.output()?;
+    debug!(
+        "fusermount stdout on {}: {}",
+        mountpoint.to_string_lossy(),
+        String::from_utf8_lossy(&output.stdout)
+    );
+    debug!(
+        "fusermount stderr on {}: {}",
+        mountpoint.to_string_lossy(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    if output.status.success() {
+        return Ok(());
     }
+    let fusermount_error = parse_fusermount_unmount_stderr(OsStr::from_bytes(&output.stderr))
+        .ok_or_else(|| io::Error::other("failed to parse fusermount umount error message"))?;
+    // Since `fusermount` does not invoke any locale functions,
+    // the locale used for `strerror` in the program is guaranteed to be `C`.
+    let errno = crate::ll::errno_mapping::get_errno_by_message(
+        &fusermount_error,
+        &"C".try_into().expect("locale should be valid"),
+    )
+    .map_err(io::Error::other)?
+    .ok_or_else(|| {
+        io::Error::new(
+            ErrorKind::Other,
+            "errno not found for fusermount umount message",
+        )
+    })?;
+    Err(io::Error::from_raw_os_error(errno.code()))
+}
+
+fn parse_fusermount_unmount_stderr(output: &OsStr) -> Option<OsString> {
+    let parse_regex = Regex::new(r"([^:]+): failed to unmount ([^:]+): (.+)")
+        .expect("built-in regex should be valid");
+    parse_regex.captures(output.as_bytes()).map(|captures| {
+        let error = captures.get(3).map(|m| m.as_bytes()).unwrap_or_default();
+        OsStr::from_bytes(error).to_os_string()
+    })
 }
 
 fn detect_fusermount_bin() -> String {

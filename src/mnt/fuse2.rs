@@ -5,6 +5,7 @@ use std::os::unix::prelude::FromRawFd;
 use std::os::unix::prelude::OsStrExt;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::SessionACL;
 use crate::dev_fuse::DevFuse;
@@ -25,12 +26,16 @@ fn ensure_last_os_error() -> io::Error {
 pub(crate) struct MountImpl {
     mountpoint: CString,
 }
+
 impl MountImpl {
     pub(crate) fn new(
         mountpoint: &Path,
         options: &[MountOption],
         acl: SessionACL,
     ) -> io::Result<(Arc<DevFuse>, MountImpl)> {
+        log::warn!(
+            "Using libfuse2 as the mount backend may cause memory leaks in some scenarios, for example, if AutoUnmount is set."
+        );
         let mountpoint = CString::new(mountpoint.as_os_str().as_bytes()).unwrap();
         with_fuse_args(options, acl, |args| {
             let fd = unsafe { fuse_mount_compat25(mountpoint.as_ptr(), args) };
@@ -50,24 +55,22 @@ impl MountImpl {
         // no indication of the error available to the caller. So we call unmount
         // directly, which is what osxfuse does anyway, since we already converted
         // to the real path when we first mounted.
-        if let Err(err) = crate::mnt::libc_umount(&self.mountpoint) {
-            // Linux always returns EPERM for non-root users.  We have to let the
-            // library go through the setuid-root "fusermount -u" to unmount.
-            if err == nix::errno::Errno::EPERM {
-                #[cfg(not(any(
-                    target_os = "macos",
-                    target_os = "freebsd",
-                    target_os = "dragonfly",
-                    target_os = "openbsd",
-                    target_os = "netbsd"
-                )))]
-                unsafe {
-                    fuse_unmount_compat22(self.mountpoint.as_ptr());
-                    return Ok(());
+        super::retry_on_unmount_errors(
+            || {
+                if let Err(err) = crate::mnt::libc_umount(&self.mountpoint) {
+                    // Linux always returns EPERM for non-root users.  We have to let the
+                    // library go through the setuid-root "fusermount -u" to unmount.
+                    if err == nix::errno::Errno::EPERM {
+                        unsafe {
+                            fuse_unmount_compat22(self.mountpoint.as_ptr());
+                            return Ok(());
+                        }
+                    }
+                    return Err(err.into());
                 }
-            }
-            return Err(err.into());
-        }
-        Ok(())
+                Ok(())
+            },
+            Duration::from_secs(1),
+        )
     }
 }

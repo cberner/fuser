@@ -31,18 +31,21 @@ fn ensure_last_os_error() -> io::Error {
 #[derive(Debug)]
 pub(crate) struct MountImpl {
     fuse_session: *mut c_void,
-    mountpoint: CString,
+    _mountpoint: CString,
 }
+
 impl MountImpl {
     pub(crate) fn new(
         mnt: &Path,
         options: &[MountOption],
         acl: SessionACL,
     ) -> io::Result<(Arc<DevFuse>, MountImpl)> {
+        log::warn!(
+            "Using libfuse3 as the mount backend may cause memory leaks in some scenarios, for example, if AutoUnmount is set."
+        );
         let mnt = CString::new(mnt.as_os_str().as_bytes()).unwrap();
         with_fuse_args(options, acl, |args| {
             let ops = fuse_lowlevel_ops::default();
-
             let fuse_session = unsafe {
                 fuse_session_new(
                     args,
@@ -56,39 +59,41 @@ impl MountImpl {
             }
             let mount = MountImpl {
                 fuse_session,
-                mountpoint: mnt.clone(),
+                _mountpoint: mnt.clone(),
             };
             let result = unsafe { fuse_session_mount(mount.fuse_session, mnt.as_ptr()) };
             if result != 0 {
+                unsafe {
+                    fuse_session_destroy(fuse_session);
+                }
                 return Err(ensure_last_os_error());
             }
             let fd = unsafe { fuse_session_fd(mount.fuse_session) };
             if fd < 0 {
+                unsafe {
+                    fuse_session_unmount(fuse_session);
+                    fuse_session_destroy(fuse_session);
+                }
                 return Err(io::Error::last_os_error());
             }
             let fd = unsafe { BorrowedFd::borrow_raw(fd) };
             // We dup the fd here as the existing fd is owned by the fuse_session, and we
             // don't want it being closed out from under us:
-            let fd = fd.try_clone_to_owned()?;
+            let fd = fd.try_clone_to_owned().inspect_err(|_| unsafe {
+                fuse_session_unmount(fuse_session);
+                fuse_session_destroy(fuse_session);
+            })?;
             let file = File::from(fd);
             Ok((Arc::new(DevFuse(file)), mount))
         })
     }
 
     pub(crate) fn umount_impl(&mut self) -> io::Result<()> {
-        if let Err(err) = crate::mnt::libc_umount(&self.mountpoint) {
-            // Linux always returns EPERM for non-root users.  We have to let the
-            // library go through the setuid-root "fusermount -u" to unmount.
-            if err == nix::errno::Errno::EPERM {
-                #[cfg(target_os = "linux")]
-                unsafe {
-                    fuse_session_unmount(self.fuse_session);
-                    fuse_session_destroy(self.fuse_session);
-                    return Ok(());
-                }
-            }
-            return Err(err.into());
-        }
+        // Because fuse_session_new and fuse_session_mount were called, which initializes FFI structures, libfuse expects these 2 functions to be called unconditionally to clean up, or a structure leak will occur (alongside the auto unmount fd leak which is unfixable)
+        unsafe {
+            fuse_session_unmount(self.fuse_session);
+            fuse_session_destroy(self.fuse_session);
+        };
         Ok(())
     }
 }

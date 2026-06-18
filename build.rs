@@ -47,6 +47,9 @@ fn main() {
 }
 
 fn configure_libfuse3() -> Result<(), pkg_config::Error> {
+    eprintln!(
+        "Using libfuse3 as the mount backend may cause memory leaks in some scenarios, for example, if AutoUnmount is set."
+    );
     pkg_config::Config::new()
         .atleast_version("3.0.0")
         .probe("fuse3")?;

@@ -1,6 +1,7 @@
 //! Low-level kernel communication.
 
 mod argument;
+pub(crate) mod errno_mapping;
 pub(crate) mod flags;
 pub(crate) mod fuse_abi;
 pub(crate) mod ioctl;
@@ -50,7 +51,7 @@ macro_rules! no_xattr_doc {
 }
 
 /// Represents an error code to be returned to the caller
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct Errno(
     /// Positive value.
     NonZeroI32,
