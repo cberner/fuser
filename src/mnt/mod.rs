@@ -268,7 +268,10 @@ fn is_mounted(fuse_device: &DevFuse) -> bool {
 /// - EINTR: Interrupted system call, retry immediately.
 /// - EBUSY: Resource busy due to other processes using the filesystem, wait for the interval and retry.
 /// - Other errors, return immediately.
-#[cfg_attr(any(fuser_mount_impl = "libfuse3", fuser_mount_impl = "macos-no-mount"), expect(dead_code))]
+#[cfg_attr(
+    any(fuser_mount_impl = "libfuse3", fuser_mount_impl = "macos-no-mount"),
+    expect(dead_code)
+)]
 fn retry_on_unmount_errors<T, F>(mut callback: F, interval: Duration) -> io::Result<T>
 where
     F: FnMut() -> io::Result<T>,
