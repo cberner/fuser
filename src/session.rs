@@ -566,6 +566,15 @@ pub struct BackgroundSession {
     mount: Option<Mount>,
 }
 
+/// A set of relevant threads during an asynchronous unmounting process.
+#[derive(Debug)]
+pub struct BackgroundUnmount {
+    /// The unmounting thread
+    pub unmount_thread: JoinHandle<io::Result<()>>,
+    /// The session thread that hosts the filesystem
+    pub session_thread: JoinHandle<io::Result<()>>,
+}
+
 impl BackgroundSession {
     /// Unmount the filesystem and join the background thread.
     pub fn umount_and_join(mut self) -> io::Result<()> {
@@ -590,5 +599,27 @@ impl BackgroundSession {
                     "filesystem background thread panicked",
                 )
             })?
+    }
+
+    /// Unmount the filesystem and return the background thread for manual joining. This is useful for asynchronous daemons that coordinate access to multiple filesystems.
+    pub fn umount_no_join(mut self) -> io::Result<JoinHandle<io::Result<()>>> {
+        if let Some(mount) = self.mount.take() {
+            mount.umount()?;
+        }
+        Ok(self.guard)
+    }
+
+    /// Unmount the filesystem from a separate thread and return the background thread for manual joining. This allows the main thread to continue doing useful work while reporting errors in the background, and for implementing structured concurrency by giving the filesystem threads an opportunity to be joined.
+    pub fn umount_background(mut self) -> BackgroundUnmount {
+        let unmount_thread = thread::spawn(move || {
+            if let Some(mount) = self.mount.take() {
+                mount.umount()?;
+            }
+            Ok(())
+        });
+        BackgroundUnmount {
+            unmount_thread,
+            session_thread: self.guard,
+        }
     }
 }
