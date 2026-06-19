@@ -270,6 +270,14 @@ impl ReplyEntry {
         ));
     }
 
+    /// Registers a fd for passthrough, returning a `BackingId`. Once you have the backing ID, you can pass it as an argument in [`ReplyOpen::opened_passthrough`] or [`ReplyCreate::created_passthrough`].
+    ///
+    /// This method is ideal for registering a backing ID for an inode at first lookup. This method should only be called once per inode lifecycle.
+    pub fn open_backing(&self, fd: impl std::os::fd::AsFd) -> std::io::Result<BackingId> {
+        // TODO: assert passthrough capability is enabled.
+        self.reply.sender.as_ref().unwrap().open_backing(fd.as_fd())
+    }
+
     /// Reply to a request with the given error code
     pub fn error(self, err: Errno) {
         self.reply.error(err);
@@ -779,6 +787,14 @@ impl ReplyDirectoryPlus {
             attr.into(),
             *ttl,
         ))
+    }
+
+    /// Registers a fd for passthrough, returning a `BackingId`. Once you have the backing ID, you can pass it as an argument in [`ReplyOpen::opened_passthrough`] or [`ReplyCreate::created_passthrough`].
+    ///
+    /// This method is ideal for registering a backing ID for an inode at first lookup. This method should only be called once per inode lifecycle.
+    pub fn open_backing(&self, fd: impl std::os::fd::AsFd) -> std::io::Result<BackingId> {
+        // TODO: assert passthrough capability is enabled.
+        self.reply.sender.as_ref().unwrap().open_backing(fd.as_fd())
     }
 
     /// Reply to a request with the filled directory buffer
