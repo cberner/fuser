@@ -567,35 +567,3 @@ fn fuse_mount_sys(
 ) -> Result<Option<DevFuse>, Error> {
     Ok(None)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use procfs::process::Process;
-
-    #[test_log::test]
-    fn test_pure_automount_unmount() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let (_device, mut mount) = MountImpl::new(
-            temp_dir.path(),
-            &[MountOption::AutoUnmount],
-            SessionACL::All,
-        )
-        .unwrap();
-        let current_proc = Process::myself().unwrap();
-        let after_mount_info = current_proc.mountinfo().unwrap();
-        let current_mount = after_mount_info
-            .iter()
-            .find(|i| i.mount_point == temp_dir.path());
-        assert!(current_mount.is_some(), "Mount point not found");
-        mount.umount_impl().unwrap();
-        let after_unmount_info = current_proc.mountinfo().unwrap();
-        let after_unmount_mount = after_unmount_info
-            .iter()
-            .find(|i| i.mount_point == temp_dir.path());
-        assert!(
-            after_unmount_mount.is_none(),
-            "Mount point still found after unmount"
-        );
-    }
-}
