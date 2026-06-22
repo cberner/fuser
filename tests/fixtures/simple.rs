@@ -1,6 +1,7 @@
 //! A full-fledged fixture filesystem for testing niche interactions (e.g. auto_unmount)
 #![allow(clippy::needless_return)]
 #![allow(clippy::unnecessary_cast)] // libc::S_* are u16 or u32 depending on the platform
+#![allow(unused)]
 
 use std::cmp::min;
 use std::collections::BTreeMap;

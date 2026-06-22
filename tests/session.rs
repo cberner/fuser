@@ -9,6 +9,7 @@ mod fixtures;
 ///
 /// # Notes
 /// SimpleFS fixture is used to emulate FUSE requests.
+#[cfg(target_os = "linux")]
 #[test_log::test]
 fn test_session_auto_unmount() {
     let data_dir = tempfile::TempDir::new().unwrap();
