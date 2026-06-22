@@ -245,7 +245,7 @@ fn receive_fusermount_message(socket: &UnixStream) -> Result<DevFuse, Error> {
             socket.as_raw_fd(),
             &mut iov,
             Some(&mut cmsg_buffer),
-            MsgFlags::empty(),
+            MsgFlags::MSG_CMSG_CLOEXEC,
         ) {
             Ok(msg) => break msg,
             Err(nix::errno::Errno::EINTR) => continue,
@@ -260,18 +260,24 @@ fn receive_fusermount_message(socket: &UnixStream) -> Result<DevFuse, Error> {
         ));
     }
 
-    for cmsg in msg
+    if let Some(cmsg) = msg
         .cmsgs()
         .map_err(|e| Error::new(ErrorKind::InvalidData, e.to_string()))?
+        .next()
     {
+        let mut owned_fds = Vec::new();
         match cmsg {
             ControlMessageOwned::ScmRights(fds) => {
-                if let Some(&fd) = fds.first() {
+                for fd in fds {
                     if fd < 0 {
                         return Err(ErrorKind::InvalidData.into());
                     }
-                    return Ok(DevFuse(unsafe { File::from_raw_fd(fd) }));
+                    owned_fds.push(unsafe { File::from_raw_fd(fd) });
                 }
+                if owned_fds.is_empty() {
+                    return Err(ErrorKind::InvalidData.into());
+                }
+                return Ok(DevFuse(owned_fds.remove(0)));
             }
             other => {
                 return Err(Error::new(
