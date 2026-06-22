@@ -1,3 +1,4 @@
+#![allow(unused_imports)]
 use fuser::{Config, MountOption, SessionACL};
 
 mod fixtures;
