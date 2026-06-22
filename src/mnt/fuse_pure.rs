@@ -55,14 +55,33 @@ const MOUNT_FUSEFS_BIN: &str = "mount_fusefs";
 #[derive(Debug)]
 pub(crate) struct MountImpl {
     mountpoint: CString,
-    auto_unmount: Option<AutoUnmount>,
+    _auto_unmount: Option<AutoUnmount>,
     fuse_device: Arc<DevFuse>,
 }
 
 #[derive(Debug)]
 struct AutoUnmount {
     process: Child,
-    socket: UnixStream,
+    _socket: Option<UnixStream>,
+}
+
+impl AutoUnmount {
+    fn new(process: Child, socket: UnixStream) -> Self {
+        Self {
+            process,
+            _socket: Some(socket),
+        }
+    }
+}
+
+impl Drop for AutoUnmount {
+    fn drop(&mut self) {
+        if let Some(socket) = mem::take(&mut self._socket) {
+            drop(socket);
+        }
+        // Do not allow the process to persist as a zombie
+        let _ = self.process.wait();
+    }
 }
 
 impl MountImpl {
@@ -78,7 +97,7 @@ impl MountImpl {
             file.clone(),
             MountImpl {
                 mountpoint: CString::new(mountpoint.as_os_str().as_bytes())?,
-                auto_unmount,
+                _auto_unmount: auto_unmount,
                 fuse_device: file,
             },
         ))
@@ -91,21 +110,6 @@ impl MountImpl {
                     // If the filesystem has already been unmounted, avoid unmounting it again.
                     // Unmounting it a second time could cause a race with a newly mounted filesystem
                     // living at the same mountpoint
-                    return Ok(());
-                }
-                if let Some(unmount) = mem::take(&mut self.auto_unmount) {
-                    // fusermount in auto-unmount mode, no more work to do.
-                    // On Linux 2.4.11+, the detached mode is used.
-                    let sock = unmount.socket;
-                    drop(sock);
-
-                    let process = unmount.process;
-                    log::debug!(
-                        "Auto-unmount: waiting for fusermount process ID {} to exit",
-                        process.id()
-                    );
-                    process.wait_with_output()?;
-                    log::debug!("Auto-unmount: process exited");
                     return Ok(());
                 }
                 if let Err(err) = crate::mnt::libc_umount(&self.mountpoint) {
@@ -383,10 +387,7 @@ fn fuse_mount_fusermount(
                 debug!("fusermount: {}", String::from_utf8_lossy(&buf[..len]));
             }
         }
-        auto_unmount = Some(AutoUnmount {
-            process: fusermount_child,
-            socket: receive_socket,
-        });
+        auto_unmount = Some(AutoUnmount::new(fusermount_child, receive_socket));
     }
 
     // TODO: do not ignore error.
