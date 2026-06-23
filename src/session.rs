@@ -291,7 +291,7 @@ impl<FS: Filesystem> Session<FS> {
         let mut threads = Vec::with_capacity(n_threads);
 
         for (i, ch) in channels.into_iter().enumerate() {
-            let thread_name = format!("fuser-{i}");
+            let thread_name = (config.thread_name_fn)(i);
             let event_loop = SessionEventLoop {
                 thread_name: thread_name.clone(),
                 filesystem: filesystem.clone(),

@@ -1,11 +1,13 @@
 use std::collections::HashSet;
+use std::fmt::Debug;
 use std::io;
 use std::io::ErrorKind;
+use std::sync::Arc;
 
 use crate::SessionACL;
 
 /// Fuser session configuration, including mount options.
-#[derive(Debug, Clone, Default, Eq, PartialEq)]
+#[derive(Clone)]
 #[non_exhaustive]
 pub struct Config {
     /// Mount options.
@@ -18,6 +20,78 @@ pub struct Config {
     /// This enables more efficient request processing
     /// when multiple threads are used. Requires Linux 4.5+.
     pub clone_fd: bool,
+    /// Use custom thread naming for internal threads
+    pub thread_name_fn: Arc<dyn Fn(usize) -> String + Sync + Send>,
+}
+
+impl Debug for Config {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Config")
+            .field("mount_options", &self.mount_options)
+            .field("acl", &self.acl)
+            .field("n_threads", &self.n_threads)
+            .field("clone_fd", &self.clone_fd)
+            .finish()
+    }
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            mount_options: Vec::default(),
+            acl: SessionACL::default(),
+            n_threads: None,
+            clone_fd: false,
+            thread_name_fn: Arc::new(|i| format!("fuser-{i}")),
+        }
+    }
+}
+
+impl PartialEq for Config {
+    fn eq(&self, other: &Self) -> bool {
+        self.mount_options == other.mount_options
+            && self.acl == other.acl
+            && self.n_threads == other.n_threads
+            && self.clone_fd == other.clone_fd
+            && Arc::ptr_eq(&self.thread_name_fn, &other.thread_name_fn)
+    }
+}
+
+impl Eq for Config {}
+
+impl Config {
+    /// Create a new Config with default values.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the mount options.
+    pub fn set_mount_options(&mut self, options: Vec<MountOption>) {
+        self.mount_options = options;
+    }
+
+    /// Set the ACL.
+    pub fn set_acl(&mut self, acl: SessionACL) {
+        self.acl = acl;
+    }
+
+    /// Set the number of threads.
+    pub fn set_n_threads(&mut self, n_threads: usize) {
+        self.n_threads = Some(n_threads);
+    }
+
+    /// Set whether to use clone_fd.
+    pub fn set_clone_fd(&mut self, clone_fd: bool) {
+        self.clone_fd = clone_fd;
+    }
+
+    /// Set the thread name function.
+    pub fn set_thread_name_fn(
+        &mut self,
+        thread_name_fn: Arc<dyn Fn(usize) -> String + Sync + Send>,
+    ) {
+        self.thread_name_fn = thread_name_fn;
+    }
 }
 
 /// Mount options accepted by the FUSE filesystem type
