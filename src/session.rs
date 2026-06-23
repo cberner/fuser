@@ -6,8 +6,6 @@
 //! for filesystem operations under its mount point.
 
 use std::borrow::Cow;
-use std::ffi::CStr;
-use std::ffi::CString;
 use std::fs::File;
 use std::io;
 use std::os::fd::AsFd;
