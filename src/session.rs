@@ -302,7 +302,7 @@ impl<FS: Filesystem> Session<FS> {
             };
             threads.push(
                 thread::Builder::new()
-                    .name(thread_name)
+                    .name(thread_name_sanitized)
                     .spawn(move || event_loop.event_loop())?,
             );
         }
