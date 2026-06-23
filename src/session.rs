@@ -6,6 +6,8 @@
 //! for filesystem operations under its mount point.
 
 use std::borrow::Cow;
+use std::ffi::CStr;
+use std::ffi::CString;
 use std::fs::File;
 use std::io;
 use std::os::fd::AsFd;
@@ -292,8 +294,9 @@ impl<FS: Filesystem> Session<FS> {
 
         for (i, ch) in channels.into_iter().enumerate() {
             let thread_name = (config.thread_name_fn)(i);
+            let thread_name_sanitized = thread_name.replace('\0', "");
             let event_loop = SessionEventLoop {
-                thread_name: thread_name.clone(),
+                thread_name: thread_name_sanitized.clone(),
                 filesystem: filesystem.clone(),
                 ch,
                 allowed,

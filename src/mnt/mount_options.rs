@@ -6,6 +6,14 @@ use std::sync::Arc;
 
 use crate::SessionACL;
 
+fn default_thread_name_fn(i: usize) -> String {
+    format!("fuser-{i}")
+}
+
+lazy_static::lazy_static! {
+    static ref DEFAULT_THREAD_NAME_FN: Arc<dyn Fn(usize) -> String + Sync + Send> = Arc::new(default_thread_name_fn);
+}
+
 /// Fuser session configuration, including mount options.
 #[derive(Clone)]
 #[non_exhaustive]
@@ -42,7 +50,7 @@ impl Default for Config {
             acl: SessionACL::default(),
             n_threads: None,
             clone_fd: false,
-            thread_name_fn: Arc::new(|i| format!("fuser-{i}")),
+            thread_name_fn: DEFAULT_THREAD_NAME_FN.clone(),
         }
     }
 }
