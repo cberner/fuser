@@ -765,6 +765,17 @@ mod op {
         header: &'a fuse_in_header,
     }
 
+    /// Synchronize the file system.
+    ///
+    /// Sent by the kernel in response to `syncfs(2)`/`sync(2)` when the server
+    /// opted in with `InitFlags::FUSE_HAS_SYNCFS`. Filesystem-wide, so there is no
+    /// meaningful argument (the wire payload is a single reserved `u64` padding word).
+    #[derive(Debug)]
+    pub(crate) struct SyncFs<'a> {
+        #[expect(dead_code)]
+        header: &'a fuse_in_header,
+    }
+
     /// Release an open file.
     ///
     /// Release is called when there are no more references to an open file: all file
@@ -1708,6 +1719,7 @@ mod op {
                 out
             }),
             fuse_opcode::FUSE_STATFS => Operation::StatFs(StatFs { header }),
+            fuse_opcode::FUSE_SYNCFS => Operation::SyncFs(SyncFs { header }),
             fuse_opcode::FUSE_RELEASE => Operation::Release(Release {
                 header,
                 arg: data.fetch()?,
@@ -1898,6 +1910,7 @@ pub(crate) enum Operation<'a> {
     Read(Read<'a>),
     Write(Write<'a>),
     StatFs(#[expect(dead_code)] StatFs<'a>),
+    SyncFs(#[expect(dead_code)] SyncFs<'a>),
     Release(Release<'a>),
     FSync(FSync<'a>),
     SetXAttr(SetXAttr<'a>),
@@ -1983,6 +1996,7 @@ impl fmt::Display for Operation<'_> {
                 x.write_flags()
             ),
             Operation::StatFs(_) => write!(f, "STATFS"),
+            Operation::SyncFs(_) => write!(f, "SYNCFS"),
             Operation::Release(x) => write!(
                 f,
                 "RELEASE fh {:?}, flags {:#x}, flush {}, lock owner {:?}",
@@ -2330,6 +2344,30 @@ mod tests {
                 assert_eq!(x.umask(), 0o755);
                 assert_eq!(x.name(), OsStr::new("foo.txt"));
             }
+            _ => panic!("Unexpected request operation"),
+        }
+    }
+
+    // len 48 = header (40) + fuse_syncfs_in.padding (8); opcode 50 = 0x32.
+    #[cfg(target_endian = "little")]
+    const SYNCFS_REQUEST: AlignedData<[u8; 48]> = AlignedData([
+        0x30, 0x00, 0x00, 0x00, 0x32, 0x00, 0x00, 0x00, // len, opcode
+        0x0d, 0xf0, 0xad, 0xba, 0xef, 0xbe, 0xad, 0xde, // unique
+        0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, // nodeid
+        0x0d, 0xd0, 0x01, 0xc0, 0xfe, 0xca, 0x01, 0xc0, // uid, gid
+        0x5e, 0xba, 0xde, 0xc0, 0x00, 0x00, 0x00, 0x00, // pid, padding
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // fuse_syncfs_in.padding
+    ]);
+
+    #[test]
+    #[cfg(target_endian = "little")]
+    fn syncfs() {
+        let req = AnyRequest::try_from(&SYNCFS_REQUEST[..]).unwrap();
+        assert_eq!(req.header.len, 48);
+        assert_eq!(req.header.opcode, 50);
+        assert_eq!(req.nodeid(), INodeNo(0x1122_3344_5566_7788));
+        match req.operation().unwrap() {
+            Operation::SyncFs(_) => (),
             _ => panic!("Unexpected request operation"),
         }
     }

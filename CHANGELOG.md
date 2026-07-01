@@ -1,6 +1,9 @@
 # FUSE for Rust - Changelog
 
 ## 0.18.0 - Unreleased
+* Add `Filesystem::sync_fs()` to service `FUSE_SYNCFS` (`syncfs(2)`/`sync(2)`), plus the
+  `InitFlags::FUSE_HAS_SYNCFS` opt-in capability a privileged server requests via
+  `KernelConfig::add_capabilities()`
 * Remove deprecated feature flags `abi-*`
 * Rename `mount2()` to `mount()`
 * Rename `spawn_mount2()` to `spawn_mount()`

@@ -777,6 +777,22 @@ pub trait Filesystem: Send + Sync + 'static {
         reply.statfs(0, 0, 0, 0, 0, 512, 255, 0);
     }
 
+    /// Synchronize the file system.
+    ///
+    /// Called when userspace issues `syncfs(2)` (or `sync(2)`) against the mount,
+    /// giving the server a chance to flush any state it has buffered before
+    /// replying. The kernel only forwards this once the server has opted in by
+    /// requesting [`InitFlags::FUSE_HAS_SYNCFS`] in [`Filesystem::init`]
+    /// (via [`KernelConfig::add_capabilities`]), and only honors that opt-in for
+    /// servers that opened `/dev/fuse` with `CAP_SYS_ADMIN` in the initial user
+    /// namespace — otherwise this is never called. Reply with `reply.ok()` once the
+    /// data is durable; replying [`Errno::ENOSYS`] tells the kernel to stop sending
+    /// `FUSE_SYNCFS` (treated as a permanent success), which is the default.
+    fn sync_fs(&self, _req: &Request, ino: INodeNo, reply: ReplyEmpty) {
+        warn!("[Not Implemented] sync_fs(ino: {ino:#x?})");
+        reply.error(Errno::ENOSYS);
+    }
+
     /// Set an extended attribute.
     fn setxattr(
         &self,
