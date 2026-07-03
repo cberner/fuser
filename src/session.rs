@@ -256,6 +256,7 @@ impl<FS: Filesystem> Session<FS> {
 
         let n_threads = config.n_threads.unwrap_or(1);
 
+        #[cfg(not(feature = "allow-multi-thread"))]
         if !cfg!(target_os = "linux") && n_threads != 1 {
             // TODO: check whether it works on macOS/FreeBSD and enable if it works.
             return Err(io::Error::other(

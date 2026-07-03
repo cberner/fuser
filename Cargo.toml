@@ -54,6 +54,7 @@ pkg-config = "0.3.14"
 [features]
 default = []
 experimental = ["async-trait", "tokio"]
+allow-multi-thread = []
 libfuse = []
 libfuse2 = ["libfuse"]
 libfuse3 = ["libfuse"]
