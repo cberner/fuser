@@ -124,6 +124,7 @@ impl MountImpl {
                 }
                 Ok(())
             },
+            &self.mountpoint,
             Duration::from_secs(1),
         )
     }

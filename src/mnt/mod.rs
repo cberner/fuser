@@ -232,7 +232,6 @@ fn unmount_flags() -> nix::mount::MntFlags {
 
 /// Warning: This will return true if the filesystem has been detached (lazy unmounted), but not
 /// yet destroyed by the kernel.
-#[cfg(any(all(not(target_os = "macos"), test), fuser_mount_impl = "pure-rust"))]
 fn is_mounted(fuse_device: &DevFuse) -> bool {
     use std::os::unix::io::AsFd;
     use std::slice;
@@ -272,17 +271,35 @@ fn is_mounted(fuse_device: &DevFuse) -> bool {
     any(fuser_mount_impl = "libfuse3", fuser_mount_impl = "macos-no-mount"),
     expect(dead_code)
 )]
-fn retry_on_unmount_errors<T, F>(mut callback: F, interval: Duration) -> io::Result<T>
+fn retry_on_unmount_errors<T, F>(
+    mut callback: F,
+    mountpoint: &CStr,
+    interval: Duration,
+) -> io::Result<T>
 where
     F: FnMut() -> io::Result<T>,
 {
+    let mut retry_announced = false;
     loop {
         match callback() {
-            Ok(result) => return Ok(result),
+            Ok(result) => {
+                if retry_announced {
+                    log::debug!("Unmount unblocked and succeeded on {:?}", mountpoint);
+                }
+                return Ok(result);
+            }
             // Interrupted system call, retry immediately.
             Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
             // On EBUSY, wait for the interval and retry.
             Err(err) if err.kind() == io::ErrorKind::ResourceBusy => {
+                if !retry_announced {
+                    log::debug!(
+                        "Unmount failed on {:?} with {:?}, may block for indefinite periods",
+                        err.raw_os_error(),
+                        mountpoint,
+                    );
+                    retry_announced = true;
+                }
                 std::thread::sleep(interval);
                 continue;
             }

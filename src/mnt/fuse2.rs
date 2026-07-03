@@ -25,6 +25,7 @@ fn ensure_last_os_error() -> io::Error {
 #[derive(Debug)]
 pub(crate) struct MountImpl {
     mountpoint: CString,
+    fuse_device: Arc<DevFuse>,
 }
 
 impl MountImpl {
@@ -43,7 +44,14 @@ impl MountImpl {
                 Err(ensure_last_os_error())
             } else {
                 let file = unsafe { File::from_raw_fd(fd) };
-                Ok((Arc::new(DevFuse(file)), MountImpl { mountpoint }))
+                let devfuse = Arc::new(DevFuse(file));
+                Ok((
+                    devfuse.clone(),
+                    MountImpl {
+                        mountpoint,
+                        fuse_device: devfuse,
+                    },
+                ))
             }
         })
     }
@@ -57,6 +65,12 @@ impl MountImpl {
         // to the real path when we first mounted.
         super::retry_on_unmount_errors(
             || {
+                if !super::is_mounted(&self.fuse_device) {
+                    // If the filesystem has already been unmounted, avoid unmounting it again.
+                    // Unmounting it a second time could cause a race with a newly mounted filesystem
+                    // living at the same mountpoint
+                    return Ok(());
+                }
                 if let Err(err) = crate::mnt::libc_umount(&self.mountpoint) {
                     // Linux always returns EPERM for non-root users.  We have to let the
                     // library go through the setuid-root "fusermount -u" to unmount.
@@ -70,7 +84,32 @@ impl MountImpl {
                 }
                 Ok(())
             },
+            &self.mountpoint,
             Duration::from_secs(1),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Scenario: this serves as a complementary test to session::tests::test_session_early_unmount. macFUSE apparently does not materialize the mountpoint in the mount table right away, so the kernel responds with EINVAL. The mountpoint only appears after the handshake is complete.
+    #[cfg(target_os = "macos")]
+    #[test_log::test]
+    fn test_mac_fuse2_umount_impl() {
+        let test_dir = tempfile::tempdir().expect("failed to create test directory");
+        log::info!("Test directory: {:?}", test_dir.path());
+        let mut mount = MountImpl::new(test_dir.path(), &[], SessionACL::Owner)
+            .expect("failed to mount filesystem");
+        let err = mount
+            .1
+            .umount_impl()
+            .expect_err("failed to unmount filesystem");
+        assert_eq!(
+            err.raw_os_error(),
+            Some(nix::errno::Errno::EINVAL as i32),
+            "macFUSE 5.2.0 should not materialize the mountpoint in the mount table"
+        );
     }
 }

@@ -156,8 +156,7 @@ impl<FS: Filesystem> Session<FS> {
         mountpoint: P,
         options: &Config,
     ) -> io::Result<Session<FS>> {
-        check_option_conflicts(options)?;
-
+        Self::validate_options(options)?;
         let mountpoint = mountpoint.as_ref();
         info!("Mounting {}", mountpoint.display());
         // If AutoUnmount is requested, but not AllowRoot or AllowOther, return an error
@@ -193,6 +192,35 @@ impl<FS: Filesystem> Session<FS> {
         Ok(session)
     }
 
+    /// Validate options for session creation.
+    fn validate_options(options: &Config) -> io::Result<()> {
+        check_option_conflicts(options)?;
+        Self::validate_execution(options)?;
+        Ok(())
+    }
+
+    /// Validate execution options for session creation.
+    fn validate_execution(options: &Config) -> io::Result<()> {
+        let n_threads = options.n_threads.unwrap_or(1);
+
+        if !cfg!(target_os = "linux") && n_threads != 1 {
+            // TODO: check whether it works on macOS/FreeBSD and enable if it works.
+            return Err(io::Error::other(
+                "n_threads != 1 is only supported on Linux",
+            ));
+        }
+
+        let Some(_) = n_threads.checked_sub(1) else {
+            return Err(io::Error::other("n_threads"));
+        };
+
+        if !cfg!(target_os = "linux") && options.clone_fd {
+            return Err(io::Error::other("clone_fd is only supported on Linux"));
+        }
+
+        Ok(())
+    }
+
     /// Wrap an existing /dev/fuse file descriptor. This doesn't mount the
     /// filesystem anywhere; that must be done separately.
     pub fn from_fd(
@@ -201,6 +229,7 @@ impl<FS: Filesystem> Session<FS> {
         acl: SessionACL,
         config: Config,
     ) -> io::Result<Self> {
+        Self::validate_execution(&config)?;
         let ch = Channel::new(Arc::new(DevFuse(File::from(fd))));
         let mut session = Session {
             filesystem: FilesystemHolder {
@@ -215,9 +244,7 @@ impl<FS: Filesystem> Session<FS> {
             proto_version: None,
             config,
         };
-
         session.handshake()?;
-
         Ok(session)
     }
 
@@ -253,22 +280,11 @@ impl<FS: Filesystem> Session<FS> {
             proto_version: _,
             config,
         } = self;
-
-        let n_threads = config.n_threads.unwrap_or(1);
-
-        if !cfg!(target_os = "linux") && n_threads != 1 {
-            // TODO: check whether it works on macOS/FreeBSD and enable if it works.
-            return Err(io::Error::other(
-                "n_threads != 1 is only supported on Linux",
-            ));
-        }
-
-        let Some(n_threads_minus_one) = n_threads.checked_sub(1) else {
-            return Err(io::Error::other("n_threads"));
-        };
-
         let mut filesystem = Arc::new(filesystem);
-
+        let n_threads = config.n_threads.unwrap_or(1);
+        let n_threads_minus_one = n_threads
+            .checked_sub(1)
+            .expect("n_threads should be non-zero");
         let mut channels = Vec::with_capacity(n_threads);
 
         for _ in 0..n_threads_minus_one {
@@ -280,7 +296,9 @@ impl<FS: Filesystem> Session<FS> {
                 }
                 #[cfg(not(target_os = "linux"))]
                 {
-                    return Err(io::Error::other("clone_fd is only supported on Linux"));
+                    unreachable!(
+                        "clone_fd is only supported on Linux, parameter should have been validated"
+                    );
                 }
             } else {
                 channels.push(ch.clone());
@@ -590,5 +608,28 @@ impl BackgroundSession {
                     "filesystem background thread panicked",
                 )
             })?
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TestFilesystem;
+    impl Filesystem for TestFilesystem {}
+
+    /// Scenario: the session is created and the handshake is completed, but the session is unmounted immediately after such creation.
+    ///
+    /// On MacOS (MacFUSE 5.2.0/MacOS 15.7.7), the framework apparently sends a few FUSE requests that the server must complete before clearing the mountpoint for unmounting, and this would cause the unmount to fail with EBUSY, leading to a hang for some period of time (almost exactly 4 minutes) until the kernel or driver gives up and yields the mountpoint.
+    ///
+    /// Mitigations:
+    /// - The coordinating thread should not fail, at least until it can process the initial requests. This means parameter verification should be delegated to Session::new.
+    #[cfg_attr(target_os = "macos", ignore = "this test hangs on MacOS for 4 minutes")]
+    #[test_log::test]
+    fn test_session_early_unmount() {
+        let temp_dir = tempfile::tempdir().expect("failed to create test directory");
+        let mut session =
+            Session::new(TestFilesystem, temp_dir.path(), &Config::default()).unwrap();
+        session.unmount().unwrap();
     }
 }
