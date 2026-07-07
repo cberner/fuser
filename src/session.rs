@@ -624,6 +624,7 @@ mod tests {
     ///
     /// Mitigations:
     /// - The coordinating thread should not fail, at least until it can process the initial requests. This means parameter verification should be delegated to Session::new.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[cfg_attr(target_os = "macos", ignore = "this test hangs on MacOS for 4 minutes")]
     #[test_log::test]
     fn test_session_early_unmount() {
