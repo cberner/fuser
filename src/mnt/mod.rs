@@ -232,7 +232,11 @@ fn unmount_flags() -> nix::mount::MntFlags {
 
 /// Warning: This will return true if the filesystem has been detached (lazy unmounted), but not
 /// yet destroyed by the kernel.
-#[cfg(any(fuser_mount_impl = "libfuse2", fuser_mount_impl = "pure-rust", test))]
+#[cfg(any(
+    fuser_mount_impl = "libfuse2",
+    fuser_mount_impl = "pure-rust",
+    all(not(target_os = "macos"), test)
+))]
 fn is_mounted(fuse_device: &DevFuse) -> bool {
     use std::os::unix::io::AsFd;
     use std::slice;

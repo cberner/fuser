@@ -92,12 +92,12 @@ impl MountImpl {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     /// Scenario: this serves as a complementary test to session::tests::test_session_early_unmount. macFUSE apparently does not materialize the mountpoint in the mount table right away, so the kernel responds with EINVAL. The mountpoint only appears after the handshake is complete.
     #[cfg(target_os = "macos")]
     #[test_log::test]
     fn test_mac_fuse2_umount_impl() {
+        use super::*;
+
         let test_dir = tempfile::tempdir().expect("failed to create test directory");
         log::info!("Test directory: {:?}", test_dir.path());
         let mut mount = MountImpl::new(test_dir.path(), &[], SessionACL::Owner)
