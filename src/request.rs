@@ -14,6 +14,7 @@ use log::error;
 use crate::Filesystem;
 use crate::PollNotifier;
 use crate::RenameFlags;
+use crate::ReplyEmpty;
 use crate::Request;
 use crate::channel::ChannelSender;
 use crate::forget_one::ForgetOne;
@@ -115,7 +116,21 @@ impl<'a> RequestWithSender<'a> {
             }
 
             ll::Operation::Interrupt(x) => {
-                filesystem.interrupt(self.request_header(), x.unique(), self.reply());
+                se.interrupt_pool.execute({
+                    let holder = se.filesystem.clone();
+                    let header = self.request_header().clone();
+                    let reply: ReplyEmpty = self.reply();
+                    let unique = x.unique();
+                    move || {
+                        let Some(filesystem) = &holder.fs else {
+                            // This is handled before dispatch call.
+                            error!("bug: filesystem must be initialized in dispatch_req");
+                            reply.error(Errno::ENOSYS);
+                            return;
+                        };
+                        filesystem.interrupt(&header, unique, reply)
+                    }
+                });
             }
             ll::Operation::Lookup(x) => {
                 filesystem.lookup(
