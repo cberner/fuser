@@ -409,6 +409,12 @@ pub trait Filesystem: Send + Sync + 'static {
     /// Called on filesystem exit.
     fn destroy(&mut self) {}
 
+    /// Interrupt an existing request.
+    fn interrupt(&self, _req: &Request, unique: RequestId, reply: ReplyEmpty) {
+        warn!("[Not Implemented] interrupt(unique: {:?})", unique);
+        reply.error(Errno::ENOSYS);
+    }
+
     /// Look up a directory entry by name and get its attributes.
     fn lookup(&self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
         warn!("[Not Implemented] lookup(parent: {parent:#x?}, name {name:?})");

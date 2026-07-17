@@ -114,11 +114,9 @@ impl<'a> RequestWithSender<'a> {
                 return Err(Errno::EIO);
             }
 
-            ll::Operation::Interrupt(_) => {
-                // TODO: handle FUSE_INTERRUPT
-                return Err(Errno::ENOSYS);
+            ll::Operation::Interrupt(x) => {
+                filesystem.interrupt(self.request_header(), x.unique(), self.reply());
             }
-
             ll::Operation::Lookup(x) => {
                 filesystem.lookup(
                     self.request_header(),
