@@ -5,10 +5,27 @@ use crate::ll;
 use crate::ll::fuse_abi::fuse_in_header;
 
 /// FUSE request parameters.
-#[derive(Debug, Clone, RefCastCustom)]
+#[derive(Debug, RefCastCustom)]
 #[repr(transparent)]
 pub struct Request {
     header: fuse_in_header,
+}
+
+impl Clone for Request {
+    fn clone(&self) -> Self {
+        Request {
+            header: fuse_in_header {
+                len: self.header.len,
+                opcode: self.header.opcode,
+                unique: self.header.unique,
+                nodeid: self.header.nodeid,
+                uid: self.header.uid,
+                gid: self.header.gid,
+                pid: self.header.pid,
+                padding: self.header.padding,
+            },
+        }
+    }
 }
 
 impl Request {
