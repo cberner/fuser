@@ -121,7 +121,9 @@ Licensed under [MIT License](LICENSE.md), except for those files in `examples/` 
 
 ## Contribution
 
-Fork, hack, submit pull request. Make sure to make it useful for the target audience, keep the project's philosophy and Rust coding standards in mind. For larger or essential changes, you may want to open an issue for discussion first. Also remember to update the [Changelog] if your changes are relevant to the users.
+**Pull requests are no longer being accepted. Please file an issue, or fork the project instead.**
+
+Fork, hack, ~~submit pull request~~. Make sure to make it useful for the target audience, keep the project's philosophy and Rust coding standards in mind. For larger or essential changes, you may want to open an issue for discussion first. Also remember to update the [Changelog] if your changes are relevant to the users.
 
 [Rust]: https://rust-lang.org
 [Homebrew]: https://brew.sh
