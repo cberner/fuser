@@ -338,17 +338,17 @@ impl SimpleFS {
     fn allocate_next_inode(&self) -> INodeNo {
         let path = Path::new(&self.data_dir).join("superblock");
         let current_inode = match File::open(&path) {
-            Ok(file) => INodeNo(bincode::deserialize_from(file).unwrap()),
+            Ok(file) => INodeNo(rmp_serde::from_read(file).unwrap()),
             _ => INodeNo::ROOT,
         };
 
-        let file = OpenOptions::new()
+        let mut file = OpenOptions::new()
             .write(true)
             .create(true)
             .truncate(true)
             .open(&path)
             .unwrap();
-        bincode::serialize_into(file, &(current_inode.0 + 1)).unwrap();
+        rmp_serde::encode::write(&mut file, &(current_inode.0 + 1)).unwrap();
 
         INodeNo(current_inode.0 + 1)
     }
@@ -386,7 +386,7 @@ impl SimpleFS {
             .join("contents")
             .join(inode.to_string());
         match File::open(path) {
-            Ok(file) => Ok(bincode::deserialize_from(file).unwrap()),
+            Ok(file) => Ok(rmp_serde::from_read(file).unwrap()),
             _ => Err(Errno::ENOENT),
         }
     }
@@ -395,13 +395,13 @@ impl SimpleFS {
         let path = Path::new(&self.data_dir)
             .join("contents")
             .join(inode.to_string());
-        let file = OpenOptions::new()
+        let mut file = OpenOptions::new()
             .write(true)
             .create(true)
             .truncate(true)
             .open(path)
             .unwrap();
-        bincode::serialize_into(file, &entries).unwrap();
+        rmp_serde::encode::write(&mut file, &entries).unwrap();
     }
 
     fn get_inode(&self, inode: INodeNo) -> Result<InodeAttributes, Errno> {
@@ -409,7 +409,7 @@ impl SimpleFS {
             .join("inodes")
             .join(inode.to_string());
         match File::open(path) {
-            Ok(file) => Ok(bincode::deserialize_from(file).unwrap()),
+            Ok(file) => Ok(rmp_serde::from_read(file).unwrap()),
             _ => Err(Errno::ENOENT),
         }
     }
@@ -418,13 +418,13 @@ impl SimpleFS {
         let path = Path::new(&self.data_dir)
             .join("inodes")
             .join(inode.inode.to_string());
-        let file = OpenOptions::new()
+        let mut file = OpenOptions::new()
             .write(true)
             .create(true)
             .truncate(true)
             .open(path)
             .unwrap();
-        bincode::serialize_into(file, inode).unwrap();
+        rmp_serde::encode::write(&mut file, inode).unwrap();
     }
 
     // Check whether a file should be removed from storage. Should be called after decrementing
