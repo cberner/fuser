@@ -1,0 +1,44 @@
+name: Security audit
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+  schedule:
+    # Weekly, Monday 07:00 UTC. A scheduled run catches advisories that are
+    # newly published against unchanged dependencies, which a PR/push trigger
+    # alone would miss.
+    - cron: '0 7 * * 1'
+  workflow_dispatch:
+
+# Least privilege: this job only reads the repository to resolve dependencies.
+permissions:
+  contents: read
+
+jobs:
+  cargo-deny:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache cargo-deny
+        id: cache-cargo-deny
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-deny
+          key: cargo-deny-0.20.2
+
+      # cargo-deny >=0.20 (rustsec >=0.31) is required to parse the CVSS 4.0
+      # advisories now present in the RustSec database. That cargo-deny needs a
+      # newer rustc than the project's pinned MSRV, so it is built with the
+      # stable toolchain instead of the repository default.
+      - name: Install cargo-deny
+        if: steps.cache-cargo-deny.outputs.cache-hit != 'true'
+        run: |
+          rustup toolchain install stable --profile minimal
+          cargo +stable install --force --locked --version 0.20.2 cargo-deny
+
+      - name: Check for security advisories
+        run: cargo deny check advisories
