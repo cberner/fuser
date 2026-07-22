@@ -4,6 +4,11 @@
 * Remove deprecated feature flags `abi-*`
 * Rename `mount2()` to `mount()`
 * Rename `spawn_mount2()` to `spawn_mount()`
+* Make `Session::run()` public, and check mount option conflicts in `Session::new()`
+* Add `ReplyEntry::entry_with_ttls()` to reply with distinct entry and attribute TTLs
+* Add support for raw marshalling of `BackingId`s across process boundaries via `BackingId::create_raw()`,
+  `BackingId::into_raw()`, `ReplyOpen::wrap_backing()`, and `ReplyCreate::wrap_backing()`
+* Fix missing `allow_other` mount option on FreeBSD, which caused `EPERM` for non-owner users
 
 ## 0.17.0 - 2026-02-14
 
