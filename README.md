@@ -15,6 +15,14 @@ FUSE-Rust does not just provide bindings, it is a rewrite of the original FUSE C
 This library was originally forked from the [`fuse` crate](https://github.com/zargony/fuse-rs) with the intention
 of continuing development. In particular adding features from ABIs after 7.19
 
+## Use of AI
+
+Version 0.18.0 is the last version that was primarily developed without coding agents.
+
+Future releases will be developed primarily by a coding agent, as I believe this will lead to higher quality code,
+and faster feature development.
+All the changes will receive at least a cursory review from a human, and a full review from a coding agent.
+
 ## Documentation
 
 [FUSE-Rust reference][Documentation]
