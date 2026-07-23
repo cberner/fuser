@@ -57,6 +57,7 @@ experimental = ["async-trait", "tokio"]
 libfuse = []
 libfuse2 = ["libfuse"]
 libfuse3 = ["libfuse"]
+direct-mount = ["nix/resource", "nix/signal"]
 serializable = ["serde"]
 macfuse-4-compat = []
 # Disable mount implementations. Code will compile but won't work.
