@@ -207,7 +207,9 @@ fn is_mounted(fuse_device: &DevFuse) -> bool {
         let res = poll(slice::from_mut(&mut poll_fd), PollTimeout::ZERO);
         break match res {
             Ok(0) => true,
-            Ok(1) => poll_fd
+            // The kernel reports POLLERR on /dev/fuse if and only if the connection
+            // is no longer alive, i.e. the filesystem has been unmounted or aborted
+            Ok(1) => !poll_fd
                 .revents()
                 .is_some_and(|r| r.contains(PollFlags::POLLERR)),
             Ok(_) => unreachable!(),
@@ -265,6 +267,58 @@ mod test {
         )
         .unwrap()
         .to_owned()
+    }
+
+    /// After the filesystem is unmounted by an external process (e.g. a user
+    /// running 'umount'), `is_mounted()` must report false so that session
+    /// teardown does not attempt a second unmount of the mountpoint.
+    ///
+    /// The `mount_unmount` name prefix keeps this test covered by the
+    /// `--skip=mnt::test::mount_unmount` filter used on platforms where
+    /// unprivileged mounting is unavailable.
+    #[test]
+    #[cfg(not(target_os = "macos"))]
+    fn mount_unmount_external() {
+        use std::ffi::CString;
+        use std::mem::ManuallyDrop;
+        use std::os::unix::ffi::OsStrExt;
+
+        // We use ManuallyDrop here to leak the directory on test failure.  We don't
+        // want to try and clean up the directory if it's a mountpoint otherwise we'll
+        // deadlock.
+        let tmp = ManuallyDrop::new(tempfile::tempdir().unwrap());
+        let (file, mount) = Mount::new(tmp.path(), &[], SessionACL::default()).unwrap();
+        assert!(is_mounted(&file));
+
+        // Unmount externally, without going through `mount`
+        let unmounted = ["fusermount3", "fusermount"].iter().any(|bin| {
+            std::process::Command::new(bin)
+                .arg("-u")
+                .arg(tmp.path())
+                .status()
+                .is_ok_and(|status| status.success())
+        });
+        if !unmounted {
+            // No fusermount binary available; fall back to umount(2), which
+            // requires root
+            let mountpoint = CString::new(tmp.path().as_os_str().as_bytes()).unwrap();
+            libc_umount(&mountpoint).unwrap();
+        }
+
+        // The kernel may tear down the connection asynchronously, so allow some time
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while is_mounted(&file) && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(
+            !is_mounted(&file),
+            "is_mounted() must report false after the filesystem was unmounted"
+        );
+
+        // Dropping the mount must not fail even though the filesystem is
+        // already unmounted
+        drop(mount);
+        ManuallyDrop::into_inner(tmp);
     }
 
     #[test]
