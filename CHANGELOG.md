@@ -1,5 +1,10 @@
 # FUSE for Rust - Changelog
 
+## Unreleased
+* Fix inverted mounted-check during session teardown: after the filesystem had already been
+  unmounted externally, fuser would attempt to unmount the mountpoint again, which could
+  unmount an unrelated filesystem mounted at the same path in the meantime
+
 ## 0.18.0 - 2026-07-22
 * Remove deprecated feature flags `abi-*`
 * Rename `mount2()` to `mount()`
