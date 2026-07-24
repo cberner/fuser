@@ -4,6 +4,13 @@
 * Fix inverted mounted-check during session teardown: after the filesystem had already been
   unmounted externally, fuser would attempt to unmount the mountpoint again, which could
   unmount an unrelated filesystem mounted at the same path in the meantime
+* Apply the same already-unmounted check to the `libfuse2` and `libfuse3` mount backends,
+  fixing the spurious "Failed to umount filesystem" warning when a session is dropped after
+  an external unmount (#658). As in libfuse, a connection that was aborted (e.g. via
+  fusectl) also counts as already unmounted; its dead mount is left to `auto_unmount` or
+  `fusermount -u -z`
+* Fix a per-mount memory leak in the `libfuse3` backend: the `fuse_session` is now destroyed
+  on every teardown path, including when mounting fails partway through setup
 * Fix corruption of pre-1970 timestamps with fractional seconds in `setattr`: the nanoseconds
   were subtracted from instead of added to the (negative) whole second, shifting times by up
   to two seconds
