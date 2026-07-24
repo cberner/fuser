@@ -4,6 +4,9 @@
 * Fix inverted mounted-check during session teardown: after the filesystem had already been
   unmounted externally, fuser would attempt to unmount the mountpoint again, which could
   unmount an unrelated filesystem mounted at the same path in the meantime
+* Fix corruption of pre-1970 timestamps with fractional seconds in `setattr`: the nanoseconds
+  were subtracted from instead of added to the (negative) whole second, shifting times by up
+  to two seconds
 
 ## 0.18.0 - 2026-07-22
 * Remove deprecated feature flags `abi-*`

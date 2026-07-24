@@ -247,11 +247,15 @@ fn time_now() -> (i64, u32) {
     time_from_system_time(&SystemTime::now())
 }
 
+// As in a timespec, nanoseconds count forward from the whole second even when it
+// is negative: the represented time is secs + nsecs / 1e9
 fn system_time_from_time(secs: i64, nsecs: u32) -> SystemTime {
     if secs >= 0 {
         UNIX_EPOCH + Duration::new(secs as u64, nsecs)
+    } else if nsecs == 0 {
+        UNIX_EPOCH - Duration::new(secs.unsigned_abs(), 0)
     } else {
-        UNIX_EPOCH - Duration::new((-secs) as u64, nsecs)
+        UNIX_EPOCH - Duration::new(secs.unsigned_abs() - 1, 1_000_000_000 - nsecs)
     }
 }
 
@@ -259,10 +263,14 @@ fn time_from_system_time(system_time: &SystemTime) -> (i64, u32) {
     // Convert to signed 64-bit time with epoch at 0
     match system_time.duration_since(UNIX_EPOCH) {
         Ok(duration) => (duration.as_secs() as i64, duration.subsec_nanos()),
-        Err(before_epoch_error) => (
-            -(before_epoch_error.duration().as_secs() as i64),
-            before_epoch_error.duration().subsec_nanos(),
-        ),
+        Err(before_epoch_error) => {
+            let d = before_epoch_error.duration();
+            if d.subsec_nanos() == 0 {
+                (-(d.as_secs() as i64), 0)
+            } else {
+                (-(d.as_secs() as i64) - 1, 1_000_000_000 - d.subsec_nanos())
+            }
+        }
     }
 }
 

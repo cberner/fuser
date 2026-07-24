@@ -36,14 +36,20 @@ pub(crate) fn time_from_system_time(system_time: &SystemTime) -> (i64, u32) {
 
 /// Converts a tuple of (seconds, nanoseconds) since the Unix epoch to a `SystemTime`.
 ///
-/// This handles negative seconds (times before the Unix epoch).
+/// This handles negative seconds (times before the Unix epoch). As in a timespec,
+/// the nanoseconds count forward from the whole second even when it is negative:
+/// the represented time is `secs + nsecs / 1e9`.
 pub(crate) fn system_time_from_time(secs: i64, nsecs: u32) -> SystemTime {
+    // timespec nanoseconds are in [0, 1e9); clamp to avoid underflow on malformed input
+    let nsecs = nsecs.min(999_999_999);
     if secs >= 0 {
         SystemTime::UNIX_EPOCH + Duration::new(secs as u64, nsecs)
+    } else if nsecs == 0 {
+        SystemTime::UNIX_EPOCH - Duration::new(secs.unsigned_abs(), 0)
     } else {
-        // TODO: overflow
-        // TODO: 1_000_000_000 - nsec
-        SystemTime::UNIX_EPOCH - Duration::new((-secs) as u64, nsecs)
+        // The magnitude before the epoch is |secs| - 1 whole seconds plus the
+        // remainder of the final (partial) second
+        SystemTime::UNIX_EPOCH - Duration::new(secs.unsigned_abs() - 1, 1_000_000_000 - nsecs)
     }
 }
 
@@ -52,6 +58,7 @@ mod test {
     use std::time::Duration;
     use std::time::UNIX_EPOCH;
 
+    use crate::time::system_time_from_time;
     use crate::time::time_from_system_time;
 
     #[test]
@@ -59,6 +66,47 @@ mod test {
         let before_epoch = UNIX_EPOCH - Duration::new(1, 200_000_000);
         let (secs, nanos) = time_from_system_time(&before_epoch);
         assert_eq!((-2, 800_000_000), (secs, nanos));
+    }
+
+    #[test]
+    fn test_system_time_from_time_negative() {
+        // tv_sec = -1, tv_nsec = 5e8 is 0.5s before the epoch
+        assert_eq!(
+            UNIX_EPOCH - Duration::new(0, 500_000_000),
+            system_time_from_time(-1, 500_000_000)
+        );
+        assert_eq!(
+            UNIX_EPOCH - Duration::new(1, 200_000_000),
+            system_time_from_time(-2, 800_000_000)
+        );
+        assert_eq!(
+            UNIX_EPOCH - Duration::new(2, 0),
+            system_time_from_time(-2, 0)
+        );
+    }
+
+    #[test]
+    fn test_time_round_trip() {
+        for (secs, nsecs) in [
+            (0, 0),
+            (0, 1),
+            (1, 999_999_999),
+            (1_700_000_000, 123_456_789),
+            (-1, 0),
+            (-1, 1),
+            (-1, 999_999_999),
+            (-2, 800_000_000),
+            (-1_000_000_000, 500_000_000),
+            (i64::MIN, 0),
+            (i64::MIN, 1),
+            (i64::MAX, 999_999_999),
+        ] {
+            assert_eq!(
+                (secs, nsecs),
+                time_from_system_time(&system_time_from_time(secs, nsecs)),
+                "round trip failed for ({secs}, {nsecs})"
+            );
+        }
     }
 
     #[test]
