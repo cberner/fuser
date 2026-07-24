@@ -104,7 +104,10 @@ impl HelloFS {
     fn stats_content(&self) -> String {
         let mut content = String::new();
         for count in &self.reads_per_thread {
-            content.push_str(&format!("{}\n", count.load(Ordering::Relaxed)));
+            // Fixed-width so the file size never changes as the counters grow: readers
+            // that observe a size change mid-read can see torn content stitched together
+            // from two different snapshots
+            content.push_str(&format!("{:020}\n", count.load(Ordering::Relaxed)));
         }
         content
     }
