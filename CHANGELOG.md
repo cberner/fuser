@@ -1,6 +1,15 @@
 # FUSE for Rust - Changelog
 
 ## Unreleased
+* Dropping a `BackgroundSession` now unmounts the filesystem and waits for the session to
+  end, guaranteeing that `Filesystem::destroy` has run when drop returns (#239, #411). This
+  restores the pre-0.16 blocking drop behavior. Drop does not wait when the session cannot
+  end: sessions created via `Session::from_fd` are left detached (use `join()` after ending
+  them), and so are sessions whose unmount failed or whose connection is still alive a few
+  seconds after the unmount (e.g. a lazily unmounted filesystem still in use).
+  The `guard` field of `BackgroundSession` is now private - use `join()`/`umount_and_join()`
+* The pure-rust and `libfuse2` mount backends now report `fusermount` unmount failures
+  instead of silently ignoring them
 * Treat `ECONNABORTED` from the FUSE device as a clean session end (#212): with
   `FUSE_ABORT_ERROR` negotiated, aborting the connection made `Session::run()` and
   `BackgroundSession::umount_and_join()` return an error instead of ending normally

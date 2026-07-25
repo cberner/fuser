@@ -51,8 +51,8 @@ impl MountImpl {
         // directly, which is what osxfuse does anyway, since we already converted
         // to the real path when we first mounted.
         if let Err(err) = crate::mnt::libc_umount(&self.mountpoint) {
-            // Linux always returns EPERM for non-root users.  We have to let the
-            // library go through the setuid-root "fusermount -u" to unmount.
+            // Linux always returns EPERM for non-root users.  We have to go
+            // through the setuid-root "fusermount -u" to unmount.
             if err == nix::errno::Errno::EPERM {
                 #[cfg(not(any(
                     target_os = "macos",
@@ -61,9 +61,12 @@ impl MountImpl {
                     target_os = "openbsd",
                     target_os = "netbsd"
                 )))]
-                unsafe {
-                    fuse_unmount_compat22(self.mountpoint.as_ptr());
-                    return Ok(());
+                {
+                    // Not libfuse's fuse_unmount_compat22: that would swallow
+                    // fusermount failures (leaving a still-running session that
+                    // callers then believe has been unmounted) and stat the
+                    // mountpoint through the filesystem via realpath
+                    return crate::mnt::fusermount_unmount("fusermount", &self.mountpoint);
                 }
             }
             return Err(err.into());

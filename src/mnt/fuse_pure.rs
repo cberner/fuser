@@ -84,7 +84,7 @@ impl MountImpl {
             if err == nix::errno::Errno::EPERM {
                 // Linux always returns EPERM for non-root users.  We have to let the
                 // library go through the setuid-root "fusermount -u" to unmount.
-                fuse_unmount_pure(&self.mountpoint);
+                fuse_unmount_pure(&self.mountpoint)?;
                 return Ok(());
             } else {
                 return Err(err.into());
@@ -120,33 +120,20 @@ fn fuse_mount_pure(
     fuse_mount_fusermount(mountpoint, options, acl)
 }
 
-fn fuse_unmount_pure(mountpoint: &CStr) {
+fn fuse_unmount_pure(mountpoint: &CStr) -> io::Result<()> {
     #[cfg(target_os = "linux")]
     {
         if nix::mount::umount2(mountpoint, nix::mount::MntFlags::MNT_DETACH).is_ok() {
-            return;
+            return Ok(());
         }
     }
     #[cfg(target_os = "macos")]
     {
         if nix::mount::unmount(mountpoint, nix::mount::MntFlags::MNT_FORCE).is_ok() {
-            return;
+            return Ok(());
         }
     }
-
-    let mut builder = Command::new(detect_fusermount_bin());
-    builder.stdout(Stdio::piped()).stderr(Stdio::piped());
-    builder
-        .arg("-u")
-        .arg("-q")
-        .arg("-z")
-        .arg("--")
-        .arg(OsStr::new(&mountpoint.to_string_lossy().into_owned()));
-
-    if let Ok(output) = builder.output() {
-        debug!("fusermount: {}", String::from_utf8_lossy(&output.stdout));
-        debug!("fusermount: {}", String::from_utf8_lossy(&output.stderr));
-    }
+    crate::mnt::fusermount_unmount(&detect_fusermount_bin(), mountpoint)
 }
 
 fn detect_fusermount_bin() -> String {
