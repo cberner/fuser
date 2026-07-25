@@ -212,6 +212,75 @@ fn libc_umount(mnt: &CStr) -> nix::Result<()> {
     }
 }
 
+/// Waits (bounded) for the FUSE kernel connection to end after an unmount was
+/// requested. Returns false if the connection is still alive when the timeout
+/// expires, e.g. because a lazily unmounted filesystem is still in use, or an
+/// unmount helper failed in a way that cannot be observed directly.
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn connection_ended(fuse_device: &DevFuse, timeout: std::time::Duration) -> bool {
+    let deadline = std::time::Instant::now() + timeout;
+    while is_mounted(fuse_device) {
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    true
+}
+
+/// The FUSE device poll semantics are untested on macOS, so assume the unmount
+/// took effect there.
+#[cfg(target_os = "macos")]
+pub(crate) fn connection_ended(_fuse_device: &DevFuse, _timeout: std::time::Duration) -> bool {
+    true
+}
+
+/// Lazily unmount via the given fusermount binary. Helper failures are reported,
+/// so that callers do not mistake a still-mounted filesystem for an unmounted
+/// one - BackgroundSession would otherwise wait forever for the session to end.
+#[cfg(any(
+    all(test, target_os = "linux"),
+    fuser_mount_impl = "pure-rust",
+    all(
+        fuser_mount_impl = "libfuse2",
+        not(any(
+            target_os = "macos",
+            target_os = "freebsd",
+            target_os = "dragonfly",
+            target_os = "openbsd",
+            target_os = "netbsd"
+        ))
+    )
+))]
+pub(crate) fn fusermount_unmount(fusermount_bin: &str, mountpoint: &CStr) -> io::Result<()> {
+    use std::os::unix::ffi::OsStrExt;
+
+    use log::debug;
+
+    let mut builder = std::process::Command::new(fusermount_bin);
+    builder
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    builder
+        .arg("-u")
+        .arg("-q")
+        .arg("-z")
+        .arg("--")
+        .arg(std::ffi::OsStr::from_bytes(mountpoint.to_bytes()));
+
+    let output = builder.output()?;
+    debug!("fusermount: {}", String::from_utf8_lossy(&output.stdout));
+    debug!("fusermount: {}", String::from_utf8_lossy(&output.stderr));
+    if !output.status.success() {
+        return Err(io::Error::other(format!(
+            "fusermount failed to unmount ({}): {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    Ok(())
+}
+
 /// Warning: This will return true if the filesystem has been detached (lazy unmounted), but not
 /// yet destroyed by the kernel.
 #[cfg(not(target_os = "macos"))]
@@ -274,6 +343,23 @@ mod test {
                 );
             },
         );
+    }
+
+    /// A fusermount helper that cannot run or exits nonzero must report an error:
+    /// the filesystem is then still mounted, and treating that as success would
+    /// make teardown wait forever for a session that never ends.
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn fusermount_unmount_reports_failure() {
+        use std::ffi::CString;
+
+        let mountpoint = CString::new("/nonexistent").unwrap();
+        // Helper exits nonzero (/bin/false ignores its arguments)
+        assert!(fusermount_unmount("/bin/false", &mountpoint).is_err());
+        // Helper cannot be executed at all
+        assert!(fusermount_unmount("/nonexistent/fusermount", &mountpoint).is_err());
+        // Helper reports success
+        assert!(fusermount_unmount("/bin/true", &mountpoint).is_ok());
     }
 
     #[cfg(not(target_os = "macos"))]

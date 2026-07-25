@@ -227,17 +227,21 @@ impl<FS: Filesystem> Session<FS> {
     }
 
     /// Run the session loop in a background thread. If the returned handle is dropped,
-    /// the filesystem is unmounted and the given session ends.
+    /// the filesystem is unmounted and the session is waited for, so that
+    /// `Filesystem::destroy` has run when drop returns - except in the cases documented
+    /// on [`BackgroundSession`], where the session thread is detached instead.
     pub fn spawn(self) -> io::Result<BackgroundSession> {
         let sender = self.ch.sender();
+        let fuse_device = self.ch.device();
         // Take the fuse_session, so that we can unmount it
         let mount = std::mem::take(&mut *self.mount.mount.lock());
         let guard = thread::Builder::new()
             .name("fuser-bg".to_string())
             .spawn(move || self.run())?;
         Ok(BackgroundSession {
-            guard,
+            guard: Some(guard),
             sender,
+            fuse_device,
             mount,
         })
     }
@@ -565,23 +569,51 @@ impl<FS: Filesystem> SessionEventLoop<FS> {
 }
 
 /// The background session data structure
+///
+/// Dropping this unmounts the filesystem and blocks until the session has ended,
+/// which guarantees that `Filesystem::destroy` has run when drop returns. Because
+/// of that, it must not be dropped from within a filesystem callback, which runs
+/// on the session thread being waited for. For a session created via
+/// `Session::from_fd` there is no mount to remove, so dropping cannot end the
+/// session and leaves its thread detached; end the session externally and use
+/// `join` to wait for it instead. The thread is likewise left detached, with a
+/// warning, rather than waiting for a session that may never end when the
+/// unmount fails, or when the kernel connection is still alive a few seconds
+/// after a successful unmount request (e.g. a lazily unmounted filesystem that
+/// is still in use, or an unmount helper that failed without reporting it).
 #[derive(Debug)]
 pub struct BackgroundSession {
-    /// Thread guard of the background session
-    pub guard: JoinHandle<io::Result<()>>,
+    /// Thread guard of the background session. None once joined.
+    guard: Option<JoinHandle<io::Result<()>>>,
     /// Object for creating Notifiers for client use
     sender: ChannelSender,
+    /// The FUSE device fd of the session's kernel connection
+    fuse_device: Arc<DevFuse>,
     /// Ensures the filesystem is unmounted when the session ends
     mount: Option<Mount>,
 }
 
+/// How long teardown waits for the kernel connection to end after a successful
+/// unmount request, before giving up on joining the session thread. The
+/// connection can end asynchronously (auto_unmount, kernel teardown), but a few
+/// seconds only pass without it ending when the session cannot be waited for,
+/// e.g. a lazily unmounted filesystem still in use
+const UNMOUNT_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
 impl BackgroundSession {
-    /// Unmount the filesystem and join the background thread.
+    /// Unmount the filesystem and join the background thread, returning the
+    /// session result. `Filesystem::destroy` has run when this returns.
     pub fn umount_and_join(mut self) -> io::Result<()> {
         if let Some(mount) = self.mount.take() {
-            mount.umount()?;
+            if let Err(err) = mount.umount() {
+                // The filesystem is still mounted and the session still running,
+                // so joining would block indefinitely; leave the thread detached,
+                // as before
+                self.guard.take();
+                return Err(err);
+            }
         }
-        self.join()
+        self.join_impl()
     }
 
     /// Returns an object that can be used to send notifications to the kernel
@@ -589,9 +621,17 @@ impl BackgroundSession {
         Notifier::new(self.sender.clone())
     }
 
-    /// Join the filesystem thread.
-    pub fn join(self) -> io::Result<()> {
-        self.guard
+    /// Join the filesystem thread without unmounting first: blocks until
+    /// something else ends the session, e.g. an external unmount.
+    pub fn join(mut self) -> io::Result<()> {
+        self.join_impl()
+    }
+
+    fn join_impl(&mut self) -> io::Result<()> {
+        let Some(guard) = self.guard.take() else {
+            return Ok(());
+        };
+        guard
             .join()
             .map_err(|_panic: Box<dyn std::any::Any + Send>| {
                 io::Error::new(
@@ -599,6 +639,36 @@ impl BackgroundSession {
                     "filesystem background thread panicked",
                 )
             })?
+    }
+}
+
+impl Drop for BackgroundSession {
+    fn drop(&mut self) {
+        // Unmount and wait for the session to end, so that Filesystem::destroy
+        // has run by the time drop returns (issues #239 and #411). Without the
+        // join, the process could exit before the detached session thread got
+        // around to calling destroy
+        let Some(mount) = self.mount.take() else {
+            // No mount to remove (Session::from_fd): nothing here can end the
+            // session, so joining could block forever; leave the thread detached
+            return;
+        };
+        if let Err(err) = mount.umount() {
+            // Still mounted, so the session is still running and joining would
+            // block indefinitely
+            warn!("Failed to unmount filesystem during drop: {err}");
+            return;
+        }
+        // The connection can end asynchronously (e.g. auto_unmount), and some
+        // unmount helpers cannot report failures. Wait boundedly, and if the
+        // session lives on, detach rather than block indefinitely
+        if !crate::mnt::connection_ended(&self.fuse_device, UNMOUNT_WAIT) {
+            warn!("FUSE connection still alive after unmount; detaching session thread");
+            return;
+        }
+        if let Err(err) = self.join_impl() {
+            warn!("Session ended with an error during drop: {err}");
+        }
     }
 }
 
@@ -672,6 +742,40 @@ mod test {
                 .arg(&mountpoint)
                 .status();
         }
+        ManuallyDrop::into_inner(tmp);
+    }
+
+    /// Dropping a BackgroundSession must unmount the filesystem and wait for the
+    /// session to end, so that Filesystem::destroy has run when drop returns.
+    #[test]
+    fn drop_waits_for_destroy() {
+        struct DestroyFs {
+            destroyed: Arc<std::sync::atomic::AtomicBool>,
+        }
+        impl Filesystem for DestroyFs {
+            fn destroy(&mut self) {
+                // Give drop a chance to return early: without the join, drop
+                // consistently wins this race and the assertion below fails
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                self.destroyed
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+
+        let tmp = ManuallyDrop::new(tempfile::tempdir().unwrap());
+        let destroyed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let fs = DestroyFs {
+            destroyed: destroyed.clone(),
+        };
+        let bg = Session::new(fs, tmp.path(), &Config::default())
+            .unwrap()
+            .spawn()
+            .unwrap();
+        drop(bg);
+        assert!(
+            destroyed.load(std::sync::atomic::Ordering::SeqCst),
+            "destroy() must have been called by the time drop returns"
+        );
         ManuallyDrop::into_inner(tmp);
     }
 

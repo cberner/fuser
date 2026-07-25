@@ -47,6 +47,11 @@ impl Channel {
         }
     }
 
+    /// Returns the FUSE device of this channel.
+    pub(crate) fn device(&self) -> Arc<DevFuse> {
+        self.0.clone()
+    }
+
     /// Returns a sender object for this channel. The sender object can be
     /// used to send to the channel. Multiple sender objects can be used
     /// and they can safely be sent to other threads.
