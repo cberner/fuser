@@ -54,6 +54,11 @@ use crate::request::RequestWithSender;
 /// and 128k on other systems.
 pub(crate) const MAX_WRITE_SIZE: usize = 16 * 1024 * 1024;
 
+/// The minimum write size the kernel will honor: process_init_reply() in the
+/// kernel's fs/fuse/inode.c clamps a smaller negotiated max_write up to 4096,
+/// so advertising less would not stop larger write requests from arriving.
+pub(crate) const MIN_WRITE_SIZE: usize = 4096;
+
 #[derive(Default, Debug, Eq, PartialEq, Clone, Copy)]
 /// How requests should be filtered based on the calling UID.
 pub enum SessionACL {

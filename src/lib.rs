@@ -76,6 +76,7 @@ pub use crate::reply::ReplyXattr;
 pub use crate::request_param::Request;
 pub use crate::session::BackgroundSession;
 use crate::session::MAX_WRITE_SIZE;
+use crate::session::MIN_WRITE_SIZE;
 pub use crate::session::Session;
 pub use crate::session::SessionACL;
 pub use crate::session::SessionUnmounter;
@@ -295,10 +296,13 @@ impl KernelConfig {
     ///
     /// On success returns the previous value.
     /// # Errors
-    /// If the argument is too large, returns the nearest value which will succeed.
+    /// If the argument is too small or too large, returns the nearest value which will succeed.
     pub fn set_max_write(&mut self, value: u32) -> Result<u32, u32> {
-        if value == 0 {
-            return Err(1);
+        // The kernel clamps max_write below 4096 up to 4096 (process_init_reply()
+        // in fs/fuse/inode.c), so a smaller advertised value would not take
+        // effect: write requests of up to 4096 bytes would still arrive
+        if value < MIN_WRITE_SIZE as u32 {
+            return Err(MIN_WRITE_SIZE as u32);
         }
         if value > MAX_WRITE_SIZE as u32 {
             return Err(MAX_WRITE_SIZE as u32);
@@ -1071,4 +1075,37 @@ pub fn spawn_mount<'a, FS: Filesystem + Send + 'static + 'a, P: AsRef<Path>>(
     options: &Config,
 ) -> io::Result<BackgroundSession> {
     Session::new(filesystem, mountpoint.as_ref(), options).and_then(session::Session::spawn)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn kernel_config_set_max_write_bounds() {
+        let mut config = KernelConfig::new(InitFlags::empty(), 65536, Version(7, 31));
+        // Values the kernel would not honor (it clamps max_write below 4096 up
+        // to 4096) are rejected with the nearest value that will take effect
+        assert_eq!(config.set_max_write(0), Err(MIN_WRITE_SIZE as u32));
+        assert_eq!(
+            config.set_max_write(MIN_WRITE_SIZE as u32 - 1),
+            Err(MIN_WRITE_SIZE as u32)
+        );
+        // Values beyond the session's read buffer are rejected likewise
+        assert_eq!(
+            config.set_max_write(MAX_WRITE_SIZE as u32 + 1),
+            Err(MAX_WRITE_SIZE as u32)
+        );
+        // Rejected calls must leave the configured value unchanged
+        assert_eq!(config.max_write, MAX_WRITE_SIZE as u32);
+        // Both bounds themselves are accepted, returning the previous value
+        assert_eq!(
+            config.set_max_write(MIN_WRITE_SIZE as u32),
+            Ok(MAX_WRITE_SIZE as u32)
+        );
+        assert_eq!(
+            config.set_max_write(MAX_WRITE_SIZE as u32),
+            Ok(MIN_WRITE_SIZE as u32)
+        );
+    }
 }
