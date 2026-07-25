@@ -1,6 +1,9 @@
 # FUSE for Rust - Changelog
 
 ## Unreleased
+* `KernelConfig::set_max_write()` now rejects values below 4096 with the nearest valid value,
+  per its documented contract (#327). The kernel clamps `max_write` to at least 4096, so a
+  smaller value was accepted but ineffective: write requests of up to 4096 bytes still arrived
 * Fix inverted mounted-check during session teardown: after the filesystem had already been
   unmounted externally, fuser would attempt to unmount the mountpoint again, which could
   unmount an unrelated filesystem mounted at the same path in the meantime
