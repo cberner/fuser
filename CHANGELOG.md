@@ -1,6 +1,10 @@
 # FUSE for Rust - Changelog
 
 ## Unreleased
+* Treat `ECONNABORTED` from the FUSE device as a clean session end (#212): with
+  `FUSE_ABORT_ERROR` negotiated, aborting the connection made `Session::run()` and
+  `BackgroundSession::umount_and_join()` return an error instead of ending normally
+  the way an unmount (`ENODEV`) does
 * `KernelConfig::set_max_write()` now rejects values below 4096 with the nearest valid value,
   per its documented contract (#327). The kernel clamps `max_write` to at least 4096, so a
   smaller value was accepted but ineffective: write requests of up to 4096 bytes still arrived

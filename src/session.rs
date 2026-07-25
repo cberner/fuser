@@ -345,7 +345,7 @@ impl<FS: Filesystem> Session<FS> {
             // Read the init request from the kernel
             let size = match self.ch.receive_retrying(buf) {
                 Ok(size) => size,
-                Err(nix::errno::Errno::ENODEV) => {
+                Err(nix::errno::Errno::ENODEV | nix::errno::Errno::ECONNABORTED) => {
                     return Err(io::Error::new(
                         io::ErrorKind::NotConnected,
                         "FUSE device disconnected during handshake",
@@ -553,7 +553,11 @@ impl<FS: Filesystem> SessionEventLoop<FS> {
                         ));
                     }
                 },
-                Err(nix::errno::Errno::ENODEV) => return Ok(()),
+                // The kernel returns ENODEV when the filesystem was unmounted, or
+                // ECONNABORTED when the connection was aborted with FUSE_ABORT_ERROR
+                // negotiated. Either way the connection is gone: a normal end of the
+                // session, not an operation failure (issue #212)
+                Err(nix::errno::Errno::ENODEV | nix::errno::Errno::ECONNABORTED) => return Ok(()),
                 Err(err) => return Err(err.into()),
             }
         }
@@ -595,5 +599,104 @@ impl BackgroundSession {
                     "filesystem background thread panicked",
                 )
             })?
+    }
+}
+
+// The abort test uses fusectl, which only exists on Linux; on other targets the
+// whole module would be dead code
+#[cfg(all(test, target_os = "linux"))]
+mod test {
+    use std::io::Write;
+    use std::mem::ManuallyDrop;
+
+    use super::*;
+    use crate::Config;
+    use crate::InitFlags;
+    use crate::KernelConfig;
+    use crate::Request;
+
+    /// A filesystem that requests FUSE_ABORT_ERROR during init, so that after an
+    /// abort the FUSE device fails reads with ECONNABORTED instead of ENODEV.
+    struct AbortErrorFs;
+
+    impl Filesystem for AbortErrorFs {
+        fn init(&mut self, _req: &Request, config: &mut KernelConfig) -> io::Result<()> {
+            // Ignore the error: on kernels without FUSE_ABORT_ERROR an abort
+            // yields ENODEV, which ends the session cleanly anyway
+            let _ = config.add_capabilities(InitFlags::FUSE_ABORT_ERROR);
+            Ok(())
+        }
+    }
+
+    /// Aborting the connection (via fusectl) with FUSE_ABORT_ERROR negotiated makes
+    /// the FUSE device return ECONNABORTED. The session loop must treat that as a
+    /// normal end of the session, so that umount_and_join() reports success rather
+    /// than an error for an administratively aborted filesystem (issue #212).
+    #[test]
+    fn session_ends_cleanly_after_abort() {
+        // Leak the directory on failure: it may still be a (dead) mountpoint
+        let tmp = ManuallyDrop::new(tempfile::tempdir().unwrap());
+        // The mount table lists the canonical path; resolve while it is a plain dir
+        let mountpoint = tmp.path().canonicalize().unwrap();
+
+        let session = Session::new(AbortErrorFs, &mountpoint, &Config::default()).unwrap();
+        let bg = session.spawn().unwrap();
+
+        // Wait until the handshake completed: the kernel forwards filesystem
+        // requests only after the init reply was processed, so a completed
+        // operation (the errno does not matter) proves the loop is past it
+        let _ = std::fs::metadata(&mountpoint);
+
+        let Some(abort_path) = fusectl_abort_path(&mountpoint) else {
+            eprintln!("skipping session_ends_cleanly_after_abort: fusectl not available");
+            bg.umount_and_join().unwrap();
+            ManuallyDrop::into_inner(tmp);
+            return;
+        };
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(abort_path)
+            .unwrap()
+            .write_all(b"1")
+            .unwrap();
+
+        bg.umount_and_join()
+            .expect("session must end cleanly after the connection was aborted");
+
+        // Teardown intentionally leaves the dead mount in the mount table (the
+        // same as libfuse); detach it so the tempdir can be removed
+        let _ = nix::mount::umount2(&mountpoint, nix::mount::MntFlags::MNT_DETACH);
+        for fusermount in ["fusermount3", "fusermount"] {
+            let _ = std::process::Command::new(fusermount)
+                .args(["-u", "-q", "-z", "--"])
+                .arg(&mountpoint)
+                .status();
+        }
+        ManuallyDrop::into_inner(tmp);
+    }
+
+    /// The fusectl abort file for the FUSE mount at `mountpoint`: the connection
+    /// directory is named after the mount's anonymous device number.
+    fn fusectl_abort_path(mountpoint: &Path) -> Option<std::path::PathBuf> {
+        let mountinfo = std::fs::read_to_string("/proc/self/mountinfo").ok()?;
+        let mut device = None;
+        for line in mountinfo.lines() {
+            let mut fields = line.split(' ');
+            let (Some(dev), Some(path)) = (fields.nth(2), fields.nth(1)) else {
+                continue;
+            };
+            // mountinfo octal-escapes special characters; the tempdir path has none.
+            // Later entries are mounted on top of earlier ones, so the last match wins
+            if Path::new(path) == mountpoint {
+                let (major, minor) = dev.split_once(':')?;
+                let (major, minor): (u64, u64) = (major.parse().ok()?, minor.parse().ok()?);
+                // fusectl names the directory with the raw kernel-internal
+                // device number, (major << 20) | minor: fuse_ctl_add_conn()
+                // prints fc->dev (= sb->s_dev) without re-encoding it
+                device = Some((major << 20) | minor);
+            }
+        }
+        let path = std::path::PathBuf::from(format!("/sys/fs/fuse/connections/{}/abort", device?));
+        path.exists().then_some(path)
     }
 }
