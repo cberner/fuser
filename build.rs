@@ -23,7 +23,6 @@ fn main() {
                 .map_err(|e| eprintln!("{e}"))
                 .unwrap();
             println!("cargo::rustc-cfg=fuser_mount_impl=\"libfuse2\"");
-            println!("cargo::rustc-cfg=feature=\"macfuse-4-compat\"");
         }
     } else if cfg!(feature = "libfuse3") {
         configure_libfuse3().unwrap();

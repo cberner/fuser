@@ -1271,8 +1271,30 @@ impl Filesystem for SimpleFS {
             }
         }
 
+        // Linux's RENAME_EXCHANGE and macOS's RENAME_SWAP both mean: atomically exchange the
+        // two entries instead of replacing the destination. Linux's RENAME_NOREPLACE and
+        // macOS's RENAME_EXCL both mean: fail instead of replacing an existing destination
         #[cfg(target_os = "linux")]
-        if flags.contains(RenameFlags::RENAME_EXCHANGE) {
+        let (exchange, no_replace) = (
+            flags.contains(RenameFlags::RENAME_EXCHANGE),
+            flags.contains(RenameFlags::RENAME_NOREPLACE),
+        );
+        #[cfg(target_os = "macos")]
+        let (exchange, no_replace) = (
+            flags.contains(RenameFlags::RENAME_SWAP),
+            flags.contains(RenameFlags::RENAME_EXCL),
+        );
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        let (exchange, no_replace) = (false, false);
+
+        // Exchanging and refusing to replace are contradictory: renameat2(2) and
+        // renamex_np(2) both reject the combination
+        if exchange && no_replace {
+            reply.error(Errno::EINVAL);
+            return;
+        }
+
+        if exchange {
             let mut new_inode_attrs = match self.lookup_name(newparent, newname) {
                 Ok(attrs) => attrs,
                 Err(error_code) => {
@@ -1322,6 +1344,11 @@ impl Filesystem for SimpleFS {
             }
 
             reply.ok();
+            return;
+        }
+
+        if no_replace && self.lookup_name(newparent, newname).is_ok() {
+            reply.error(Errno::EEXIST);
             return;
         }
 

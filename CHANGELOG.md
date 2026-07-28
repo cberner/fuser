@@ -21,6 +21,17 @@
 * Fix corruption of pre-1970 timestamps with fractional seconds in `setattr`: the nanoseconds
   were subtracted from instead of added to the (negative) whole second, shifting times by up
   to two seconds
+* macOS: forward the `renamex_np(2)` flags to `Filesystem::rename()` as
+  `RenameFlags::RENAME_SWAP` and `RenameFlags::RENAME_EXCL`, instead of always passing an empty
+  set. Filesystems that do not implement these operations must now reply with EINVAL for flags
+  they don't handle
+* macOS: fix garbled `rename()` names (#341). fuser assumed macFUSE always sends the extended
+  16-byte `fuse_rename_in`, but macFUSE sends it only once the extended rename operations have
+  been negotiated, which fuser never requested. The 8-byte layout it actually received was then
+  parsed at the wrong offset, so the filesystem saw truncated or empty names. fuser now always
+  requests those operations
+* Remove the `macfuse-4-compat` feature flag, which was set by the build script and selected the
+  extended `fuse_rename_in` layout. That layout is now used for all macOS builds
 
 ## 0.18.0 - 2026-07-22
 * Remove deprecated feature flags `abi-*`
