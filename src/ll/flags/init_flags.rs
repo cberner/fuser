@@ -93,6 +93,14 @@ bitflags! {
         /// kernel supports request timeout
         const FUSE_REQUEST_TIMEOUT = 1 << 42;
 
+        /// filesystem supports the `RENAME_SWAP` flag of `renamex_np(2)`.
+        /// Requesting this also selects macFUSE's extended `fuse_rename_in` layout
+        #[cfg(target_os = "macos")]
+        const FUSE_RENAME_SWAP = 1 << 25;
+        /// filesystem supports the `RENAME_EXCL` flag of `renamex_np(2)`.
+        /// Requesting this also selects macFUSE's extended `fuse_rename_in` layout
+        #[cfg(target_os = "macos")]
+        const FUSE_RENAME_EXCL = 1 << 26;
         /// pre-allocate space for a file
         #[cfg(target_os = "macos")]
         const FUSE_ALLOCATE = 1 << 27;

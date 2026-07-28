@@ -13,7 +13,6 @@ use log::error;
 
 use crate::Filesystem;
 use crate::PollNotifier;
-use crate::RenameFlags;
 use crate::Request;
 use crate::channel::ChannelSender;
 use crate::forget_one::ForgetOne;
@@ -207,13 +206,19 @@ impl<'a> RequestWithSender<'a> {
                 );
             }
             ll::Operation::Rename(x) => {
+                // Only macFUSE carries flags on the plain rename opcode. Everywhere else the
+                // extended flags arrive via FUSE_RENAME2.
+                #[cfg(target_os = "macos")]
+                let flags = x.flags();
+                #[cfg(not(target_os = "macos"))]
+                let flags = crate::RenameFlags::empty();
                 filesystem.rename(
                     self.request_header(),
                     self.request.nodeid(),
                     x.src().name.as_ref(),
                     x.dest().dir,
                     x.dest().name.as_ref(),
-                    RenameFlags::empty(),
+                    flags,
                     self.reply(),
                 );
             }

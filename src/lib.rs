@@ -108,13 +108,19 @@ mod time;
 const INIT_FLAGS: InitFlags = InitFlags::FUSE_ASYNC_READ.union(InitFlags::FUSE_BIG_WRITES);
 // TODO: Add FUSE_EXPORT_SUPPORT
 
-/// On macOS, we additionally support case insensitiveness, volume renames and xtimes
+/// On macOS, we additionally support case insensitiveness, volume renames, xtimes and the
+/// extended rename operations.
+///
+/// `FUSE_RENAME_SWAP`/`FUSE_RENAME_EXCL` must always be requested: macFUSE only sends the
+/// extended `fuse_rename_in` layout that fuser parses once they have been negotiated.
 /// TODO: we should eventually let the filesystem implementation decide which flags to set
 #[cfg(target_os = "macos")]
 const INIT_FLAGS: InitFlags = InitFlags::FUSE_ASYNC_READ
     .union(InitFlags::FUSE_CASE_INSENSITIVE)
     .union(InitFlags::FUSE_VOL_RENAME)
-    .union(InitFlags::FUSE_XTIMES);
+    .union(InitFlags::FUSE_XTIMES)
+    .union(InitFlags::FUSE_RENAME_SWAP)
+    .union(InitFlags::FUSE_RENAME_EXCL);
 // TODO: Add FUSE_EXPORT_SUPPORT and FUSE_BIG_WRITES (requires ABI 7.10)
 
 fn default_init_flags(capabilities: InitFlags) -> InitFlags {
@@ -537,6 +543,9 @@ pub trait Filesystem: Send + Sync + 'static {
     }
 
     /// Rename a file.
+    ///
+    /// `flags` are the `renameat2` flags on Linux and the `renamex_np` flags on macOS. Reply
+    /// with EINVAL for any flag that isn't handled.
     fn rename(
         &self,
         _req: &Request,

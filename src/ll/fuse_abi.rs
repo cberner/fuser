@@ -259,13 +259,16 @@ pub(crate) struct fuse_mkdir_in {
     pub(crate) umask: u32,
 }
 
+/// macFUSE extends this struct with the `renamex_np(2)` flags. The kernel only sends the
+/// extended layout once `FUSE_RENAME_SWAP`/`FUSE_RENAME_EXCL` were negotiated, which fuser
+/// always does on macOS, so the layout is unconditional there.
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
 pub(crate) struct fuse_rename_in {
     pub(crate) newdir: u64,
-    #[cfg(feature = "macfuse-4-compat")]
+    #[cfg(target_os = "macos")]
     pub(crate) flags: u32,
-    #[cfg(feature = "macfuse-4-compat")]
+    #[cfg(target_os = "macos")]
     pub(crate) padding: u32,
 }
 
