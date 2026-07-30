@@ -25,6 +25,13 @@
   an external unmount (#658). As in libfuse, a connection that was aborted (e.g. via
   fusectl) also counts as already unmounted; its dead mount is left to `auto_unmount` or
   `fusermount -u -z`
+* Fix special characters in `MountOption` values being interpreted as further mount options
+  (#424). `MountOption::FSName("foo,ro")` used to mount a filesystem named `foo` that was
+  read-only, instead of one named `foo,ro`. Commas and backslashes in `FSName` are now escaped
+  for libfuse and the fusermount helpers. `Subtype` and `CUSTOM` values containing a comma or
+  backslash, which cannot be escaped consistently, are now rejected by `Session::new()`, as are
+  NUL bytes in any value, which used to panic. On platforms other than Linux the mount helpers
+  support no escaping, so `FSName` is restricted there as well
 * Fix a per-mount memory leak in the `libfuse3` backend: the `fuse_session` is now destroyed
   on every teardown path, including when mounting fails partway through setup
 * Fix corruption of pre-1970 timestamps with fractional seconds in `setattr`: the nanoseconds

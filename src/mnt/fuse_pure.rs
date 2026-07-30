@@ -43,6 +43,7 @@ use crate::dev_fuse::DevFuse;
 use crate::mnt::mount_options::MountOption;
 use crate::mnt::mount_options::MountOptionGroup;
 use crate::mnt::mount_options::option_group;
+use crate::mnt::mount_options::option_to_escaped_string;
 use crate::mnt::mount_options::option_to_flag;
 use crate::mnt::mount_options::option_to_string;
 
@@ -250,7 +251,7 @@ fn fuse_mount_fusermount(
 
     let mut builder = Command::new(&fusermount_bin);
     builder.stdout(Stdio::piped()).stderr(Stdio::piped());
-    let mut options_strs: Vec<String> = options.iter().map(option_to_string).collect();
+    let mut options_strs: Vec<String> = options.iter().map(option_to_escaped_string).collect();
     options_strs.extend(acl.to_mount_option().map(|s| s.to_owned()));
     if !options_strs.is_empty() {
         builder.arg("-o");
@@ -335,6 +336,8 @@ fn fuse_mount_mount_fusefs(
 
     let mut builder = Command::new(fusermount_bin);
     builder.stdout(Stdio::piped()).stderr(Stdio::piped());
+    // Unlike fusermount, mount_fusefs decodes no escapes. That is why the platforms
+    // using it reject comma and backslash in option values outright
     let mut options_strs: Vec<String> = options.iter().map(option_to_string).collect();
     options_strs.extend(acl.to_mount_option().map(|s| s.to_owned()));
     if !options_strs.is_empty() {
