@@ -22,6 +22,7 @@ use fuse2_sys::fuse_args;
 use log::info;
 use log::warn;
 use mount_options::MountOption;
+use mount_options::check_option_values;
 
 use crate::dev_fuse::DevFuse;
 
@@ -35,13 +36,14 @@ fn with_fuse_args<T, F: FnOnce(&fuse_args) -> T>(
 ) -> T {
     use std::ffi::CString;
 
-    use mount_options::option_to_string;
+    use mount_options::option_to_escaped_string;
 
     let mut args = vec![CString::new("rust-fuse").unwrap()];
     for x in options {
         args.extend_from_slice(&[
             CString::new("-o").unwrap(),
-            CString::new(option_to_string(x)).unwrap(),
+            CString::new(option_to_escaped_string(x))
+                .expect("option values are checked for NUL by check_option_values()"),
         ]);
     }
     if let Some(acl) = acl.to_mount_option() {
@@ -104,6 +106,10 @@ impl Mount {
         options: &[MountOption],
         acl: SessionACL,
     ) -> io::Result<(Arc<DevFuse>, Mount)> {
+        // Checked here, rather than in Session, so that every formatting of an option
+        // value below can rely on it
+        check_option_values(options)?;
+
         #[cfg(fuser_mount_impl = "pure-rust")]
         let (dev_fuse, mount_impl) = {
             let (dev_fuse, mount) = fuse_pure::MountImpl::new(mountpoint, options, acl)?;
@@ -360,6 +366,63 @@ mod test {
         assert!(fusermount_unmount("/nonexistent/fusermount", &mountpoint).is_err());
         // Helper reports success
         assert!(fusermount_unmount("/bin/true", &mountpoint).is_ok());
+    }
+
+    /// libfuse splits each -o argument on commas, so a comma in a value must reach it
+    /// escaped
+    #[test]
+    fn fuse_args_escaping() {
+        with_fuse_args(
+            &[MountOption::FSName("foo,ro".into())],
+            SessionACL::Owner,
+            |args| {
+                let v: Vec<_> = (0..args.argc)
+                    .map(|n| unsafe {
+                        CStr::from_ptr(*args.argv.offset(n as isize))
+                            .to_str()
+                            .unwrap()
+                    })
+                    .collect();
+                assert_eq!(*v, ["rust-fuse", "-o", "fsname=foo\\,ro"]);
+            },
+        );
+    }
+
+    /// A comma in `FSName` must end up in the source name of the mount, rather than
+    /// being interpreted as a separate mount option
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn mount_unmount_fsname_with_comma() {
+        use std::mem::ManuallyDrop;
+
+        let tmp = ManuallyDrop::new(tempfile::tempdir().unwrap());
+        let options = [MountOption::FSName("fuser,ro".to_owned())];
+        let (_file, mount) = Mount::new(tmp.path(), &options, SessionACL::default()).unwrap();
+
+        let mounts = std::fs::read_to_string("/proc/self/mounts").unwrap();
+        let fields: Vec<&str> = mounts
+            .lines()
+            .map(|line| line.split(' ').collect::<Vec<_>>())
+            .find(|fields| fields[1] == tmp.path().to_str().unwrap())
+            .unwrap_or_else(|| panic!("{:?} not found in:\n{}", tmp.path(), mounts));
+        assert_eq!(fields[0], "fuser,ro");
+        assert!(
+            !fields[3].split(',').any(|option| option == "ro"),
+            "the comma in the source name leaked into the mount options: {}",
+            fields[3]
+        );
+
+        mount.umount().unwrap();
+        ManuallyDrop::into_inner(tmp);
+    }
+
+    /// A NUL in an option value must be reported as an error, rather than panicking
+    #[test]
+    fn mount_option_with_nul() {
+        let tmp = tempfile::tempdir().unwrap();
+        let options = [MountOption::FSName("no\0name".to_owned())];
+        let err = Mount::new(tmp.path(), &options, SessionACL::default()).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
     }
 
     #[cfg(not(target_os = "macos"))]

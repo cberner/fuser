@@ -26,10 +26,17 @@ pub struct Config {
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
 pub enum MountOption {
     /// Set the name of the source in mtab
+    ///
+    /// On Linux the value may contain any character except NUL. On other platforms it may
+    /// contain neither comma nor backslash, because the mount helpers there cannot escape them.
     FSName(String),
     /// Set the filesystem subtype in mtab
+    ///
+    /// The value may not contain NUL, comma, or backslash.
     Subtype(String),
     /// Allows passing an option which is not otherwise supported in these enums
+    ///
+    /// The value may not contain NUL, comma, or backslash.
     #[allow(clippy::upper_case_acronyms)]
     CUSTOM(String),
 
@@ -125,6 +132,46 @@ pub(crate) fn check_option_conflicts(options: &Config) -> Result<(), io::Error> 
     }
 }
 
+/// Option values reach the kernel, libfuse, or a fusermount helper inside a comma
+/// separated list, so an unescaped comma in a value is read as the start of the next
+/// option. libfuse and fusermount decode backslash escapes, but of the values fuser sends
+/// them only `fsname` is re-escaped by libfuse when it forwards options to fusermount, so
+/// every other value must be free of both characters. NUL terminates the list and can
+/// never be represented.
+pub(crate) fn check_option_values(options: &[MountOption]) -> Result<(), io::Error> {
+    for option in options {
+        match option {
+            // Linux is the only platform where every consumer of fsname either takes it
+            // verbatim (as the mount(2) source) or decodes the escapes added by
+            // option_to_escaped_string
+            MountOption::FSName(name) if cfg!(target_os = "linux") => {
+                check_option_value(option, name, &['\0'])?;
+            }
+            MountOption::FSName(value)
+            | MountOption::Subtype(value)
+            | MountOption::CUSTOM(value) => {
+                check_option_value(option, value, &['\0', ',', '\\'])?;
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn check_option_value(
+    option: &MountOption,
+    value: &str,
+    invalid: &[char],
+) -> Result<(), io::Error> {
+    match value.chars().find(|c| invalid.contains(c)) {
+        Some(c) => Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            format!("Mount option {option:?} contains an invalid character: {c:?}"),
+        )),
+        None => Ok(()),
+    }
+}
+
 fn conflicts_with(option: &MountOption) -> Vec<MountOption> {
     match option {
         MountOption::FSName(_)
@@ -171,6 +218,30 @@ pub(crate) fn option_to_string(option: &MountOption) -> String {
         MountOption::Sync => "sync".to_string(),
         MountOption::Async => "async".to_string(),
     }
+}
+
+// Format option to be passed to libfuse or a fusermount helper, both of which split the
+// option list on commas and decode backslash escapes, unlike the kernel, which takes
+// option values verbatim
+#[allow(dead_code)]
+pub(crate) fn option_to_escaped_string(option: &MountOption) -> String {
+    match option {
+        // fsname is the only value allowed to contain characters that need escaping,
+        // see check_option_values()
+        MountOption::FSName(name) => format!("fsname={}", escape_option_value(name)),
+        option => option_to_string(option),
+    }
+}
+
+fn escape_option_value(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for c in value.chars() {
+        if c == ',' || c == '\\' {
+            escaped.push('\\');
+        }
+        escaped.push(c);
+    }
+    escaped
 }
 
 #[allow(dead_code)]
@@ -308,6 +379,58 @@ mod test {
             .is_ok()
         );
     }
+    #[test]
+    fn option_value_checking() {
+        use crate::mnt::mount_options::MountOption::*;
+
+        for option in [FSName, Subtype, CUSTOM] {
+            assert!(check_option_values(&[option("no\0name".to_owned())]).is_err());
+        }
+        for option in [Subtype, CUSTOM] {
+            assert!(check_option_values(&[option("comma,injected".to_owned())]).is_err());
+            assert!(check_option_values(&[option("back\\slash".to_owned())]).is_err());
+        }
+        // Only on Linux can fsname be escaped everywhere it is used
+        assert_eq!(
+            check_option_values(&[FSName("comma,and\\backslash".to_owned())]).is_ok(),
+            cfg!(target_os = "linux")
+        );
+        assert!(
+            check_option_values(&[FSName("plain".to_owned()), CUSTOM("plain".to_owned())]).is_ok()
+        );
+    }
+
+    /// A comma in an option value must not be read as the start of another option by
+    /// libfuse or fusermount
+    #[test]
+    fn option_escaping() {
+        use crate::mnt::mount_options::MountOption::*;
+
+        assert_eq!(
+            option_to_escaped_string(&FSName("foo,ro".to_owned())),
+            "fsname=foo\\,ro"
+        );
+        assert_eq!(
+            option_to_escaped_string(&FSName("back\\slash".to_owned())),
+            "fsname=back\\\\slash"
+        );
+        // A backslash escape must survive libfuse's octal decoding: "\\123" decodes to
+        // a literal backslash followed by "123", not to the byte 0o123
+        assert_eq!(
+            option_to_escaped_string(&FSName("\\123".to_owned())),
+            "fsname=\\\\123"
+        );
+        assert_eq!(
+            option_to_escaped_string(&FSName("plain".to_owned())),
+            "fsname=plain"
+        );
+        assert_eq!(
+            option_to_escaped_string(&Subtype("plain".to_owned())),
+            "subtype=plain"
+        );
+        assert_eq!(option_to_escaped_string(&RO), "ro");
+    }
+
     #[test]
     fn option_round_trip() {
         use crate::mnt::mount_options::MountOption::*;
