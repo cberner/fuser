@@ -58,6 +58,15 @@ fn with_fuse_args<T, F: FnOnce(&fuse_args) -> T>(
     })
 }
 
+/// Name what could not be reached, so that a bare "No such file or directory" does not
+/// leave the caller guessing between the mountpoint, the FUSE device and the mount
+/// helper. The error kind is preserved for callers that match on it; the OS error
+/// number survives only in the message
+#[allow(dead_code)] // Not used with every feature.
+pub(crate) fn context(what: impl std::fmt::Display, err: io::Error) -> io::Error {
+    io::Error::new(err.kind(), format!("{what}: {err}"))
+}
+
 /// Make a libfuse call that signals failure through its return value, and turn a failure
 /// into an error worth reporting.
 ///
@@ -307,7 +316,9 @@ pub(crate) fn fusermount_unmount(fusermount_bin: &str, mountpoint: &CStr) -> io:
         .arg("--")
         .arg(std::ffi::OsStr::from_bytes(mountpoint.to_bytes()));
 
-    let output = builder.output()?;
+    let output = builder
+        .output()
+        .map_err(|err| context(format_args!("running {fusermount_bin}"), err))?;
     debug!("fusermount: {}", String::from_utf8_lossy(&output.stdout));
     debug!("fusermount: {}", String::from_utf8_lossy(&output.stderr));
     if !output.status.success() {
@@ -395,10 +406,34 @@ mod test {
         let mountpoint = CString::new("/nonexistent").unwrap();
         // Helper exits nonzero (/bin/false ignores its arguments)
         assert!(fusermount_unmount("/bin/false", &mountpoint).is_err());
-        // Helper cannot be executed at all
-        assert!(fusermount_unmount("/nonexistent/fusermount", &mountpoint).is_err());
+        // Helper cannot be executed at all, which must say which helper that was
+        let err = fusermount_unmount("/nonexistent/fusermount", &mountpoint).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::NotFound);
+        assert!(err.to_string().contains("/nonexistent/fusermount"), "{err}");
         // Helper reports success
         assert!(fusermount_unmount("/bin/true", &mountpoint).is_ok());
+    }
+
+    /// A mount touches the mountpoint, the FUSE device and the mount helper, so "No such
+    /// file or directory" on its own does not say which one is missing (issue #250)
+    #[test]
+    fn context_names_what_failed() {
+        let err = context("/dev/fuse", io::ErrorKind::PermissionDenied.into());
+        // Preserved, so that callers matching on the kind keep working
+        assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
+        assert!(err.to_string().contains("/dev/fuse"), "{err}");
+        assert!(err.to_string().contains("permission denied"), "{err}");
+    }
+
+    /// The mountpoint is the first thing a mount resolves, and a missing one is what the
+    /// reporter of issue #250 mistook a missing /dev/fuse for
+    #[test]
+    #[cfg(fuser_mount_impl = "pure-rust")]
+    fn missing_mountpoint_is_named() {
+        let err =
+            Mount::new(Path::new("/nonexistent/mountpoint"), &[], SessionACL::Owner).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::NotFound);
+        assert!(err.to_string().contains("/nonexistent/mountpoint"), "{err}");
     }
 
     /// A libfuse call that fails without setting errno must not be reported with whatever
