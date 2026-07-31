@@ -779,6 +779,75 @@ mod test {
         ManuallyDrop::into_inner(tmp);
     }
 
+    /// An unmount must not fail merely because the filesystem is still in use. The
+    /// Mount is consumed by the unmount attempt, so a caller that gets EBUSY has
+    /// nothing left to retry with and the filesystem is left mounted (issue #686).
+    #[test]
+    fn umount_succeeds_while_filesystem_is_busy() {
+        use std::time::SystemTime;
+
+        use crate::FileAttr;
+        use crate::FileHandle;
+        use crate::FileType;
+        use crate::INodeNo;
+        use crate::ReplyAttr;
+
+        /// Serves getattr, which is all that opening the mount root needs
+        struct RootDirFs;
+        impl Filesystem for RootDirFs {
+            fn getattr(
+                &self,
+                _req: &Request,
+                ino: INodeNo,
+                _fh: Option<FileHandle>,
+                reply: ReplyAttr,
+            ) {
+                let now = SystemTime::now();
+                reply.attr(
+                    &std::time::Duration::from_secs(1),
+                    &FileAttr {
+                        ino,
+                        size: 0,
+                        blocks: 0,
+                        atime: now,
+                        mtime: now,
+                        ctime: now,
+                        crtime: now,
+                        kind: FileType::Directory,
+                        perm: 0o755,
+                        nlink: 2,
+                        uid: 0,
+                        gid: 0,
+                        rdev: 0,
+                        blksize: 4096,
+                        flags: 0,
+                    },
+                );
+            }
+        }
+
+        let tmp = ManuallyDrop::new(tempfile::tempdir().unwrap());
+        let mountpoint = tmp.path().canonicalize().unwrap();
+        let mut session = Session::new(RootDirFs, &mountpoint, &Config::default()).unwrap();
+        let mut unmounter = session.unmount_callable();
+        let runner = std::thread::spawn(move || session.run());
+        // The kernel forwards requests only after the init reply was processed, so a
+        // completed operation proves the session loop is past the handshake
+        let _ = std::fs::metadata(&mountpoint);
+
+        // An open handle on the mount root makes an eager unmount fail with EBUSY
+        let busy = std::fs::File::open(&mountpoint).unwrap();
+        unmounter
+            .unmount()
+            .expect("unmount must not fail while the filesystem is in use");
+
+        // Releasing the handle lets the lazily detached filesystem go away, ending
+        // the session
+        drop(busy);
+        runner.join().unwrap().unwrap();
+        ManuallyDrop::into_inner(tmp);
+    }
+
     /// The fusectl abort file for the FUSE mount at `mountpoint`: the connection
     /// directory is named after the mount's anonymous device number.
     fn fusectl_abort_path(mountpoint: &Path) -> Option<std::path::PathBuf> {

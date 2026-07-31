@@ -1,6 +1,9 @@
 # FUSE for Rust - Changelog
 
 ## Unreleased
+* Fix `EBUSY` when unmounting a filesystem that is still in use, as root on Linux (#686).
+  The unmount is now lazy, as it already was for unprivileged users and as libfuse does,
+  instead of failing and leaving the filesystem mounted with no way to retry
 * Fix meaningless errors when a mount fails inside libfuse (#406). A failure that libfuse
   reported without setting errno was surfaced with an unrelated errno, most visibly
   `Success (os error 0)`; such a failure now names the libfuse call it came from, alongside
