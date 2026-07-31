@@ -1,6 +1,9 @@
 # FUSE for Rust - Changelog
 
 ## Unreleased
+* Name the file that could not be reached when a mount fails, instead of reporting a bare
+  "No such file or directory" that could equally mean the mountpoint, `/dev/fuse` or the
+  `fusermount` helper (#250)
 * Fix `EBUSY` when unmounting a filesystem that is still in use, as root on Linux (#686).
   The unmount is now lazy, as it already was for unprivileged users and as libfuse does,
   instead of failing and leaving the filesystem mounted with no way to retry

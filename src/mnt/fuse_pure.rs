@@ -28,7 +28,6 @@ use std::process::Stdio;
 use std::sync::Arc;
 
 use log::debug;
-use log::error;
 use nix::fcntl::FcntlArg;
 use nix::fcntl::FdFlag;
 use nix::fcntl::OFlag;
@@ -63,7 +62,9 @@ impl MountImpl {
         options: &[MountOption],
         acl: SessionACL,
     ) -> io::Result<(Arc<DevFuse>, MountImpl)> {
-        let mountpoint = mountpoint.canonicalize()?;
+        let mountpoint = mountpoint
+            .canonicalize()
+            .map_err(|err| crate::mnt::context(format_args!("{}", mountpoint.display()), err))?;
         let (file, sock) = fuse_mount_pure(mountpoint.as_os_str(), options, acl)?;
         let file = Arc::new(file);
         Ok((
@@ -130,18 +131,18 @@ fn fuse_unmount_pure(mountpoint: &CStr) -> io::Result<()> {
             return Ok(());
         }
     }
-    crate::mnt::fusermount_unmount(&detect_fusermount_bin(), mountpoint)
+    crate::mnt::fusermount_unmount(&detect_fusermount_bin()?, mountpoint)
 }
 
-fn detect_fusermount_bin() -> String {
+fn detect_fusermount_bin() -> io::Result<String> {
     if let Some(fusermount) = env::var_os("FUSERMOUNT_PATH") {
-        return fusermount
+        return Ok(fusermount
             .to_str()
             .expect("FUSERMOUNT_PATH is not UTF-8")
-            .to_owned();
+            .to_owned());
     }
 
-    for name in [
+    let candidates = [
         FUSERMOUNT3_BIN.to_string(),
         FUSERMOUNT_BIN.to_string(),
         MOUNT_FUSEFS_BIN.to_string(),
@@ -150,15 +151,20 @@ fn detect_fusermount_bin() -> String {
         format!("/sbin/{MOUNT_FUSEFS_BIN}"),
         format!("/bin/{FUSERMOUNT3_BIN}"),
         format!("/bin/{FUSERMOUNT_BIN}"),
-    ]
-    .iter()
-    {
+    ];
+    for name in candidates.iter() {
         if Command::new(name).arg("-h").output().is_ok() {
-            return name.to_string();
+            return Ok(name.to_string());
         }
     }
-    // Default to fusermount3
-    FUSERMOUNT3_BIN.to_string()
+    // None of these could be started, so naming a single guessed default would be misleading
+    Err(Error::new(
+        ErrorKind::NotFound,
+        format!(
+            "no FUSE mount helper found, tried {} (set FUSERMOUNT_PATH to override)",
+            candidates.join(", ")
+        ),
+    ))
 }
 
 fn receive_fusermount_message(socket: &UnixStream) -> Result<DevFuse, Error> {
@@ -237,7 +243,7 @@ fn fuse_mount_fusermount(
     options: &[MountOption],
     acl: SessionACL,
 ) -> Result<(DevFuse, Option<UnixStream>), Error> {
-    let fusermount_bin = detect_fusermount_bin();
+    let fusermount_bin = detect_fusermount_bin()?;
 
     if fusermount_bin.ends_with(MOUNT_FUSEFS_BIN) {
         return fuse_mount_mount_fusefs(&fusermount_bin, mountpoint, options, acl);
@@ -262,7 +268,9 @@ fn fuse_mount_fusermount(
         clear_cloexec_in_pre_exec(&mut builder, child_socket.as_fd());
     }
 
-    let fusermount_child = builder.spawn()?;
+    let fusermount_child = builder
+        .spawn()
+        .map_err(|err| crate::mnt::context(format_args!("spawning {fusermount_bin}"), err))?;
 
     drop(child_socket); // close socket in parent
 
@@ -345,7 +353,9 @@ fn fuse_mount_mount_fusefs(
 
     unsafe { clear_cloexec_in_pre_exec(&mut builder, fuse_device.as_fd()) };
 
-    let output = builder.output()?;
+    let output = builder
+        .output()
+        .map_err(|err| crate::mnt::context(format_args!("running {fusermount_bin}"), err))?;
     if !output.status.success() {
         return Err(io::Error::new(
             ErrorKind::Other,
@@ -365,20 +375,16 @@ fn fuse_mount_sys(
 ) -> Result<Option<DevFuse>, Error> {
     use std::os::unix::fs::PermissionsExt;
 
-    let mountpoint_mode = File::open(mountpoint)?.metadata()?.permissions().mode();
+    let mountpoint_mode = File::open(mountpoint)
+        .map_err(|err| crate::mnt::context(Path::new(mountpoint).display(), err))?
+        .metadata()?
+        .permissions()
+        .mode();
 
     // Auto unmount requests must be sent to fusermount binary
     assert!(!options.contains(&MountOption::AutoUnmount));
 
-    let file = match DevFuse::open() {
-        Ok(dev_fuse) => dev_fuse,
-        Err(error) => {
-            if error.kind() == ErrorKind::NotFound {
-                error!("{} not found. Try 'modprobe fuse'", DevFuse::PATH);
-            }
-            return Err(error);
-        }
-    };
+    let file = DevFuse::open()?;
     assert!(
         file.as_raw_fd() > 2,
         "Conflict with stdin/stdout/stderr. fd={}",
