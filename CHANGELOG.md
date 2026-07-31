@@ -1,6 +1,10 @@
 # FUSE for Rust - Changelog
 
 ## Unreleased
+* Fix meaningless errors when a mount fails inside libfuse (#406). A failure that libfuse
+  reported without setting errno was surfaced with an unrelated errno, most visibly
+  `Success (os error 0)`; such a failure now names the libfuse call it came from, alongside
+  libfuse's own diagnostic on stderr
 * Dropping a `BackgroundSession` now unmounts the filesystem and waits for the session to
   end, guaranteeing that `Filesystem::destroy` has run when drop returns (#239, #411). This
   restores the pre-0.16 blocking drop behavior. Drop does not wait when the session cannot

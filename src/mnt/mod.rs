@@ -58,6 +58,34 @@ fn with_fuse_args<T, F: FnOnce(&fuse_args) -> T>(
     })
 }
 
+/// Make a libfuse call that signals failure through its return value, and turn a failure
+/// into an error worth reporting.
+///
+/// libfuse does not set errno to report these failures, and does not clear it beforehand,
+/// so reading `io::Error::last_os_error()` afterwards picks up whatever an unrelated call
+/// left behind: an unrelated error, or errno 0, which renders as the nonsensical
+/// "Success (os error 0)". Clearing errno first makes what remains attributable - anything
+/// non-zero was set during the call, and is worth passing on. When nothing was set, the
+/// only thing to report is which call failed; libfuse writes its own diagnostic to stderr.
+#[cfg(any(test, fuser_mount_impl = "libfuse2", fuser_mount_impl = "libfuse3"))]
+fn libfuse_call<T>(
+    function: &str,
+    call: impl FnOnce() -> T,
+    succeeded: impl FnOnce(&T) -> bool,
+) -> io::Result<T> {
+    nix::errno::Errno::clear();
+    let result = call();
+    if succeeded(&result) {
+        return Ok(result);
+    }
+    Err(match io::Error::last_os_error() {
+        err if err.raw_os_error() == Some(0) => {
+            io::Error::other(format!("libfuse's {function}() failed"))
+        }
+        err => err,
+    })
+}
+
 use std::ffi::CStr;
 use std::path::Path;
 use std::path::PathBuf;
@@ -366,6 +394,47 @@ mod test {
         assert!(fusermount_unmount("/nonexistent/fusermount", &mountpoint).is_err());
         // Helper reports success
         assert!(fusermount_unmount("/bin/true", &mountpoint).is_ok());
+    }
+
+    /// A libfuse call that fails without setting errno must not be reported with whatever
+    /// errno an unrelated call left behind - least of all errno 0, which renders as the
+    /// nonsensical "Success (os error 0)"
+    #[test]
+    fn libfuse_call_reports_only_its_own_errno() {
+        // Stale errno from an unrelated call, which the failing call below does not set
+        nix::errno::Errno::ENOTTY.set();
+        let err = libfuse_call("fuse_session_new", || (), |_| false).unwrap_err();
+        assert_eq!(err.raw_os_error(), None);
+        assert!(err.to_string().contains("fuse_session_new"), "{err}");
+
+        // An errno the call itself set is worth passing on
+        let err = libfuse_call(
+            "fuse_session_mount",
+            || nix::errno::Errno::EPERM.set(),
+            |_| false,
+        )
+        .unwrap_err();
+        assert_eq!(err.raw_os_error(), Some(libc::EPERM));
+        assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
+
+        // A call that succeeded is passed through untouched
+        assert_eq!(
+            libfuse_call("fuse_session_fd", || 3, |fd| *fd >= 0).unwrap(),
+            3
+        );
+    }
+
+    /// libfuse rejects this option in fuse_session_new(), which reports the failure without
+    /// setting errno. Reporting whatever errno was left over then surfaced as the
+    /// nonsensical "Success (os error 0)"
+    #[test]
+    #[cfg(fuser_mount_impl = "libfuse3")]
+    fn mount_option_rejected_by_libfuse() {
+        let tmp = tempfile::tempdir().unwrap();
+        let options = [MountOption::CUSTOM("max_read=not_a_number".to_owned())];
+        let err = Mount::new(tmp.path(), &options, SessionACL::default()).unwrap_err();
+        assert_eq!(err.raw_os_error(), None, "{err}");
+        assert!(err.to_string().contains("fuse_session_new"), "{err}");
     }
 
     /// libfuse splits each -o argument on commas, so a comma in a value must reach it
