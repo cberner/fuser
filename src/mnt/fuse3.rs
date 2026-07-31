@@ -17,16 +17,8 @@ use crate::mnt::fuse3_sys::fuse_session_fd;
 use crate::mnt::fuse3_sys::fuse_session_mount;
 use crate::mnt::fuse3_sys::fuse_session_new;
 use crate::mnt::fuse3_sys::fuse_session_unmount;
+use crate::mnt::libfuse_call;
 use crate::mnt::with_fuse_args;
-
-/// Ensures that an os error is never 0/Success
-fn ensure_last_os_error() -> io::Error {
-    let err = io::Error::last_os_error();
-    match err.raw_os_error() {
-        Some(0) => io::Error::new(io::ErrorKind::Other, "Unspecified Error"),
-        _ => err,
-    }
-}
 
 #[derive(Debug)]
 pub(crate) struct MountImpl {
@@ -43,32 +35,34 @@ impl MountImpl {
         with_fuse_args(options, acl, |args| {
             let ops = fuse_lowlevel_ops::default();
 
-            let fuse_session = unsafe {
-                fuse_session_new(
-                    args,
-                    &ops as *const _,
-                    size_of::<fuse_lowlevel_ops>(),
-                    ptr::null_mut(),
-                )
-            };
-            if fuse_session.is_null() {
-                return Err(io::Error::last_os_error());
-            }
+            let fuse_session = libfuse_call(
+                "fuse_session_new",
+                || unsafe {
+                    fuse_session_new(
+                        args,
+                        &ops as *const _,
+                        size_of::<fuse_lowlevel_ops>(),
+                        ptr::null_mut(),
+                    )
+                },
+                |session| !session.is_null(),
+            )?;
             // Construct the guard before the fallible setup steps, so an early
             // return destroys the session via Drop instead of leaking it
             let mount = MountImpl {
                 fuse_session,
                 mountpoint: mnt,
             };
-            let result =
-                unsafe { fuse_session_mount(mount.fuse_session, mount.mountpoint.as_ptr()) };
-            if result != 0 {
-                return Err(ensure_last_os_error());
-            }
-            let fd = unsafe { fuse_session_fd(mount.fuse_session) };
-            if fd < 0 {
-                return Err(io::Error::last_os_error());
-            }
+            libfuse_call(
+                "fuse_session_mount",
+                || unsafe { fuse_session_mount(mount.fuse_session, mount.mountpoint.as_ptr()) },
+                |result| *result == 0,
+            )?;
+            let fd = libfuse_call(
+                "fuse_session_fd",
+                || unsafe { fuse_session_fd(mount.fuse_session) },
+                |fd| *fd >= 0,
+            )?;
             let fd = unsafe { BorrowedFd::borrow_raw(fd) };
             // We dup the fd here as the existing fd is owned by the fuse_session, and we
             // don't want it being closed out from under us:

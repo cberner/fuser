@@ -10,16 +10,8 @@ use crate::SessionACL;
 use crate::dev_fuse::DevFuse;
 use crate::mnt::MountOption;
 use crate::mnt::fuse2_sys::*;
+use crate::mnt::libfuse_call;
 use crate::mnt::with_fuse_args;
-
-/// Ensures that an os error is never 0/Success
-fn ensure_last_os_error() -> io::Error {
-    let err = io::Error::last_os_error();
-    match err.raw_os_error() {
-        Some(0) => io::Error::new(io::ErrorKind::Other, "Unspecified Error"),
-        _ => err,
-    }
-}
 
 #[derive(Debug)]
 pub(crate) struct MountImpl {
@@ -33,13 +25,13 @@ impl MountImpl {
     ) -> io::Result<(Arc<DevFuse>, MountImpl)> {
         let mountpoint = CString::new(mountpoint.as_os_str().as_bytes()).unwrap();
         with_fuse_args(options, acl, |args| {
-            let fd = unsafe { fuse_mount_compat25(mountpoint.as_ptr(), args) };
-            if fd < 0 {
-                Err(ensure_last_os_error())
-            } else {
-                let file = unsafe { File::from_raw_fd(fd) };
-                Ok((Arc::new(DevFuse(file)), MountImpl { mountpoint }))
-            }
+            let fd = libfuse_call(
+                "fuse_mount_compat25",
+                || unsafe { fuse_mount_compat25(mountpoint.as_ptr(), args) },
+                |fd| *fd >= 0,
+            )?;
+            let file = unsafe { File::from_raw_fd(fd) };
+            Ok((Arc::new(DevFuse(file)), MountImpl { mountpoint }))
         })
     }
 
