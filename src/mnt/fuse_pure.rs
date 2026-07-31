@@ -121,13 +121,9 @@ fn fuse_mount_pure(
     fuse_mount_fusermount(mountpoint, options, acl)
 }
 
+/// Only reached once `libc_umount()` has failed with EPERM, i.e. unprivileged, so
+/// there is no point in retrying the same unmount syscall with different flags
 fn fuse_unmount_pure(mountpoint: &CStr) -> io::Result<()> {
-    #[cfg(target_os = "linux")]
-    {
-        if nix::mount::umount2(mountpoint, nix::mount::MntFlags::MNT_DETACH).is_ok() {
-            return Ok(());
-        }
-    }
     #[cfg(target_os = "macos")]
     {
         if nix::mount::unmount(mountpoint, nix::mount::MntFlags::MNT_FORCE).is_ok() {

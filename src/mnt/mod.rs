@@ -242,7 +242,12 @@ fn libc_umount(mnt: &CStr) -> nix::Result<()> {
         target_os = "netbsd"
     )))]
     {
-        nix::mount::umount(mnt)
+        // Detach lazily, as libfuse's fuse_kern_unmount() does. An eager unmount fails
+        // with EBUSY while the filesystem is still in use, and by then the Mount has
+        // been consumed, so the caller has nothing left to retry with and the mount is
+        // left behind. The unprivileged path has always been lazy, going through
+        // "fusermount -u -z", so this also makes privileged teardown agree with it
+        nix::mount::umount2(mnt, nix::mount::MntFlags::MNT_DETACH)
     }
 }
 
