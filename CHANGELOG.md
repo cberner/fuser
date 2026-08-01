@@ -1,6 +1,15 @@
 # FUSE for Rust - Changelog
 
 ## Unreleased
+* `KernelConfig::add_capabilities()` now refuses capabilities fuser cannot honor, rather than
+  requesting them and leaving the filesystem silently broken: `FUSE_SECURITY_CTX`,
+  `FUSE_CREATE_SUPP_GROUP`, `FUSE_HANDLE_KILLPRIV_V2`, `FUSE_ALLOW_IDMAP`, `FUSE_HAS_INODE_DAX`,
+  `FUSE_SUBMOUNTS`, `FUSE_MAP_ALIGNMENT`, `FUSE_OVER_IO_URING`, `FUSE_HAS_RESEND` and
+  `FUSE_REQUEST_TIMEOUT`. Negotiating most of them merely had no effect, but `FUSE_ALLOW_IDMAP`
+  left the filesystem answering `EACCES` to everything but inode creation, and
+  `FUSE_HANDLE_KILLPRIV_V2` left suid and sgid bits surviving a chown, a truncate or an
+  `O_TRUNC` open. Plain `FUSE_HANDLE_KILLPRIV` still works, as do the macFUSE capabilities that
+  share a bit with three of these
 * Add `Notifier::expire_entry()`, which marks a cached directory entry for revalidation
   instead of invalidating it (#367). Unlike `inval_entry()`, expiring leaves anything
   mounted beneath the entry mounted, so it suits an entry merely believed to be stale.
