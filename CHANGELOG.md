@@ -1,6 +1,11 @@
 # FUSE for Rust - Changelog
 
 ## Unreleased
+* Add `ReplyDirectory::remaining_capacity()` and `ReplyDirectoryPlus::remaining_capacity()`,
+  which report how much room is left for entries (#214). Before the first entry is added this
+  is the buffer size the kernel asked for, so a filesystem can size a batch of work to the
+  reply instead of preparing entries only to have `add()` report the buffer full. The
+  `experimental` async API exposes the same thing on `DirEntListBuilder`
 * Parse the extended `fuse_setxattr_in` layout, making `InitFlags::FUSE_SETXATTR_EXT` usable
   (#357). Enabling that capability previously panicked the session thread on the first
   `setxattr` and left the filesystem hung, because fuser kept reading the shorter pre-7.33

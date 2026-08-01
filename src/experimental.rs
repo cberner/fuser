@@ -85,6 +85,17 @@ impl DirEntListBuilder<'_> {
     ) -> bool {
         self.entries.add(ino, offset, kind, name)
     }
+
+    /// Bytes still available for entries in this reply.
+    ///
+    /// Before any entry is added this is the buffer size the kernel asked for, which lets
+    /// a filesystem size a batch of work up front rather than discovering the limit only
+    /// when [`add()`](Self::add) reports the buffer full. Each entry costs its name plus a
+    /// fixed header, padded for alignment, so this is a budget rather than an entry count;
+    /// `add()` remains the authority on whether a particular entry fits.
+    pub fn remaining_capacity(&self) -> usize {
+        self.entries.remaining_capacity()
+    }
 }
 
 /// Response from [`AsyncFilesystem::lookup`]

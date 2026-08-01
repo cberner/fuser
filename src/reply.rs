@@ -707,6 +707,17 @@ impl ReplyDirectory {
         }
     }
 
+    /// Bytes still available for entries in this reply.
+    ///
+    /// Before any entry is added this is the buffer size the kernel asked for, which lets
+    /// a filesystem size a batch of work up front rather than discovering the limit only
+    /// when [`add()`](Self::add) reports the buffer full. Each entry costs its name plus a
+    /// fixed header, padded for alignment, so this is a budget rather than an entry count;
+    /// `add()` remains the authority on whether a particular entry fits.
+    pub fn remaining_capacity(&self) -> usize {
+        self.data.remaining_capacity()
+    }
+
     /// Add an entry to the directory reply buffer. Returns true if the buffer is full.
     /// A transparent offset value can be provided for each entry. The kernel uses these
     /// value to request the next entries in further readdir calls
@@ -755,6 +766,18 @@ impl ReplyDirectoryPlus {
             reply: Reply::new(unique, sender),
             buf: DirEntPlusList::new(size),
         }
+    }
+
+    /// Bytes still available for entries in this reply.
+    ///
+    /// Before any entry is added this is the buffer size the kernel asked for. It matters
+    /// more here than for plain readdir: each entry carries a full set of attributes, so a
+    /// filesystem that must fetch them can size that work to the budget instead of
+    /// preparing an entry only to find it does not fit. Each entry costs its name plus a
+    /// fixed header, padded for alignment, so this is a budget rather than an entry count;
+    /// [`add()`](Self::add) remains the authority on whether a particular entry fits.
+    pub fn remaining_capacity(&self) -> usize {
+        self.buf.remaining_capacity()
     }
 
     /// Add an entry to the directory reply buffer. Returns true if the buffer is full.
@@ -1231,6 +1254,83 @@ mod test {
         let mut reply = ReplyDirectory::new(ll::RequestId(0xdeadbeef), sender, 4096);
         assert!(!reply.add(INodeNo(0xaabb), 1, FileType::Directory, "hello"));
         assert!(!reply.add(INodeNo(0xccdd), 2, FileType::RegularFile, "world.rs"));
+        reply.ok();
+    }
+
+    #[test]
+    fn reply_directory_remaining_capacity() {
+        let (tx, _rx) = sync_channel::<()>(1);
+        let mut reply = ReplyDirectory::new(ll::RequestId(0xdeadbeef), ReplySender::Sync(tx), 4096);
+        // Starts out as the size the kernel asked for
+        assert_eq!(reply.remaining_capacity(), 4096);
+
+        assert!(!reply.add(INodeNo(1), 1, FileType::Directory, "hello"));
+        let after_first = reply.remaining_capacity();
+        assert!(after_first < 4096);
+
+        assert!(!reply.add(INodeNo(2), 2, FileType::RegularFile, "world.rs"));
+        assert!(reply.remaining_capacity() < after_first);
+        reply.ok();
+    }
+
+    /// The budget must agree with `add()`: entries keep fitting while capacity remains,
+    /// and the entry that is finally refused needed more room than was left.
+    #[test]
+    fn reply_directory_capacity_agrees_with_add() {
+        let (tx, _rx) = sync_channel::<()>(1);
+        let mut reply = ReplyDirectory::new(ll::RequestId(0xdeadbeef), ReplySender::Sync(tx), 256);
+        let mut added = 0;
+        let mut before_full = reply.remaining_capacity();
+        for i in 0..100u64 {
+            before_full = reply.remaining_capacity();
+            if reply.add(INodeNo(i + 1), i + 1, FileType::RegularFile, "some-name") {
+                break;
+            }
+            added += 1;
+            assert!(reply.remaining_capacity() < before_full);
+        }
+        // The buffer filled before the entries ran out, and the refused entry did not fit
+        // in what remained
+        assert!(added > 0 && added < 100);
+        assert!(before_full < 256);
+        reply.ok();
+    }
+
+    #[test]
+    fn reply_directory_plus_remaining_capacity() {
+        let (tx, _rx) = sync_channel::<()>(1);
+        let mut reply =
+            ReplyDirectoryPlus::new(ll::RequestId(0xdeadbeef), ReplySender::Sync(tx), 4096);
+        assert_eq!(reply.remaining_capacity(), 4096);
+
+        let attr = FileAttr {
+            ino: INodeNo(1),
+            size: 0,
+            blocks: 0,
+            atime: UNIX_EPOCH,
+            mtime: UNIX_EPOCH,
+            ctime: UNIX_EPOCH,
+            crtime: UNIX_EPOCH,
+            kind: FileType::RegularFile,
+            perm: 0o644,
+            nlink: 1,
+            uid: 0,
+            gid: 0,
+            rdev: 0,
+            flags: 0,
+            blksize: 512,
+        };
+        assert!(!reply.add(
+            INodeNo(1),
+            1,
+            "hello",
+            &Duration::ZERO,
+            &attr,
+            ll::Generation(0)
+        ));
+        // An entry here carries a full set of attributes, so it costs far more than a
+        // plain readdir entry
+        assert!(reply.remaining_capacity() < 4096 - 100);
         reply.ok();
     }
 
