@@ -462,6 +462,17 @@ pub(crate) struct fuse_setxattr_in {
     pub(crate) padding: u32,
 }
 
+/// Tail of the extended `fuse_setxattr_in`, which the kernel appends to the layout above
+/// once `FUSE_SETXATTR_EXT` has been negotiated. Never sent on macOS, where bit 29 means
+/// `FUSE_CASE_INSENSITIVE` instead
+#[cfg(not(target_os = "macos"))]
+#[repr(C)]
+#[derive(Debug, FromBytes, KnownLayout, Immutable)]
+pub(crate) struct fuse_setxattr_in_ext {
+    pub(crate) setxattr_flags: u32,
+    pub(crate) padding: u32,
+}
+
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
 pub(crate) struct fuse_getxattr_in {
