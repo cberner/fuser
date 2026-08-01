@@ -68,11 +68,12 @@ impl<'a> Notification<'a> {
     pub(crate) fn new_inval_entry(
         parent: INodeNo,
         name: &'a OsStr,
+        flags: u32,
     ) -> Result<Self, TryFromIntError> {
         let r = abi::fuse_notify_inval_entry_out {
             parent: parent.0,
             namelen: name.len().try_into()?,
-            padding: 0,
+            flags,
         };
         Ok(Self::from_struct_with_name(&r, name.as_bytes()))
     }
@@ -141,7 +142,7 @@ mod test {
 
     #[test]
     fn inval_entry() {
-        let n = Notification::new_inval_entry(INodeNo(0x42), OsStr::new("abc"))
+        let n = Notification::new_inval_entry(INodeNo(0x42), OsStr::new("abc"), 0)
             .unwrap()
             .with_iovec(
                 abi::fuse_notify_code::FUSE_NOTIFY_INVAL_ENTRY,
@@ -152,6 +153,25 @@ mod test {
             0x24, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x42, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x61, 0x62, 0x63, 0x00,
+        ];
+        assert_eq!(n, expected);
+    }
+
+    /// The same notification as `inval_entry`, but with FUSE_EXPIRE_ONLY in the flags word.
+    #[test]
+    fn expire_entry() {
+        let n =
+            Notification::new_inval_entry(INodeNo(0x42), OsStr::new("abc"), abi::FUSE_EXPIRE_ONLY)
+                .unwrap()
+                .with_iovec(
+                    abi::fuse_notify_code::FUSE_NOTIFY_INVAL_ENTRY,
+                    ioslice_to_vec,
+                )
+                .unwrap();
+        let expected = vec![
+            0x24, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x42, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00,
+            0x01, 0x00, 0x00, 0x00, 0x61, 0x62, 0x63, 0x00,
         ];
         assert_eq!(n, expected);
     }
@@ -189,7 +209,7 @@ mod test {
 
     #[test]
     fn delete() {
-        let n = Notification::new_inval_entry(INodeNo(0x42), OsStr::new("abc"))
+        let n = Notification::new_inval_entry(INodeNo(0x42), OsStr::new("abc"), 0)
             .unwrap()
             .with_iovec(abi::fuse_notify_code::FUSE_NOTIFY_DELETE, ioslice_to_vec)
             .unwrap();

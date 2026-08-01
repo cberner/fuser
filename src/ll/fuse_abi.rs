@@ -702,8 +702,13 @@ pub(crate) struct fuse_notify_inval_inode_out {
 pub(crate) struct fuse_notify_inval_entry_out {
     pub(crate) parent: u64,
     pub(crate) namelen: u32,
-    pub(crate) padding: u32,
+    pub(crate) flags: u32,
 }
+
+/// Expire the entry rather than invalidating it: the kernel marks it for revalidation
+/// on next use instead of forcibly detaching it, which would also detach any submounts
+/// beneath it. Requires `FUSE_HAS_EXPIRE_ONLY`
+pub(crate) const FUSE_EXPIRE_ONLY: u32 = 1 << 0;
 
 #[repr(C)]
 #[derive(Debug, IntoBytes, KnownLayout, Immutable)]

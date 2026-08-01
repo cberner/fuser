@@ -146,6 +146,10 @@ pub struct Session<FS: Filesystem> {
     /// Capabilities agreed with the kernel during init. Some request layouts depend on
     /// them, so the event loops need them to parse correctly
     pub(crate) negotiated: InitFlags,
+    /// Everything the kernel advertised during init, whether or not it was requested.
+    /// Some operations are honoured by the kernel without being negotiated, so this,
+    /// not `negotiated`, says whether the kernel can perform them
+    pub(crate) kernel_capabilities: InitFlags,
     pub(crate) config: Config,
 }
 
@@ -194,6 +198,7 @@ impl<FS: Filesystem> Session<FS> {
             session_owner: geteuid(),
             proto_version: None,
             negotiated: InitFlags::empty(),
+            kernel_capabilities: InitFlags::empty(),
             config: options.clone(),
         };
 
@@ -223,6 +228,7 @@ impl<FS: Filesystem> Session<FS> {
             session_owner: geteuid(),
             proto_version: None,
             negotiated: InitFlags::empty(),
+            kernel_capabilities: InitFlags::empty(),
             config,
         };
 
@@ -238,6 +244,7 @@ impl<FS: Filesystem> Session<FS> {
     pub fn spawn(self) -> io::Result<BackgroundSession> {
         let sender = self.ch.sender();
         let fuse_device = self.ch.device();
+        let kernel_capabilities = self.kernel_capabilities;
         // Take the fuse_session, so that we can unmount it
         let mount = std::mem::take(&mut *self.mount.mount.lock());
         let guard = thread::Builder::new()
@@ -248,6 +255,7 @@ impl<FS: Filesystem> Session<FS> {
             sender,
             fuse_device,
             mount,
+            kernel_capabilities,
         })
     }
 
@@ -266,6 +274,7 @@ impl<FS: Filesystem> Session<FS> {
             session_owner,
             proto_version: _,
             negotiated,
+            kernel_capabilities,
             config,
         } = self;
 
@@ -314,6 +323,7 @@ impl<FS: Filesystem> Session<FS> {
                 allowed,
                 session_owner,
                 negotiated,
+                kernel_capabilities,
             };
             threads.push(
                 thread::Builder::new()
@@ -448,6 +458,7 @@ impl<FS: Filesystem> Session<FS> {
             // Remember the ABI version supported by kernel and mark the session initialized.
             self.proto_version = Some(v);
             self.negotiated = init.capabilities() & config.requested;
+            self.kernel_capabilities = init.capabilities();
 
             // Log capability status for debugging
             for bit in 0..64 {
@@ -508,7 +519,7 @@ impl<FS: Filesystem> Session<FS> {
 
     /// Returns an object that can be used to send notifications to the kernel
     pub fn notifier(&self) -> Notifier {
-        Notifier::new(self.ch.sender())
+        Notifier::new(self.ch.sender(), self.kernel_capabilities)
     }
 }
 
@@ -536,6 +547,7 @@ pub(crate) struct SessionEventLoop<FS: Filesystem> {
     pub(crate) allowed: SessionACL,
     pub(crate) session_owner: Uid,
     pub(crate) negotiated: InitFlags,
+    pub(crate) kernel_capabilities: InitFlags,
 }
 
 impl<FS: Filesystem> SessionEventLoop<FS> {
@@ -602,6 +614,9 @@ pub struct BackgroundSession {
     fuse_device: Arc<DevFuse>,
     /// Ensures the filesystem is unmounted when the session ends
     mount: Option<Mount>,
+    /// Everything the kernel advertised during init, for notifications whose support
+    /// depends on it
+    kernel_capabilities: InitFlags,
 }
 
 /// How long teardown waits for the kernel connection to end after a successful
@@ -629,7 +644,7 @@ impl BackgroundSession {
 
     /// Returns an object that can be used to send notifications to the kernel
     pub fn notifier(&self) -> Notifier {
-        Notifier::new(self.sender.clone())
+        Notifier::new(self.sender.clone(), self.kernel_capabilities)
     }
 
     /// Join the filesystem thread without unmounting first: blocks until

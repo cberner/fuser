@@ -1,6 +1,12 @@
 # FUSE for Rust - Changelog
 
 ## Unreleased
+* Add `Notifier::expire_entry()`, which marks a cached directory entry for revalidation
+  instead of invalidating it (#367). Unlike `inval_entry()`, expiring leaves anything
+  mounted beneath the entry mounted, so it suits an entry merely believed to be stale.
+  Returns `ENOTSUP` on a kernel that does not advertise `InitFlags::FUSE_HAS_EXPIRE_ONLY`,
+  rather than sending a request such a kernel would answer by invalidating the entry and
+  reporting success
 * Add `ReplyDirectory::remaining_capacity()` and `ReplyDirectoryPlus::remaining_capacity()`,
   which report how much room is left for entries (#214). Before the first entry is added this
   is the buffer size the kernel asked for, so a filesystem can size a batch of work to the
