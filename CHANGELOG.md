@@ -1,6 +1,12 @@
 # FUSE for Rust - Changelog
 
 ## Unreleased
+* Parse the extended `fuse_setxattr_in` layout, making `InitFlags::FUSE_SETXATTR_EXT` usable
+  (#357). Enabling that capability previously panicked the session thread on the first
+  `setxattr` and left the filesystem hung, because fuser kept reading the shorter pre-7.33
+  layout. A `setxattr` whose value length disagrees with its header is now rejected rather
+  than panicking, and one carrying `FUSE_SETXATTR_ACL_KILL_SGID` is refused with `ENOTSUP`,
+  since `Filesystem::setxattr` cannot yet be told to clear SGID
 * Name the file that could not be reached when a mount fails, instead of reporting a bare
   "No such file or directory" that could equally mean the mountpoint, `/dev/fuse` or the
   `fusermount` helper (#250)

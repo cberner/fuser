@@ -21,6 +21,7 @@ use serde::Serialize;
 
 use crate::Errno;
 use crate::ll::argument::ArgumentIterator;
+use crate::ll::flags::init_flags::InitFlags;
 use crate::ll::fuse_abi as abi;
 use crate::ll::fuse_abi::fuse_in_header;
 use crate::ll::fuse_abi::fuse_opcode;
@@ -839,12 +840,19 @@ mod op {
         #[expect(dead_code)]
         header: &'a fuse_in_header,
         arg: &'a fuse_setxattr_in,
+        /// Only carried when `FUSE_SETXATTR_EXT` was negotiated; 0 otherwise
+        setxattr_flags: u32,
         name: &'a OsStr,
         value: &'a [u8],
     }
     impl<'a> SetXAttr<'a> {
         pub(crate) fn name(&self) -> &'a OsStr {
             self.name
+        }
+        /// The `FUSE_SETXATTR_*` flags. Always 0 unless `FUSE_SETXATTR_EXT` has been
+        /// negotiated, which never happens on macOS
+        pub(crate) fn setxattr_flags(&self) -> u32 {
+            self.setxattr_flags
         }
         pub(crate) fn value(&self) -> &'a [u8] {
             self.value
@@ -1642,6 +1650,8 @@ mod op {
         header: &'a fuse_in_header,
         opcode: &fuse_opcode,
         data: &'a [u8],
+        // Only the setxattr layout depends on this, and that is not reachable on macOS
+        #[cfg_attr(target_os = "macos", allow(unused_variables))] negotiated: InitFlags,
     ) -> Option<Operation<'a>> {
         let mut data = ArgumentIterator::new(data);
         Some(match opcode {
@@ -1724,13 +1734,30 @@ mod op {
                 arg: data.fetch()?,
             }),
             fuse_opcode::FUSE_SETXATTR => Operation::SetXAttr({
+                let arg = data.fetch()?;
+                // Once FUSE_SETXATTR_EXT is negotiated the kernel sends an extended
+                // fuse_setxattr_in, whose extra fields sit between the struct and the name
+                #[cfg(not(target_os = "macos"))]
+                let setxattr_flags = if negotiated.contains(InitFlags::FUSE_SETXATTR_EXT) {
+                    let ext: &fuse_setxattr_in_ext = data.fetch()?;
+                    ext.setxattr_flags
+                } else {
+                    0
+                };
+                #[cfg(target_os = "macos")]
+                let setxattr_flags: u32 = 0;
                 let out = SetXAttr {
                     header,
-                    arg: data.fetch()?,
+                    arg,
+                    setxattr_flags,
                     name: data.fetch_str()?,
                     value: data.fetch_all(),
                 };
-                assert!(out.value.len() == out.arg.size as usize);
+                // A value length that disagrees with the header means the layout was
+                // misread; reject the request rather than taking down the session
+                if out.value.len() != out.arg.size as usize {
+                    return None;
+                }
                 out
             }),
             fuse_opcode::FUSE_GETXATTR => Operation::GetXAttr(GetXAttr {
@@ -2133,6 +2160,9 @@ impl fmt::Display for Operation<'_> {
 pub(crate) struct AnyRequest<'a> {
     header: &'a fuse_in_header,
     data: &'a [u8],
+    /// Capabilities negotiated during INIT. Some request layouts depend on them, so a
+    /// request parsed without them (i.e. during the handshake itself) must assume none
+    negotiated: InitFlags,
 }
 
 impl<'a> AnyRequest<'a> {
@@ -2173,7 +2203,14 @@ impl<'a> AnyRequest<'a> {
             |e: num_enum::TryFromPrimitiveError<_>| RequestError::UnknownOperation(e.number),
         )?;
         // Parse/check operation arguments
-        op::parse(self.header, &opcode, self.data).ok_or(RequestError::InsufficientData)
+        op::parse(self.header, &opcode, self.data, self.negotiated)
+            .ok_or(RequestError::InsufficientData)
+    }
+
+    /// Records the capabilities negotiated during INIT, which some later request
+    /// layouts depend on.
+    pub(crate) fn set_negotiated(&mut self, negotiated: InitFlags) {
+        self.negotiated = negotiated;
     }
 
     pub(crate) fn header(&self) -> &fuse_in_header {
@@ -2218,6 +2255,9 @@ impl<'a> TryFrom<&'a [u8]> for AnyRequest<'a> {
         Ok(Self {
             header,
             data: &data[size_of::<fuse_in_header>()..header.len as usize],
+            // The handshake parses INIT itself, whose layout never varies; callers
+            // dispatching later requests set this from the negotiated result
+            negotiated: InitFlags::empty(),
         })
     }
 }
@@ -2408,5 +2448,73 @@ mod tests {
             }
             _ => panic!("Unexpected request operation"),
         }
+    }
+
+    // 40 byte header + 8 byte fuse_setxattr_in + "user.a\0" + "VAL"
+    #[cfg(all(target_endian = "little", not(target_os = "macos")))]
+    const SETXATTR_REQUEST: AlignedData<[u8; 58]> = AlignedData([
+        0x3a, 0x00, 0x00, 0x00, 0x15, 0x00, 0x00, 0x00, // len, opcode
+        0x0d, 0xf0, 0xad, 0xba, 0xef, 0xbe, 0xad, 0xde, // unique
+        0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, // nodeid
+        0x0d, 0xd0, 0x01, 0xc0, 0xfe, 0xca, 0x01, 0xc0, // uid, gid
+        0x5e, 0xba, 0xde, 0xc0, 0x00, 0x00, 0x00, 0x00, // pid, padding
+        0x03, 0x00, 0x00, 0x00, 0x11, 0x00, 0x00, 0x00, // size, flags
+        0x75, 0x73, 0x65, 0x72, 0x2e, 0x61, 0x00, // name "user.a"
+        0x56, 0x41, 0x4c, // value "VAL"
+    ]);
+
+    // The same request in the extended layout the kernel sends once FUSE_SETXATTR_EXT
+    // has been negotiated: 8 further bytes sit between the struct and the name
+    #[cfg(all(target_endian = "little", not(target_os = "macos")))]
+    const SETXATTR_EXT_REQUEST: AlignedData<[u8; 66]> = AlignedData([
+        0x42, 0x00, 0x00, 0x00, 0x15, 0x00, 0x00, 0x00, // len, opcode
+        0x0d, 0xf0, 0xad, 0xba, 0xef, 0xbe, 0xad, 0xde, // unique
+        0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, // nodeid
+        0x0d, 0xd0, 0x01, 0xc0, 0xfe, 0xca, 0x01, 0xc0, // uid, gid
+        0x5e, 0xba, 0xde, 0xc0, 0x00, 0x00, 0x00, 0x00, // pid, padding
+        0x03, 0x00, 0x00, 0x00, 0x11, 0x00, 0x00, 0x00, // size, flags
+        0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // setxattr_flags, padding
+        0x75, 0x73, 0x65, 0x72, 0x2e, 0x61, 0x00, // name "user.a"
+        0x56, 0x41, 0x4c, // value "VAL"
+    ]);
+
+    #[test]
+    #[cfg(all(target_endian = "little", not(target_os = "macos")))]
+    fn setxattr_compat() {
+        let req = AnyRequest::try_from(&SETXATTR_REQUEST[..]).unwrap();
+        match req.operation().unwrap() {
+            Operation::SetXAttr(x) => {
+                assert_eq!(x.name(), OsStr::new("user.a"));
+                assert_eq!(x.value(), b"VAL");
+                assert_eq!(x.flags(), 0x11);
+                assert_eq!(x.setxattr_flags(), 0);
+            }
+            _ => panic!("Unexpected request operation"),
+        }
+    }
+
+    #[test]
+    #[cfg(all(target_endian = "little", not(target_os = "macos")))]
+    fn setxattr_extended() {
+        let mut req = AnyRequest::try_from(&SETXATTR_EXT_REQUEST[..]).unwrap();
+        req.set_negotiated(InitFlags::FUSE_SETXATTR_EXT);
+        match req.operation().unwrap() {
+            Operation::SetXAttr(x) => {
+                assert_eq!(x.name(), OsStr::new("user.a"));
+                assert_eq!(x.value(), b"VAL");
+                assert_eq!(x.flags(), 0x11);
+                assert_eq!(x.setxattr_flags(), 1);
+            }
+            _ => panic!("Unexpected request operation"),
+        }
+    }
+
+    /// Reading an extended request with the compat layout shifts the name and value by
+    /// eight bytes. That must fail the request rather than take down the session.
+    #[test]
+    #[cfg(all(target_endian = "little", not(target_os = "macos")))]
+    fn setxattr_layout_mismatch_is_rejected() {
+        let req = AnyRequest::try_from(&SETXATTR_EXT_REQUEST[..]).unwrap();
+        assert!(req.operation().is_err());
     }
 }

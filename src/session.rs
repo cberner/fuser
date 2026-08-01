@@ -143,6 +143,9 @@ pub struct Session<FS: Filesystem> {
     /// FUSE protocol version, as reported by the kernel.
     /// The field is set to `Some` when the init message is received.
     pub(crate) proto_version: Option<Version>,
+    /// Capabilities agreed with the kernel during init. Some request layouts depend on
+    /// them, so the event loops need them to parse correctly
+    pub(crate) negotiated: InitFlags,
     pub(crate) config: Config,
 }
 
@@ -190,6 +193,7 @@ impl<FS: Filesystem> Session<FS> {
             allowed: options.acl,
             session_owner: geteuid(),
             proto_version: None,
+            negotiated: InitFlags::empty(),
             config: options.clone(),
         };
 
@@ -218,6 +222,7 @@ impl<FS: Filesystem> Session<FS> {
             allowed: acl,
             session_owner: geteuid(),
             proto_version: None,
+            negotiated: InitFlags::empty(),
             config,
         };
 
@@ -260,6 +265,7 @@ impl<FS: Filesystem> Session<FS> {
             allowed,
             session_owner,
             proto_version: _,
+            negotiated,
             config,
         } = self;
 
@@ -307,6 +313,7 @@ impl<FS: Filesystem> Session<FS> {
                 ch,
                 allowed,
                 session_owner,
+                negotiated,
             };
             threads.push(
                 thread::Builder::new()
@@ -440,6 +447,7 @@ impl<FS: Filesystem> Session<FS> {
 
             // Remember the ABI version supported by kernel and mark the session initialized.
             self.proto_version = Some(v);
+            self.negotiated = init.capabilities() & config.requested;
 
             // Log capability status for debugging
             for bit in 0..64 {
@@ -527,6 +535,7 @@ pub(crate) struct SessionEventLoop<FS: Filesystem> {
     pub(crate) filesystem: Arc<FilesystemHolder<FS>>,
     pub(crate) allowed: SessionACL,
     pub(crate) session_owner: Uid,
+    pub(crate) negotiated: InitFlags,
 }
 
 impl<FS: Filesystem> SessionEventLoop<FS> {
@@ -539,24 +548,26 @@ impl<FS: Filesystem> SessionEventLoop<FS> {
             // Read the next request from the given channel to kernel driver
             // The kernel driver makes sure that we get exactly one request per read
             match self.ch.receive_retrying(buf) {
-                Ok(size) => match RequestWithSender::new(self.ch.sender(), &buf[..size]) {
-                    // Dispatch request
-                    Some(req) => {
-                        if let Ok(Operation::Destroy(_)) = req.request.operation() {
-                            req.reply::<ReplyEmpty>().ok();
-                            return Ok(());
-                        } else {
-                            req.dispatch(self)
+                Ok(size) => {
+                    match RequestWithSender::new(self.ch.sender(), &buf[..size], self.negotiated) {
+                        // Dispatch request
+                        Some(req) => {
+                            if let Ok(Operation::Destroy(_)) = req.request.operation() {
+                                req.reply::<ReplyEmpty>().ok();
+                                return Ok(());
+                            } else {
+                                req.dispatch(self)
+                            }
+                        }
+                        // Quit loop on illegal request
+                        None => {
+                            return Err(io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                "Invalid request",
+                            ));
                         }
                     }
-                    // Quit loop on illegal request
-                    None => {
-                        return Err(io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            "Invalid request",
-                        ));
-                    }
-                },
+                }
                 // The kernel returns ENODEV when the filesystem was unmounted, or
                 // ECONNABORTED when the connection was aborted with FUSE_ABORT_ERROR
                 // negotiated. Either way the connection is gone: a normal end of the

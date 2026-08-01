@@ -20,6 +20,7 @@ use crate::ll;
 use crate::ll::Errno;
 use crate::ll::ResponseData;
 use crate::ll::ResponseErrno;
+use crate::ll::flags::init_flags::InitFlags;
 use crate::reply::Reply;
 use crate::reply::ReplyDirectory;
 use crate::reply::ReplyDirectoryPlus;
@@ -39,14 +40,19 @@ pub(crate) struct RequestWithSender<'a> {
 
 impl<'a> RequestWithSender<'a> {
     /// Create a new request from the given data
-    pub(crate) fn new(ch: ChannelSender, data: &'a [u8]) -> Option<RequestWithSender<'a>> {
-        let request = match ll::AnyRequest::try_from(data) {
+    pub(crate) fn new(
+        ch: ChannelSender,
+        data: &'a [u8],
+        negotiated: InitFlags,
+    ) -> Option<RequestWithSender<'a>> {
+        let mut request = match ll::AnyRequest::try_from(data) {
             Ok(request) => request,
             Err(err) => {
                 error!("{err}");
                 return None;
             }
         };
+        request.set_negotiated(negotiated);
 
         Some(Self { ch, request })
     }
@@ -336,6 +342,14 @@ impl<'a> RequestWithSender<'a> {
                 filesystem.statfs(self.request_header(), self.request.nodeid(), self.reply());
             }
             ll::Operation::SetXAttr(x) => {
+                // The only flag defined here is FUSE_SETXATTR_ACL_KILL_SGID, which asks
+                // the filesystem to drop SGID as part of an ACL update. Filesystem cannot
+                // be told about it yet, and acknowledging a request to drop privileges
+                // without dropping them would leave SGID set on a file the kernel wanted
+                // it cleared on, so refuse the request instead
+                if x.setxattr_flags() != 0 {
+                    return Err(Errno::ENOTSUP);
+                }
                 filesystem.setxattr(
                     self.request_header(),
                     self.request.nodeid(),
