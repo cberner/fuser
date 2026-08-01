@@ -6,6 +6,8 @@ use std::io;
 
 use crate::INodeNo;
 use crate::channel::ChannelSender;
+use crate::ll::flags::init_flags::InitFlags;
+use crate::ll::fuse_abi::FUSE_EXPIRE_ONLY;
 use crate::ll::fuse_abi::fuse_notify_code as notify_code;
 use crate::ll::notify::Notification;
 
@@ -22,10 +24,10 @@ pub struct PollNotifier {
 }
 
 impl PollNotifier {
-    pub(crate) fn new(cs: ChannelSender, kh: PollHandle) -> Self {
+    pub(crate) fn new(cs: ChannelSender, kh: PollHandle, kernel_capabilities: InitFlags) -> Self {
         Self {
             handle: kh,
-            notifier: Notifier::new(cs),
+            notifier: Notifier::new(cs, kernel_capabilities),
         }
     }
 
@@ -50,11 +52,20 @@ impl std::fmt::Debug for PollNotifier {
 
 /// A handle by which the application can send notifications to the server
 #[derive(Debug, Clone)]
-pub struct Notifier(ChannelSender);
+pub struct Notifier {
+    sender: ChannelSender,
+    /// Everything the kernel advertised during init. Some notifications are only
+    /// meaningful on a kernel that supports them, and the kernel reports success
+    /// regardless, so they are refused here rather than silently doing something else
+    kernel_capabilities: InitFlags,
+}
 
 impl Notifier {
-    pub(crate) fn new(cs: ChannelSender) -> Self {
-        Self(cs)
+    pub(crate) fn new(cs: ChannelSender, kernel_capabilities: InitFlags) -> Self {
+        Self {
+            sender: cs,
+            kernel_capabilities,
+        }
     }
 
     /// Notify poll clients of I/O readiness
@@ -70,7 +81,33 @@ impl Notifier {
     /// Returns an error if the notification data is too large.
     /// Returns an error if the kernel rejects the notification.
     pub fn inval_entry(&self, parent: INodeNo, name: &OsStr) -> io::Result<()> {
-        let notif = Notification::new_inval_entry(parent, name).map_err(Self::too_big_err)?;
+        let notif = Notification::new_inval_entry(parent, name, 0).map_err(Self::too_big_err)?;
+        self.send_inval(notify_code::FUSE_NOTIFY_INVAL_ENTRY, &notif)
+    }
+
+    /// Expire the kernel cache for a given directory entry, rather than invalidating it.
+    ///
+    /// The entry is marked for revalidation on next use instead of being forcibly
+    /// detached, so anything mounted beneath it stays mounted. Use this in preference to
+    /// [`inval_entry()`](Self::inval_entry) when the entry is merely believed to be stale
+    /// rather than known to be gone.
+    ///
+    /// # Errors
+    /// Returns `ENOTSUP` if the kernel did not advertise `InitFlags::FUSE_HAS_EXPIRE_ONLY`.
+    /// Such a kernel reads the flag as the padding it used to be and invalidates the entry,
+    /// detaching any submounts, while still reporting success, so this refuses to send
+    /// rather than quietly doing the destructive thing this call exists to avoid.
+    /// Returns an error if the notification data is too large.
+    /// Returns an error if the kernel rejects the notification.
+    pub fn expire_entry(&self, parent: INodeNo, name: &OsStr) -> io::Result<()> {
+        if !self
+            .kernel_capabilities
+            .contains(InitFlags::FUSE_HAS_EXPIRE_ONLY)
+        {
+            return Err(io::Error::from_raw_os_error(libc::ENOTSUP));
+        }
+        let notif = Notification::new_inval_entry(parent, name, FUSE_EXPIRE_ONLY)
+            .map_err(Self::too_big_err)?;
         self.send_inval(notify_code::FUSE_NOTIFY_INVAL_ENTRY, &notif)
     }
 
@@ -117,7 +154,7 @@ impl Notifier {
 
     fn send(&self, code: notify_code, notification: &Notification<'_>) -> io::Result<()> {
         notification
-            .with_iovec(code, |iov| self.0.send(iov))
+            .with_iovec(code, |iov| self.sender.send(iov))
             .map_err(Self::too_big_err)?
     }
 
@@ -126,5 +163,49 @@ impl Notifier {
     /// capable of encoding.
     fn too_big_err(tfie: std::num::TryFromIntError) -> io::Error {
         io::Error::new(io::ErrorKind::Other, format!("Data too large: {tfie:?}"))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::fs::File;
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::channel::Channel;
+    use crate::dev_fuse::DevFuse;
+
+    fn notifier(kernel_capabilities: InitFlags) -> Notifier {
+        // /dev/null stands in for the FUSE device: the cases below either return before
+        // sending, or send a notification whose fate is not what is under test
+        let dev = Arc::new(DevFuse(
+            File::options().write(true).open("/dev/null").unwrap(),
+        ));
+        Notifier::new(Channel::new(dev).sender(), kernel_capabilities)
+    }
+
+    /// A kernel that never advertised expiring would invalidate the entry and report
+    /// success, so the request is refused here instead of being sent.
+    #[test]
+    fn expire_entry_refused_without_kernel_support() {
+        let err = notifier(InitFlags::empty())
+            .expire_entry(INodeNo::ROOT, OsStr::new("x"))
+            .unwrap_err();
+        assert_eq!(err.raw_os_error(), Some(libc::ENOTSUP));
+    }
+
+    #[test]
+    fn expire_entry_sent_with_kernel_support() {
+        notifier(InitFlags::FUSE_HAS_EXPIRE_ONLY)
+            .expire_entry(INodeNo::ROOT, OsStr::new("x"))
+            .unwrap();
+    }
+
+    /// Invalidating is unconditional: it does not depend on the expire capability.
+    #[test]
+    fn inval_entry_needs_no_capability() {
+        notifier(InitFlags::empty())
+            .inval_entry(INodeNo::ROOT, OsStr::new("x"))
+            .unwrap();
     }
 }
