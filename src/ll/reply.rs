@@ -389,6 +389,11 @@ impl EntListBuf {
         }
     }
 
+    /// Bytes still available in the reply buffer.
+    pub(crate) fn remaining_capacity(&self) -> usize {
+        self.max_size.saturating_sub(self.buf.len())
+    }
+
     /// Add an entry to the directory reply buffer. Returns true if the buffer is full.
     /// A transparent offset value can be provided for each entry. The kernel uses these
     /// value to request the next entries in further readdir calls
@@ -445,6 +450,9 @@ impl From<DirEntList> for ResponseData {
 impl DirEntList {
     pub(crate) fn new(max_size: usize) -> Self {
         Self(EntListBuf::new(max_size))
+    }
+    pub(crate) fn remaining_capacity(&self) -> usize {
+        self.0.remaining_capacity()
     }
     /// Add an entry to the directory reply buffer. Returns true if the buffer is full.
     /// A transparent offset value can be provided for each entry. The kernel uses these
@@ -509,6 +517,9 @@ impl From<DirEntPlusList> for ResponseData {
 impl DirEntPlusList {
     pub(crate) fn new(max_size: usize) -> Self {
         Self(EntListBuf::new(max_size))
+    }
+    pub(crate) fn remaining_capacity(&self) -> usize {
+        self.0.remaining_capacity()
     }
     /// Add an entry to the directory reply buffer. Returns true if the buffer is full.
     /// A transparent offset value can be provided for each entry. The kernel uses these
