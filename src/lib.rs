@@ -131,6 +131,62 @@ fn default_init_flags(capabilities: InitFlags) -> InitFlags {
     flags
 }
 
+/// Capabilities fuser has no implementation behind, whatever the kernel advertises.
+///
+/// Negotiating one of these makes the kernel change the protocol in a way fuser gets wrong, or
+/// claims a feature fuser cannot provide. Since the negotiated set is only ever echoed back to
+/// the kernel, an unimplemented capability fails silently rather than loudly, so
+/// [`KernelConfig::add_capabilities`] refuses them up front.
+///
+/// Every bit named here is above 31, where macFUSE defines no capability of its own. The refused
+/// bits that do alias one live in `ALIASED_UNSUPPORTED_CAPABILITIES`, which is empty on macOS.
+const UNSUPPORTED_CAPABILITIES: InitFlags = ALIASED_UNSUPPORTED_CAPABILITIES
+    // The kernel appends a fuse_secctx_header extension after the name of a create, mkdir,
+    // symlink or mknod request. fuser stops parsing at the name, so the security context is
+    // dropped and the filesystem creates unlabeled files while believing it labels them
+    .union(InitFlags::FUSE_SECURITY_CTX)
+    // Likewise for the fuse_supp_groups extension. Dropping it leaves the filesystem with the
+    // caller's fsgid in exactly the case the extension exists to correct
+    .union(InitFlags::FUSE_CREATE_SUPP_GROUP)
+    // Without MountOption::DefaultPermissions the kernel refuses the connection. With it, uid
+    // and gid arrive as FUSE_INVALID_UIDGID on every request that does not create an inode,
+    // breaking Request::uid()/gid() and the SessionACL check built on them
+    .union(InitFlags::FUSE_ALLOW_IDMAP)
+    // Selecting DAX per inode requires FUSE_ATTR_DAX in the flags field of fuse_attr, which
+    // fuser sends as padding. Only a DAX-capable transport (virtiofs) advertises this
+    .union(InitFlags::FUSE_HAS_INODE_DAX)
+    // The kernel would route requests to io_uring queues that fuser never creates
+    .union(InitFlags::FUSE_OVER_IO_URING)
+    // Announces that the filesystem copes with requests the kernel resends. fuser cannot send
+    // the FUSE_NOTIFY_RESEND notification that asks for a resend in the first place
+    .union(InitFlags::FUSE_HAS_RESEND)
+    // The timeout is carried by a request_timeout field of fuse_init_out that fuser declares as
+    // reserved and always sends as zero, which the kernel reads as "no timeout requested"
+    .union(InitFlags::FUSE_REQUEST_TIMEOUT);
+
+/// The refused capabilities that occupy a bit below 32, where macFUSE assigns a meaning of its
+/// own. On macOS these bits are `FUSE_EXCHANGE_DATA`, `FUSE_ALLOCATE` and `FUSE_RENAME_EXCL` -
+/// the last of which fuser requests itself - so nothing is refused there.
+#[cfg(not(target_os = "macos"))]
+const ALIASED_UNSUPPORTED_CAPABILITIES: InitFlags = InitFlags::empty()
+    // The kernel stops clearing suid and sgid itself, having set SB_NOSEC, and instead reports
+    // per request whether the caller lacked CAP_FSETID. fuser passes on only one of the three
+    // signals it sends: FUSE_WRITE_KILL_SUIDGID reaches Filesystem::write, but FATTR_KILL_SUIDGID
+    // on a chown or truncate is not among the FattrFlags that setattr decodes, and
+    // FUSE_OPEN_KILL_SUIDGID lives in the open_flags field of fuse_open_in, which fuser does not
+    // read. Those bits would survive operations that must clear them. Unlike v2, plain
+    // FUSE_HANDLE_KILLPRIV needs no such signal, since it asks the filesystem to clear them on
+    // every write, chown and truncate, which it can tell apart by opcode
+    .union(InitFlags::FUSE_HANDLE_KILLPRIV_V2)
+    // Marking a submount root needs FUSE_ATTR_SUBMOUNT in the flags field of fuse_attr, which
+    // fuser sends as padding. Only a transport with submounts (virtiofs) advertises this
+    .union(InitFlags::FUSE_SUBMOUNTS)
+    // Read from a fuse_init_out field fuser leaves zeroed, which makes the kernel refuse the
+    // connection unless that happens to match its DAX alignment. Advertised by virtiofs alone
+    .union(InitFlags::FUSE_MAP_ALIGNMENT);
+#[cfg(target_os = "macos")]
+const ALIASED_UNSUPPORTED_CAPABILITIES: InitFlags = InitFlags::empty();
+
 /// File types
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[cfg_attr(feature = "serializable", derive(Serialize, Deserialize))]
@@ -348,11 +404,13 @@ impl KernelConfig {
     /// Add a set of capabilities.
     ///
     /// # Errors
-    /// When the argument includes capabilities not supported by the kernel, returns the bits of the capabilities not supported.
+    /// When the argument includes capabilities the kernel does not support, or ones fuser cannot
+    /// honor, returns the bits of the capabilities that were refused. Nothing is added in that
+    /// case, not even the capabilities that would have been accepted on their own.
     pub fn add_capabilities(&mut self, capabilities_to_add: InitFlags) -> Result<(), InitFlags> {
-        if !self.capabilities.contains(capabilities_to_add) {
-            let unsupported = capabilities_to_add & !self.capabilities;
-            return Err(unsupported);
+        let refused = capabilities_to_add & (!self.capabilities | UNSUPPORTED_CAPABILITIES);
+        if !refused.is_empty() {
+            return Err(refused);
         }
         self.requested |= capabilities_to_add;
         Ok(())
@@ -1116,5 +1174,45 @@ mod tests {
             config.set_max_write(MAX_WRITE_SIZE as u32),
             Ok(MIN_WRITE_SIZE as u32)
         );
+    }
+
+    #[test]
+    fn add_capabilities_refuses_unimplemented() {
+        // A kernel advertising everything, so only fuser's own limits can refuse anything
+        let mut config = KernelConfig::new(InitFlags::all(), 65536, Version(7, 43));
+        let before = config.requested;
+        for capability in UNSUPPORTED_CAPABILITIES {
+            assert_eq!(config.add_capabilities(capability), Err(capability));
+        }
+        // A capability fuser implements is still accepted from the same kernel
+        assert_eq!(config.add_capabilities(InitFlags::FUSE_POSIX_ACL), Ok(()));
+        assert_eq!(config.requested, before | InitFlags::FUSE_POSIX_ACL);
+    }
+
+    #[test]
+    fn refused_capabilities_are_never_requested_by_default() {
+        // Below bit 32 a capability aliases a macFUSE one, some of which fuser requests itself.
+        // Refusing a bit fuser goes on to request would be incoherent, and on macOS would break
+        // the operations built on it, so the two sets must stay disjoint on every platform
+        assert!(UNSUPPORTED_CAPABILITIES.intersection(INIT_FLAGS).is_empty());
+    }
+
+    #[test]
+    fn add_capabilities_refuses_all_or_nothing() {
+        // Advertise everything except one capability fuser does implement
+        let capabilities = InitFlags::all() - InitFlags::FUSE_POSIX_ACL;
+        let mut config = KernelConfig::new(capabilities, 65536, Version(7, 43));
+        let before = config.requested;
+        // Both reasons for refusing are reported together, and a capability that would have
+        // been accepted on its own is not added
+        assert_eq!(
+            config.add_capabilities(
+                InitFlags::FUSE_POSIX_ACL
+                    | InitFlags::FUSE_SECURITY_CTX
+                    | InitFlags::FUSE_ASYNC_DIO
+            ),
+            Err(InitFlags::FUSE_POSIX_ACL | InitFlags::FUSE_SECURITY_CTX)
+        );
+        assert_eq!(config.requested, before);
     }
 }
