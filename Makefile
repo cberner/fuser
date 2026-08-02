@@ -13,6 +13,7 @@ pre:
 	cargo deny check licenses
 	cargo clippy --all-targets
 	cargo clippy --all-targets --no-default-features
+	cargo clippy --all-targets --all-features
 
 xfstests:
 	docker build -t fuser:xfstests -f xfstests.Dockerfile .

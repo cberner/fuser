@@ -228,6 +228,7 @@ impl<T: AsyncFilesystem + Send + Sync + 'static> Filesystem for TokioAdapter<T> 
 
 /// Experimental async API. Expect this to change in the future
 #[async_trait::async_trait]
+#[allow(clippy::too_many_arguments)]
 pub trait AsyncFilesystem: Send + Sync + 'static {
     async fn lookup(
         &self,
