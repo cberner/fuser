@@ -295,12 +295,18 @@ mod test {
         }
     }
 
+    /// Both sides have to reach 7.44, so what this crate replies with decides it just as much
+    /// as what the kernel offers. On macOS that is 7.19 and never enough, which is the answer
+    /// there however new the kernel is.
     #[test]
-    fn inc_epoch_sent_from_its_abi_version_on() {
+    fn inc_epoch_sent_only_when_this_crate_reports_its_abi_version() {
+        let reported = Version(FUSE_KERNEL_VERSION, FUSE_KERNEL_MINOR_VERSION);
+        let this_crate_reaches_it = reported >= FUSE_NOTIFY_INC_EPOCH_VERSION;
         for abi in [Version(7, 44), Version(7, 45), Version(7, 99)] {
-            notifier_with_abi(InitFlags::empty(), Some(abi))
+            let sent = notifier_with_abi(InitFlags::empty(), Some(abi))
                 .inc_epoch()
-                .unwrap();
+                .is_ok();
+            assert_eq!(sent, this_crate_reaches_it, "{abi:?}");
         }
     }
 
@@ -313,8 +319,9 @@ mod test {
             notifier.negotiated_abi(),
             Some(Version(FUSE_KERNEL_VERSION, FUSE_KERNEL_MINOR_VERSION))
         );
-        // ...and a kernel offering less than that caps it the other way round
-        let notifier = notifier_with_abi(InitFlags::empty(), Some(Version(7, 31)));
-        assert_eq!(notifier.negotiated_abi(), Some(Version(7, 31)));
+        // ...and a kernel offering less caps it the other way round. 7.8 is below what every
+        // platform replies with, macOS included, so this does not depend on which one it is
+        let notifier = notifier_with_abi(InitFlags::empty(), Some(Version(7, 8)));
+        assert_eq!(notifier.negotiated_abi(), Some(Version(7, 8)));
     }
 }
