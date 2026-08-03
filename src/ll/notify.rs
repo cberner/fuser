@@ -115,6 +115,12 @@ impl<'a> Notification<'a> {
         Ok(Self::from_struct_with_name(&r, name.as_bytes()))
     }
 
+    /// The notification carries no payload at all: the kernel's handler takes only the
+    /// connection, ignoring the size and the rest of the message
+    pub(crate) fn new_inc_epoch() -> Self {
+        Self::Bare(NotificationBuf::new())
+    }
+
     pub(crate) fn new_poll(kh: PollHandle) -> Self {
         let r = abi::fuse_notify_poll_wakeup_out { kh: kh.0 };
         Self::from_struct(&r)
@@ -217,6 +223,20 @@ mod test {
             0x24, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x42, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x61, 0x62, 0x63, 0x00,
+        ];
+        assert_eq!(n, expected);
+    }
+
+    /// Nothing but a header: 16 bytes of length and code, and no payload for the kernel to
+    /// read past it.
+    #[test]
+    fn inc_epoch() {
+        let n = Notification::new_inc_epoch()
+            .with_iovec(abi::fuse_notify_code::FUSE_NOTIFY_INC_EPOCH, ioslice_to_vec)
+            .unwrap();
+        let expected = vec![
+            0x10, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00,
         ];
         assert_eq!(n, expected);
     }

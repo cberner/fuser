@@ -5,9 +5,11 @@ use std::ffi::OsStr;
 use std::io;
 
 use crate::INodeNo;
+use crate::Version;
 use crate::channel::ChannelSender;
 use crate::ll::flags::init_flags::InitFlags;
 use crate::ll::fuse_abi::FUSE_EXPIRE_ONLY;
+use crate::ll::fuse_abi::FUSE_NOTIFY_INC_EPOCH_VERSION;
 use crate::ll::fuse_abi::fuse_notify_code as notify_code;
 use crate::ll::notify::Notification;
 
@@ -24,10 +26,15 @@ pub struct PollNotifier {
 }
 
 impl PollNotifier {
-    pub(crate) fn new(cs: ChannelSender, kh: PollHandle, kernel_capabilities: InitFlags) -> Self {
+    pub(crate) fn new(
+        cs: ChannelSender,
+        kh: PollHandle,
+        kernel_capabilities: InitFlags,
+        kernel_abi: Option<Version>,
+    ) -> Self {
         Self {
             handle: kh,
-            notifier: Notifier::new(cs, kernel_capabilities),
+            notifier: Notifier::new(cs, kernel_capabilities, kernel_abi),
         }
     }
 
@@ -58,13 +65,22 @@ pub struct Notifier {
     /// meaningful on a kernel that supports them, and the kernel reports success
     /// regardless, so they are refused here rather than silently doing something else
     kernel_capabilities: InitFlags,
+    /// The ABI version the kernel agreed on, or `None` before init has run. Notifications
+    /// added after a given version have no capability bit to key on, so the version is
+    /// what says whether the kernel will understand them
+    kernel_abi: Option<Version>,
 }
 
 impl Notifier {
-    pub(crate) fn new(cs: ChannelSender, kernel_capabilities: InitFlags) -> Self {
+    pub(crate) fn new(
+        cs: ChannelSender,
+        kernel_capabilities: InitFlags,
+        kernel_abi: Option<Version>,
+    ) -> Self {
         Self {
             sender: cs,
             kernel_capabilities,
+            kernel_abi,
         }
     }
 
@@ -109,6 +125,40 @@ impl Notifier {
         let notif = Notification::new_inval_entry(parent, name, FUSE_EXPIRE_ONLY)
             .map_err(Self::too_big_err)?;
         self.send_inval(notify_code::FUSE_NOTIFY_INVAL_ENTRY, &notif)
+    }
+
+    /// Invalidate every cached directory entry at once, by incrementing the connection's
+    /// epoch.
+    ///
+    /// The kernel stamps each dentry with the epoch current when it was looked up, and
+    /// treats one stamped with an older epoch as stale. Incrementing therefore invalidates
+    /// the whole dentry and readdir cache in constant time, where
+    /// [`inval_entry()`](Self::inval_entry) costs a notification per entry and needs the
+    /// filesystem to know the names to begin with. That suits a backing store that has
+    /// changed wholesale, or one whose changes cannot be enumerated.
+    ///
+    /// Invalidation is lazy, as with [`expire_entry()`](Self::expire_entry): entries are
+    /// revalidated on next use rather than forcibly detached, so anything mounted beneath
+    /// one stays mounted. A kernel configured with the `inval_wq` module parameter also
+    /// prunes unused entries in the background.
+    ///
+    /// # Errors
+    /// Returns `ENOTSUP` if the kernel agreed on an ABI older than 7.44, which has no case
+    /// for this notification. Such a kernel does reject it, unlike the one
+    /// [`expire_entry()`](Self::expire_entry) guards against, but only with an `EINVAL`
+    /// that says nothing about why, and a caller holding a `Notifier` has no way to check
+    /// the version for itself.
+    /// Returns an error if the kernel rejects the notification.
+    pub fn inc_epoch(&self) -> io::Result<()> {
+        // Unknown before init has run, which is also a kernel that cannot be relied on for it
+        if self
+            .kernel_abi
+            .is_none_or(|v| v < FUSE_NOTIFY_INC_EPOCH_VERSION)
+        {
+            return Err(io::Error::from_raw_os_error(libc::ENOTSUP));
+        }
+        let notif = Notification::new_inc_epoch();
+        self.send(notify_code::FUSE_NOTIFY_INC_EPOCH, &notif)
     }
 
     /// Invalidate the kernel cache for a given inode (metadata and
@@ -176,12 +226,16 @@ mod test {
     use crate::dev_fuse::DevFuse;
 
     fn notifier(kernel_capabilities: InitFlags) -> Notifier {
+        notifier_with_abi(kernel_capabilities, Some(FUSE_NOTIFY_INC_EPOCH_VERSION))
+    }
+
+    fn notifier_with_abi(kernel_capabilities: InitFlags, kernel_abi: Option<Version>) -> Notifier {
         // /dev/null stands in for the FUSE device: the cases below either return before
         // sending, or send a notification whose fate is not what is under test
         let dev = Arc::new(DevFuse(
             File::options().write(true).open("/dev/null").unwrap(),
         ));
-        Notifier::new(Channel::new(dev).sender(), kernel_capabilities)
+        Notifier::new(Channel::new(dev).sender(), kernel_capabilities, kernel_abi)
     }
 
     /// A kernel that never advertised expiring would invalidate the entry and report
@@ -207,5 +261,26 @@ mod test {
         notifier(InitFlags::empty())
             .inval_entry(INodeNo::ROOT, OsStr::new("x"))
             .unwrap();
+    }
+
+    /// Incrementing the epoch keys on the ABI version rather than a capability, since the
+    /// kernel advertises no bit for it.
+    #[test]
+    fn inc_epoch_refused_below_its_abi_version() {
+        for abi in [None, Some(Version(7, 43)), Some(Version(6, 99))] {
+            let err = notifier_with_abi(InitFlags::all(), abi)
+                .inc_epoch()
+                .unwrap_err();
+            assert_eq!(err.raw_os_error(), Some(libc::ENOTSUP), "{abi:?}");
+        }
+    }
+
+    #[test]
+    fn inc_epoch_sent_from_its_abi_version_on() {
+        for abi in [Version(7, 44), Version(7, 45), Version(8, 0)] {
+            notifier_with_abi(InitFlags::empty(), Some(abi))
+                .inc_epoch()
+                .unwrap();
+        }
     }
 }

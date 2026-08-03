@@ -30,6 +30,7 @@ use zerocopy::IntoBytes;
 use zerocopy::KnownLayout;
 
 use crate::ll::flags::fattr_flags::FattrFlags;
+use crate::ll::request::Version;
 
 pub(crate) const FUSE_KERNEL_VERSION: u32 = 7;
 
@@ -182,7 +183,13 @@ pub(crate) enum fuse_notify_code {
     FUSE_NOTIFY_STORE = 4,
     FUSE_NOTIFY_RETRIEVE = 5,
     FUSE_NOTIFY_DELETE = 6,
+    FUSE_NOTIFY_RESEND = 7,
+    FUSE_NOTIFY_INC_EPOCH = 8,
 }
+
+/// ABI version that added `FUSE_NOTIFY_INC_EPOCH`. An older kernel has no case for the
+/// code and answers the write with `EINVAL`
+pub(crate) const FUSE_NOTIFY_INC_EPOCH_VERSION: Version = Version(7, 44);
 
 #[repr(C)]
 #[derive(Debug, IntoBytes, KnownLayout, Immutable)]
