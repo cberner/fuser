@@ -1411,9 +1411,21 @@ impl Filesystem for SimpleFS {
         #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         let (exchange, no_replace) = (false, false);
 
+        // Leaving a whiteout behind is Linux-only; macOS has no equivalent
+        #[cfg(target_os = "linux")]
+        let whiteout = flags.contains(RenameFlags::RENAME_WHITEOUT);
+        #[cfg(not(target_os = "linux"))]
+        let whiteout = false;
+
         // Exchanging and refusing to replace are contradictory: renameat2(2) and
         // renamex_np(2) both reject the combination
         if exchange && no_replace {
+            reply.error(Errno::EINVAL);
+            return;
+        }
+
+        // An exchange leaves nothing behind to white out, so renameat2(2) refuses the pair
+        if exchange && whiteout {
             reply.error(Errno::EINVAL);
             return;
         }
@@ -1528,6 +1540,34 @@ impl Filesystem for SimpleFS {
 
         let mut entries = self.get_directory_content(parent).unwrap();
         entries.remove(name.as_bytes());
+        // A whiteout rename puts a placeholder where the entry was, so a filesystem stacked
+        // above this one can tell "removed here" apart from "never existed". The kernel's own
+        // is a character device with device number 0 and no permission bits, which is not a
+        // node anything can be read from or written to
+        if whiteout {
+            let whiteout_inode = self.allocate_next_inode();
+            let whiteout_attrs = InodeAttributes {
+                inode: whiteout_inode.0,
+                open_file_handles: 0,
+                size: 0,
+                last_accessed: now,
+                last_modified: now,
+                last_metadata_changed: now,
+                kind: FileKind::CharDevice,
+                mode: 0,
+                hardlinks: 1,
+                uid: _req.uid(),
+                gid: creation_gid(&parent_attrs, _req.gid()),
+                rdev: 0,
+                xattrs: BTreeMap::default(),
+            };
+            self.write_inode(&whiteout_attrs);
+            File::create(self.content_path(whiteout_inode)).unwrap();
+            entries.insert(
+                name.as_bytes().to_vec(),
+                (whiteout_attrs.inode, whiteout_attrs.kind),
+            );
+        }
         self.write_directory_content(parent, &entries);
 
         let mut entries = self.get_directory_content(newparent).unwrap();
