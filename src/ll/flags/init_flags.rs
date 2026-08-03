@@ -45,6 +45,10 @@ bitflags! {
         /// allow parallel lookups and readdir
         const FUSE_PARALLEL_DIROPS = 1 << 18;
         /// fs handles killing suid/sgid/cap on write/chown/trunc
+        ///
+        /// The kernel stops removing those privileges itself, so the filesystem must clear
+        /// suid, sgid and the `security.capability` xattr on every write, chown and truncate.
+        /// No per-request signal accompanies this: the operation itself is the signal
         const FUSE_HANDLE_KILLPRIV = 1 << 19;
         /// filesystem supports posix acls
         const FUSE_POSIX_ACL = 1 << 20;
@@ -63,6 +67,19 @@ bitflags! {
         /// filesystem supports submounts
         const FUSE_SUBMOUNTS = 1 << 27;
         /// fs handles killing suid/sgid/cap on write/chown/trunc (v2)
+        ///
+        /// As with [`Self::FUSE_HANDLE_KILLPRIV`], the kernel stops removing those privileges
+        /// itself, so clearing the `security.capability` xattr on every write, chown and
+        /// truncate remains the filesystem's job and carries no per-request signal.
+        ///
+        /// What v2 adds is finer control over suid and sgid alone, matching what the VFS would
+        /// have done: they are cleared on a write or truncate only when the caller lacks
+        /// `CAP_FSETID`, and sgid only when the file is group-executable. The kernel reports
+        /// the cases it wants cleared through the `kill_suid_gid` argument of
+        /// [`Filesystem::setattr`](crate::Filesystem::setattr),
+        /// [`open`](crate::Filesystem::open) and [`create`](crate::Filesystem::create), and
+        /// through [`WriteFlags::FUSE_WRITE_KILL_SUIDGID`](crate::WriteFlags) on a write.
+        /// Honoring those covers suid and sgid only, not file capabilities
         const FUSE_HANDLE_KILLPRIV_V2 = 1 << 28;
         /// extended setxattr support
         const FUSE_SETXATTR_EXT = 1 << 29;

@@ -199,7 +199,14 @@ impl fuser::Filesystem for FSelFS {
         reply.ok();
     }
 
-    fn open(&self, _req: &Request, ino: INodeNo, flags: OpenFlags, reply: ReplyOpen) {
+    fn open(
+        &self,
+        _req: &Request,
+        ino: INodeNo,
+        flags: OpenFlags,
+        _kill_suid_gid: bool,
+        reply: ReplyOpen,
+    ) {
         let idx = FSelData::ino_to_idx(ino);
         if idx >= NUMFILES {
             reply.error(Errno::ENOENT);

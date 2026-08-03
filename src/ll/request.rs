@@ -265,6 +265,7 @@ mod op {
     use crate::ll::flags::fsync_flags::FsyncFlags;
     use crate::ll::flags::getattr_flags::GetattrFlags;
     use crate::ll::flags::init_flags::InitFlags;
+    use crate::ll::flags::open_in_flags::OpenInFlags;
     use crate::ll::flags::read_flags::ReadFlags;
     use crate::ll::flags::release_flags::ReleaseFlags;
     use crate::ll::request::FileHandle;
@@ -483,6 +484,13 @@ mod op {
             #[cfg(not(target_os = "macos"))]
             None
         }
+        /// Whether the filesystem must clear suid and sgid as part of this request.
+        ///
+        /// Only ever true once `FUSE_HANDLE_KILLPRIV_V2` has been negotiated, since the kernel
+        /// otherwise clears them itself.
+        pub(crate) fn kill_suid_gid(&self) -> bool {
+            self.valid().contains(FattrFlags::FATTR_KILL_SUIDGID)
+        }
 
         // TODO: Why does *set*attr want to have an attr response?
     }
@@ -672,6 +680,14 @@ mod op {
     impl Open<'_> {
         pub(crate) fn flags(&self) -> OpenFlags {
             OpenFlags(self.arg.flags)
+        }
+        /// Whether the filesystem must clear suid and sgid as part of this request.
+        ///
+        /// Only ever true once `FUSE_HANDLE_KILLPRIV_V2` has been negotiated, since the kernel
+        /// otherwise clears them itself.
+        pub(crate) fn kill_suid_gid(&self) -> bool {
+            OpenInFlags::from_bits_retain(self.arg.open_flags)
+                .contains(OpenInFlags::FUSE_OPEN_KILL_SUIDGID)
         }
     }
 
@@ -1269,6 +1285,14 @@ mod op {
         }
         pub(crate) fn umask(&self) -> u32 {
             self.arg.umask
+        }
+        /// Whether the filesystem must clear suid and sgid as part of this request.
+        ///
+        /// Only ever true once `FUSE_HANDLE_KILLPRIV_V2` has been negotiated, since the kernel
+        /// otherwise clears them itself.
+        pub(crate) fn kill_suid_gid(&self) -> bool {
+            OpenInFlags::from_bits_retain(self.arg.open_flags)
+                .contains(OpenInFlags::FUSE_OPEN_KILL_SUIDGID)
         }
     }
 
@@ -2516,5 +2540,131 @@ mod tests {
     fn setxattr_layout_mismatch_is_rejected() {
         let req = AnyRequest::try_from(&SETXATTR_EXT_REQUEST[..]).unwrap();
         assert!(req.operation().is_err());
+    }
+
+    #[cfg(all(target_endian = "little", not(target_os = "macos")))]
+    const OPEN_KILL_SUIDGID_REQUEST: AlignedData<[u8; 48]> = AlignedData([
+        0x30, 0x00, 0x00, 0x00, 0x0e, 0x00, 0x00, 0x00, // len, opcode
+        0x0d, 0xd0, 0xad, 0xba, 0xef, 0xbe, 0xad, 0xde, // unique
+        0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, // nodeid
+        0x0d, 0xd0, 0x01, 0xc0, 0xfe, 0xca, 0x01, 0xc0, // uid, gid
+        0x5e, 0xba, 0xde, 0xc0, 0x00, 0x00, 0x00, 0x00, // pid, padding
+        0x01, 0x02, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, // flags, open_flags (KILL_SUIDGID)
+    ]);
+
+    #[cfg(all(target_endian = "little", not(target_os = "macos")))]
+    const CREATE_KILL_SUIDGID_REQUEST: AlignedData<[u8; 64]> = AlignedData([
+        0x40, 0x00, 0x00, 0x00, 0x23, 0x00, 0x00, 0x00, // len, opcode
+        0x0d, 0xd0, 0xad, 0xba, 0xef, 0xbe, 0xad, 0xde, // unique
+        0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, // nodeid
+        0x0d, 0xd0, 0x01, 0xc0, 0xfe, 0xca, 0x01, 0xc0, // uid, gid
+        0x5e, 0xba, 0xde, 0xc0, 0x00, 0x00, 0x00, 0x00, // pid, padding
+        0x41, 0x02, 0x00, 0x00, 0xa4, 0x81, 0x00, 0x00, // flags, mode
+        0x12, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, // umask, open_flags (KILL_SUIDGID)
+        0x66, 0x6f, 0x6f, 0x2e, 0x74, 0x78, 0x74, 0x00, // name
+    ]);
+
+    #[cfg(all(target_endian = "little", not(target_os = "macos")))]
+    const SETATTR_KILL_SUIDGID_REQUEST: AlignedData<[u8; 128]> = AlignedData([
+        0x80, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, // len, opcode
+        0x0d, 0xd0, 0xad, 0xba, 0xef, 0xbe, 0xad, 0xde, // unique
+        0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, // nodeid
+        0x0d, 0xd0, 0x01, 0xc0, 0xfe, 0xca, 0x01, 0xc0, // uid, gid
+        0x5e, 0xba, 0xde, 0xc0, 0x00, 0x00, 0x00, 0x00, // pid, padding
+        0x08, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, // valid (SIZE | KILL_SUIDGID), padding
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // fh
+        0x34, 0x12, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // size
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // lock_owner
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // atime
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mtime
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // ctime
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // atimensec, mtimensec
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // ctimensec, mode
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // unused4, uid
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // gid, unused5
+    ]);
+
+    /// The three signals that FUSE_HANDLE_KILLPRIV_V2 adds. Each rides in a field fuser used to
+    /// ignore, so a filesystem that negotiated the capability was never told to clear the bits.
+    #[test]
+    #[cfg(all(target_endian = "little", not(target_os = "macos")))]
+    fn kill_suid_gid_is_parsed() {
+        let req = AnyRequest::try_from(&OPEN_KILL_SUIDGID_REQUEST[..]).unwrap();
+        match req.operation().unwrap() {
+            Operation::Open(x) => {
+                assert!(x.kill_suid_gid());
+                // The O_* flags share the request and must not be disturbed by reading it
+                assert_eq!(x.flags().0, 0x201);
+            }
+            _ => panic!("Unexpected request operation"),
+        }
+
+        let req = AnyRequest::try_from(&CREATE_KILL_SUIDGID_REQUEST[..]).unwrap();
+        match req.operation().unwrap() {
+            Operation::Create(x) => {
+                assert!(x.kill_suid_gid());
+                assert_eq!(x.name(), Path::new("foo.txt"));
+                assert_eq!(x.mode(), 0o100644);
+                assert_eq!(x.umask(), 0o22);
+            }
+            _ => panic!("Unexpected request operation"),
+        }
+
+        let req = AnyRequest::try_from(&SETATTR_KILL_SUIDGID_REQUEST[..]).unwrap();
+        match req.operation().unwrap() {
+            Operation::SetAttr(x) => {
+                assert!(x.kill_suid_gid());
+                assert_eq!(x.size(), Some(0x1234));
+                // FATTR_KILL_SUIDGID must not be mistaken for one of the value-carrying bits
+                assert_eq!(x.mode(), None);
+                assert_eq!(x.uid(), None);
+                assert_eq!(x.gid(), None);
+            }
+            _ => panic!("Unexpected request operation"),
+        }
+    }
+
+    /// Without the capability the kernel leaves these fields zero, and every request must then
+    /// report that the filesystem has nothing to clear
+    #[test]
+    #[cfg(all(target_endian = "little", not(target_os = "macos")))]
+    fn kill_suid_gid_defaults_to_false() {
+        let mut open = OPEN_KILL_SUIDGID_REQUEST;
+        open.0[44] = 0;
+        match AnyRequest::try_from(&open[..])
+            .unwrap()
+            .operation()
+            .unwrap()
+        {
+            Operation::Open(x) => assert!(!x.kill_suid_gid()),
+            _ => panic!("Unexpected request operation"),
+        }
+
+        let mut create = CREATE_KILL_SUIDGID_REQUEST;
+        create.0[52] = 0;
+        match AnyRequest::try_from(&create[..])
+            .unwrap()
+            .operation()
+            .unwrap()
+        {
+            Operation::Create(x) => assert!(!x.kill_suid_gid()),
+            _ => panic!("Unexpected request operation"),
+        }
+
+        let mut setattr = SETATTR_KILL_SUIDGID_REQUEST;
+        setattr.0[41] = 0;
+        match AnyRequest::try_from(&setattr[..])
+            .unwrap()
+            .operation()
+            .unwrap()
+        {
+            Operation::SetAttr(x) => {
+                assert!(!x.kill_suid_gid());
+                // Clearing the bit must leave the rest of the valid mask alone
+                assert_eq!(x.size(), Some(0x1234));
+            }
+            _ => panic!("Unexpected request operation"),
+        }
     }
 }

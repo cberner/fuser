@@ -352,7 +352,7 @@ pub(crate) struct fuse_open_in {
     // NOTE: this field is defined as u32 in fuse_kernel.h in libfuse. However, it is then cast
     // to an i32 when invoking the filesystem's open method and this matches the open() syscall
     pub(crate) flags: i32,
-    pub(crate) unused: u32,
+    pub(crate) open_flags: u32,
 }
 
 #[repr(C)]
@@ -363,7 +363,7 @@ pub(crate) struct fuse_create_in {
     pub(crate) flags: i32,
     pub(crate) mode: u32,
     pub(crate) umask: u32,
-    pub(crate) padding: u32,
+    pub(crate) open_flags: u32,
 }
 
 #[repr(C)]
