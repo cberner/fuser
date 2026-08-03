@@ -1,6 +1,12 @@
 # FUSE for Rust - Changelog
 
 ## Unreleased
+* Add `TryFrom<&std::fs::Metadata>` for `FileAttr` (#413), so a filesystem backed by files on
+  disk can answer `getattr` and `lookup` from the underlying file's metadata. The conversion is
+  fallible because `nlink`, `rdev` and `blksize` narrow to the widths the FUSE protocol gives
+  them, and because a file whose type `FileType` cannot represent has no valid conversion. Note
+  that `ino` is the underlying file's inode number, which a filesystem assigning its own will
+  want to overwrite
 * The `simple` example now clears suid, sgid and `security.capability` in `fallocate()` and
   `copy_file_range()`, which previously left them intact. Negotiating either killpriv capability
   stops the kernel removing privileges on those operations, and neither carries a signal saying

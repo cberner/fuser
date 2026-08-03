@@ -258,6 +258,67 @@ pub struct FileAttr {
     pub flags: u32,
 }
 
+impl TryFrom<&std::fs::Metadata> for FileAttr {
+    type Error = io::Error;
+
+    /// Convert the metadata of a local file, as returned by [`std::fs::metadata`] and friends.
+    ///
+    /// This suits a filesystem backed by files on disk, which can answer `getattr` and `lookup
+    /// ` largely by passing the underlying file's metadata through. Note that `ino` is the
+    /// inode number of that underlying file, which a filesystem assigning its own inode
+    /// numbers will want to overwrite.
+    ///
+    /// `flags` carries the BSD file flags on macOS, where the FUSE protocol has a field for
+    /// them, and is zero everywhere else. `crtime` falls back to the epoch on a platform or
+    /// filesystem that does not record a creation time.
+    ///
+    /// # Errors
+    /// Returns [`io::ErrorKind::InvalidData`] if the file is of a kind [`FileType`] cannot
+    /// represent, or if a field does not fit the width the FUSE protocol gives it. The latter
+    /// needs a filesystem well outside what Linux itself can represent, since the kernel reads
+    /// these back into the same widths.
+    fn try_from(metadata: &std::fs::Metadata) -> Result<Self, Self::Error> {
+        use std::os::unix::fs::MetadataExt;
+
+        fn narrow(value: u64, field: &str) -> io::Result<u32> {
+            u32::try_from(value).map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("{field} is {value}, which does not fit the FUSE protocol's u32"),
+                )
+            })
+        }
+
+        let kind = FileType::from_std(metadata.file_type()).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("unsupported file type {:?}", metadata.file_type()),
+            )
+        })?;
+
+        Ok(FileAttr {
+            ino: INodeNo(metadata.ino()),
+            size: metadata.size(),
+            blocks: metadata.blocks(),
+            atime: time::system_time_from_time(metadata.atime(), metadata.atime_nsec() as u32),
+            mtime: time::system_time_from_time(metadata.mtime(), metadata.mtime_nsec() as u32),
+            ctime: time::system_time_from_time(metadata.ctime(), metadata.ctime_nsec() as u32),
+            crtime: metadata.created().unwrap_or(SystemTime::UNIX_EPOCH),
+            kind,
+            perm: (metadata.mode() & 0o7777) as u16,
+            nlink: narrow(metadata.nlink(), "nlink")?,
+            uid: metadata.uid(),
+            gid: metadata.gid(),
+            rdev: narrow(metadata.rdev(), "rdev")?,
+            blksize: narrow(metadata.blksize(), "blksize")?,
+            #[cfg(target_os = "macos")]
+            flags: std::os::macos::fs::MetadataExt::st_flags(metadata),
+            #[cfg(not(target_os = "macos"))]
+            flags: 0,
+        })
+    }
+}
+
 /// Configuration of the fuse kernel module connection
 #[derive(Debug)]
 pub struct KernelConfig {
@@ -1175,6 +1236,69 @@ pub fn spawn_mount<'a, FS: Filesystem + Send + 'static + 'a, P: AsRef<Path>>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn file_attr_from_metadata() {
+        use std::os::unix::fs::MetadataExt;
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("f");
+        std::fs::write(&file, b"0123456789").unwrap();
+        // Ask for every mode bit the protocol carries, so that a conversion masking the wrong
+        // width shows up here. FreeBSD refuses setgid on a file whose group the caller is not
+        // in, where Linux drops the bit silently, so take whatever the platform stored rather
+        // than assuming the request succeeded
+        let set = std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o6754)).is_ok();
+
+        let metadata = std::fs::metadata(&file).unwrap();
+        let attr = FileAttr::try_from(&metadata).unwrap();
+
+        assert_eq!(attr.kind, FileType::RegularFile);
+        assert_eq!(attr.size, 10);
+        // The file type bits belong to `kind`, and must not leak into `perm`
+        assert_eq!(u32::from(attr.perm), metadata.mode() & 0o7777);
+        // ...which only tests anything if the raw mode has bits outside that mask to drop
+        assert_ne!(metadata.mode() & !0o7777, 0);
+        if set {
+            // Where the platform took the whole request, every bit above the permissions has
+            // to survive too, which is what a conversion masking the wrong width would lose
+            assert_eq!(attr.perm, 0o6754);
+        }
+        assert_eq!(attr.ino, INodeNo(metadata.ino()));
+        assert_eq!(attr.uid, metadata.uid());
+        assert_eq!(attr.gid, metadata.gid());
+        assert_eq!(attr.nlink, 1);
+        assert_eq!(attr.blocks, metadata.blocks());
+        assert_eq!(
+            attr.mtime,
+            time::system_time_from_time(metadata.mtime(), metadata.mtime_nsec() as u32,)
+        );
+        // std exposes no accessor for the BSD flags, so they are always absent
+        assert_eq!(attr.flags, 0);
+
+        let attr = FileAttr::try_from(&std::fs::metadata(dir.path()).unwrap()).unwrap();
+        assert_eq!(attr.kind, FileType::Directory);
+
+        // A symlink only reports as one when the metadata was taken without following it
+        let link = dir.path().join("l");
+        std::os::unix::fs::symlink(&file, &link).unwrap();
+        let attr = FileAttr::try_from(&std::fs::symlink_metadata(&link).unwrap()).unwrap();
+        assert_eq!(attr.kind, FileType::Symlink);
+        let attr = FileAttr::try_from(&std::fs::metadata(&link).unwrap()).unwrap();
+        assert_eq!(attr.kind, FileType::RegularFile);
+    }
+
+    #[test]
+    fn file_attr_from_metadata_of_a_fifo() {
+        let dir = tempfile::tempdir().unwrap();
+        let fifo = dir.path().join("p");
+        nix::unistd::mkfifo(&fifo, nix::sys::stat::Mode::S_IRUSR).unwrap();
+
+        let attr = FileAttr::try_from(&std::fs::symlink_metadata(&fifo).unwrap()).unwrap();
+        assert_eq!(attr.kind, FileType::NamedPipe);
+        assert_eq!(attr.perm, 0o400);
+    }
 
     #[test]
     fn kernel_config_set_max_write_bounds() {
