@@ -77,11 +77,16 @@ impl MountImpl {
     }
 
     pub(crate) fn umount_impl(&mut self) -> io::Result<()> {
-        if let Some(sock) = mem::take(&mut self.auto_unmount_socket) {
-            drop(sock);
-            // fusermount in auto-unmount mode, no more work to do.
-            return Ok(());
-        }
+        // The auto_unmount watcher only reacts once this process lets go of the mount, so
+        // leaving the unmount to it keeps the mountpoint occupied for the rest of the
+        // process's life. Unmount here, as libfuse does, and close the socket afterwards
+        // so the watcher exits without a mount left to clean up (issue #407)
+        let result = self.umount_now();
+        drop(mem::take(&mut self.auto_unmount_socket));
+        result
+    }
+
+    fn umount_now(&self) -> io::Result<()> {
         if let Err(err) = crate::mnt::libc_umount(&self.mountpoint) {
             if err == nix::errno::Errno::EPERM {
                 // Linux always returns EPERM for non-root users.  We have to let the
