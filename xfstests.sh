@@ -31,7 +31,8 @@ echo "generic/484" >> xfs_excludes.txt
 # Writes directly to scratch block dev
 echo "generic/062" >> xfs_excludes.txt
 
-# TODO: looks like it requires character file support
+# TODO: requires renameat2(RENAME_WHITEOUT), which has to leave a 0/0 character device
+# behind at the source. fuser passes the flag through as RenameFlags; the example ignores it
 echo "generic/078" >> xfs_excludes.txt
 
 # TODO: takes > 10min
@@ -46,13 +47,10 @@ echo "generic/127" >> xfs_excludes.txt
 # TODO: requires more complete falloc support. Also fills up the entire hard disk...
 echo "generic/103" >> xfs_excludes.txt
 
-# TODO: requires support for mknod on character files
-echo "generic/184" >> xfs_excludes.txt
-echo "generic/401" >> xfs_excludes.txt
-
-# TODO: requires fifo support
+# TODO: requires ctime and mtime to be set from a single clock reading. The example takes
+# them from separate time_now() calls, so statx can see a ctime older than the mtime set
+# moments earlier in the same operation
 echo "generic/423" >> xfs_excludes.txt
-echo "generic/434" >> xfs_excludes.txt
 
 # TODO: requires ulimit support for limiting file size
 echo "generic/394" >> xfs_excludes.txt
@@ -66,7 +64,9 @@ echo "generic/099" >> xfs_excludes.txt
 echo "generic/105" >> xfs_excludes.txt
 echo "generic/375" >> xfs_excludes.txt
 
-# TODO: requires support for mounting read-only
+# TODO: requires support for remounting read-only. 306 and 452 additionally need a change in
+# fuse-xfstests, whose _scratch_remount answers "fuse.fuser does not support any options"
+# without attempting the remount; 294 goes through _try_scratch_mount and does attempt it
 echo "generic/294" >> xfs_excludes.txt
 echo "generic/306" >> xfs_excludes.txt
 echo "generic/452" >> xfs_excludes.txt
@@ -178,7 +178,7 @@ echo "generic/208" >> xfs_excludes.txt
 echo "generic/323" >> xfs_excludes.txt
 
 
-FUSER_EXTRA_MOUNT_OPTIONS="--auto-unmount" TEST_DEV="$TEST_DATA_DIR" TEST_DIR="$TEST_DIR" SCRATCH_DEV="$SCRATCH_DATA_DIR" SCRATCH_MNT="$SCRATCH_DIR" \
+FUSER_EXTRA_MOUNT_OPTIONS="--auto-unmount --dev" TEST_DEV="$TEST_DATA_DIR" TEST_DIR="$TEST_DIR" SCRATCH_DEV="$SCRATCH_DATA_DIR" SCRATCH_MNT="$SCRATCH_DIR" \
 ./check-fuser -E xfs_excludes.txt "$@" \
 | tee /code/logs/xfstests.log
 
