@@ -460,8 +460,12 @@ impl<'a> RequestWithSender<'a> {
                 );
             }
             ll::Operation::Poll(x) => {
-                let ph =
-                    PollNotifier::new(se.ch.sender(), x.kernel_handle(), se.kernel_capabilities);
+                let ph = PollNotifier::new(
+                    se.ch.sender(),
+                    x.kernel_handle(),
+                    se.kernel_capabilities,
+                    se.kernel_abi,
+                );
 
                 filesystem.poll(
                     self.request_header(),

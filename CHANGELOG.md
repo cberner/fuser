@@ -1,6 +1,11 @@
 # FUSE for Rust - Changelog
 
 ## Unreleased
+* Add `Notifier::inc_epoch()`, which invalidates every cached directory entry at once by
+  incrementing the connection's epoch (#382). This costs one notification where
+  `inval_entry()` costs one per entry and needs the names up front, so it suits a backing
+  store that changed wholesale. Requires ABI 7.44, returning `ENOTSUP` below it, since the
+  kernel advertises no capability bit for this and an older one answers only with `EINVAL`
 * Add `TryFrom<&std::fs::Metadata>` for `FileAttr` (#413), so a filesystem backed by files on
   disk can answer `getattr` and `lookup` from the underlying file's metadata. The conversion is
   fallible because `nlink`, `rdev` and `blksize` narrow to the widths the FUSE protocol gives

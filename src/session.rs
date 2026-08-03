@@ -245,6 +245,7 @@ impl<FS: Filesystem> Session<FS> {
         let sender = self.ch.sender();
         let fuse_device = self.ch.device();
         let kernel_capabilities = self.kernel_capabilities;
+        let kernel_abi = self.proto_version;
         // Take the fuse_session, so that we can unmount it
         let mount = std::mem::take(&mut *self.mount.mount.lock());
         let guard = thread::Builder::new()
@@ -256,6 +257,7 @@ impl<FS: Filesystem> Session<FS> {
             fuse_device,
             mount,
             kernel_capabilities,
+            kernel_abi,
         })
     }
 
@@ -272,7 +274,7 @@ impl<FS: Filesystem> Session<FS> {
             mount: _do_not_umount_yet,
             allowed,
             session_owner,
-            proto_version: _,
+            proto_version,
             negotiated,
             kernel_capabilities,
             config,
@@ -324,6 +326,7 @@ impl<FS: Filesystem> Session<FS> {
                 session_owner,
                 negotiated,
                 kernel_capabilities,
+                kernel_abi: proto_version,
             };
             threads.push(
                 thread::Builder::new()
@@ -519,7 +522,11 @@ impl<FS: Filesystem> Session<FS> {
 
     /// Returns an object that can be used to send notifications to the kernel
     pub fn notifier(&self) -> Notifier {
-        Notifier::new(self.ch.sender(), self.kernel_capabilities)
+        Notifier::new(
+            self.ch.sender(),
+            self.kernel_capabilities,
+            self.proto_version,
+        )
     }
 }
 
@@ -548,6 +555,7 @@ pub(crate) struct SessionEventLoop<FS: Filesystem> {
     pub(crate) session_owner: Uid,
     pub(crate) negotiated: InitFlags,
     pub(crate) kernel_capabilities: InitFlags,
+    pub(crate) kernel_abi: Option<Version>,
 }
 
 impl<FS: Filesystem> SessionEventLoop<FS> {
@@ -617,6 +625,8 @@ pub struct BackgroundSession {
     /// Everything the kernel advertised during init, for notifications whose support
     /// depends on it
     kernel_capabilities: InitFlags,
+    /// The ABI version agreed during init, for notifications with no capability bit
+    kernel_abi: Option<Version>,
 }
 
 /// How long teardown waits for the kernel connection to end after a successful
@@ -644,7 +654,11 @@ impl BackgroundSession {
 
     /// Returns an object that can be used to send notifications to the kernel
     pub fn notifier(&self) -> Notifier {
-        Notifier::new(self.sender.clone(), self.kernel_capabilities)
+        Notifier::new(
+            self.sender.clone(),
+            self.kernel_capabilities,
+            self.kernel_abi,
+        )
     }
 
     /// Join the filesystem thread without unmounting first: blocks until
