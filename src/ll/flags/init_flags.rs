@@ -53,7 +53,13 @@ bitflags! {
         /// Unlike [`Self::FUSE_HANDLE_KILLPRIV_V2`] this does not set `SB_NOSEC`, so the kernel
         /// still computes the removal and applies it through a `setattr`. What it buys is that
         /// the kernel skips refreshing attributes first, trusting the filesystem to keep them
-        /// right
+        /// right.
+        ///
+        /// Note that this reaches further than the write, chown and truncate the contract names.
+        /// Negotiating either killpriv capability also stops the kernel removing privileges on
+        /// `fallocate` and `copy_file_range`, and neither carries a signal saying so, so a
+        /// filesystem that wants those to behave like a local one has to clear the bits there
+        /// itself
         const FUSE_HANDLE_KILLPRIV = 1 << 19;
         /// filesystem supports posix acls
         const FUSE_POSIX_ACL = 1 << 20;
@@ -87,7 +93,9 @@ bitflags! {
         /// [`Filesystem::setattr`](crate::Filesystem::setattr),
         /// [`open`](crate::Filesystem::open) and [`create`](crate::Filesystem::create), and
         /// through [`WriteFlags::FUSE_WRITE_KILL_SUIDGID`](crate::WriteFlags) on a write.
-        /// Honoring those covers suid and sgid only, not file capabilities
+        /// Honoring those covers suid and sgid only, not file capabilities, and only the
+        /// operations that carry a signal: see [`Self::FUSE_HANDLE_KILLPRIV`] for the ones that
+        /// do not
         const FUSE_HANDLE_KILLPRIV_V2 = 1 << 28;
         /// extended setxattr support
         const FUSE_SETXATTR_EXT = 1 << 29;

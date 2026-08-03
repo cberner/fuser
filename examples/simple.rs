@@ -192,6 +192,24 @@ fn clear_file_capabilities(attr: &mut InodeAttributes) {
     attr.xattrs.remove(b"security.capability".as_slice());
 }
 
+/// Drop privileges for an operation the kernel hands over without telling us when to.
+///
+/// Negotiating either killpriv capability stops the kernel removing privileges itself, but
+/// `FUSE_FALLOCATE` and `FUSE_COPY_FILE_RANGE` carry nothing like the `kill_suid_gid` argument
+/// that write, setattr, open and create get, so the filesystem cannot learn whether the caller
+/// held `CAP_FSETID`. Clearing regardless strips bits from a privileged caller that a native
+/// filesystem would keep, which is the better of the two errors available: the alternative
+/// leaves a setuid binary setuid after an unprivileged caller has rewritten it.
+///
+/// This is deliberately not the conditional form used on write and truncate, where the kernel
+/// does say. Call it only when a killpriv capability was negotiated: without one the kernel
+/// still removes privileges itself, and clearing here as well would strip bits from a
+/// privileged caller for no reason
+fn clear_privileges_unconditionally(attr: &mut InodeAttributes) {
+    clear_suid_sgid(attr);
+    clear_file_capabilities(attr);
+}
+
 fn creation_gid(parent: &InodeAttributes, gid: u32) -> u32 {
     if parent.mode & libc::S_ISGID as u16 != 0 {
         return parent.gid;
@@ -330,6 +348,10 @@ struct SimpleFS {
     next_file_handle: AtomicU64,
     direct_io: bool,
     suid_support: bool,
+    /// Whether a killpriv capability was negotiated, and so whether removing privileges is
+    /// this filesystem's job rather than the kernel's. Distinct from `suid_support`, which
+    /// only says whether the caller asked for setuid support
+    killpriv_negotiated: bool,
 }
 
 impl SimpleFS {
@@ -339,6 +361,7 @@ impl SimpleFS {
             next_file_handle: AtomicU64::new(1),
             direct_io,
             suid_support,
+            killpriv_negotiated: false,
         }
     }
 
@@ -564,6 +587,8 @@ impl Filesystem for SimpleFS {
         {
             info!("FUSE_HANDLE_KILLPRIV_V2 not supported");
             self.suid_support = false;
+        } else {
+            self.killpriv_negotiated = true;
         }
 
         fs::create_dir_all(Path::new(&self.data_dir).join("inodes")).unwrap();
@@ -1991,15 +2016,18 @@ impl Filesystem for SimpleFS {
                     reply.error(io::Error::last_os_error().into());
                     return;
                 }
-                if mode & libc::FALLOC_FL_KEEP_SIZE == 0 {
-                    let mut attrs = self.get_inode(ino).unwrap();
-                    attrs.last_metadata_changed = time_now();
-                    attrs.last_modified = time_now();
-                    if offset + length > attrs.size {
-                        attrs.size = (offset + length) as u64;
-                    }
-                    self.write_inode(&attrs);
+                let mut attrs = self.get_inode(ino).unwrap();
+                // Every fallocate mode changes the file, so the times move even when the size
+                // is pinned: a punch-hole rewrites content, and preallocation commits blocks
+                attrs.last_metadata_changed = time_now();
+                attrs.last_modified = time_now();
+                if mode & libc::FALLOC_FL_KEEP_SIZE == 0 && offset + length > attrs.size {
+                    attrs.size = (offset + length) as u64;
                 }
+                if self.killpriv_negotiated {
+                    clear_privileges_unconditionally(&mut attrs);
+                }
+                self.write_inode(&attrs);
                 reply.ok();
             }
             _ => {
@@ -2062,6 +2090,9 @@ impl Filesystem for SimpleFS {
                         };
                         if end_offset > attrs.size as usize {
                             attrs.size = end_offset as u64;
+                        }
+                        if self.killpriv_negotiated {
+                            clear_privileges_unconditionally(&mut attrs);
                         }
                         self.write_inode(&attrs);
 

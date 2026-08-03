@@ -1,6 +1,12 @@
 # FUSE for Rust - Changelog
 
 ## Unreleased
+* The `simple` example now clears suid, sgid and `security.capability` in `fallocate()` and
+  `copy_file_range()`, which previously left them intact. Negotiating either killpriv capability
+  stops the kernel removing privileges on those operations, and neither carries a signal saying
+  when to, so the example clears unconditionally: that strips the bits from a caller holding
+  `CAP_FSETID` where a local filesystem would keep them, but the alternative leaves a setuid
+  binary setuid after an unprivileged caller has rewritten it
 * The `simple` example now negotiates `FUSE_HANDLE_KILLPRIV_V2` instead of
   `FUSE_HANDLE_KILLPRIV`, and clears suid and sgid only when the kernel asks rather than on
   every write, chown and truncate. That fixes two cases where it diverged from a native
