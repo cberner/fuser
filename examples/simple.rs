@@ -18,7 +18,7 @@ use std::io::Write;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::FileExt;
 #[cfg(target_os = "linux")]
-use std::os::unix::io::IntoRawFd;
+use std::os::unix::io::AsRawFd;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicU64;
@@ -583,7 +583,13 @@ impl Filesystem for SimpleFS {
             reply.error(Errno::ENAMETOOLONG);
             return;
         }
-        let parent_attrs = self.get_inode(parent).unwrap();
+        let parent_attrs = match self.get_inode(parent) {
+            Ok(attrs) => attrs,
+            Err(error_code) => {
+                reply.error(error_code);
+                return;
+            }
+        };
         if !check_access(
             parent_attrs.uid,
             parent_attrs.gid,
@@ -1964,8 +1970,14 @@ impl Filesystem for SimpleFS {
         let path = self.content_path(ino);
         match OpenOptions::new().write(true).open(path) {
             Ok(file) => {
-                unsafe {
-                    libc::fallocate64(file.into_raw_fd(), mode, offset as i64, length as i64);
+                // Must not consume `file`, otherwise its descriptor is leaked. Tests that punch
+                // thousands of holes exhaust RLIMIT_NOFILE within a single run.
+                let result = unsafe {
+                    libc::fallocate64(file.as_raw_fd(), mode, offset as i64, length as i64)
+                };
+                if result < 0 {
+                    reply.error(io::Error::last_os_error().into());
+                    return;
                 }
                 if mode & libc::FALLOC_FL_KEEP_SIZE == 0 {
                     let mut attrs = self.get_inode(ino).unwrap();
