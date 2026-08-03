@@ -113,6 +113,45 @@ echo "generic/391" >> xfs_excludes.txt
 echo "generic/426" >> xfs_excludes.txt
 echo "generic/467" >> xfs_excludes.txt
 echo "generic/477" >> xfs_excludes.txt
+# These two check that a file handle goes stale once the cache is dropped, so the failed
+# drop leaves every handle resolvable and every check reports the opposite of what it wants
+echo "generic/756" >> xfs_excludes.txt
+echo "generic/777" >> xfs_excludes.txt
+
+# Triggering memory compaction is not allowed inside Docker: /proc/sys/vm/compact_memory is
+# read-only. Also very slow, running for > 11min before failing
+echo "generic/750" >> xfs_excludes.txt
+
+# Clearing the kernel ring buffer is not allowed inside Docker. The test itself passes; only
+# dmesg's complaint about it shows up in the output
+echo "generic/310" >> xfs_excludes.txt
+
+# fsx against hugepage-backed buffers, which cannot be set up here: MADV_COLLAPSE is refused
+# and init_hugepages_buf fails before any filesystem operation runs
+echo "generic/759" >> xfs_excludes.txt
+echo "generic/760" >> xfs_excludes.txt
+
+# Toggling CPUs offline is not allowed inside Docker: /sys/devices/system/cpu/*/online is
+# read-only
+echo "generic/650" >> xfs_excludes.txt
+
+# Mounts overlayfs on top of the filesystem under test, which is refused here
+echo "generic/631" >> xfs_excludes.txt
+
+# Mounts the same device twice and assumes the two mounts share a superblock, as the test's own
+# _exclude_fs list for nfs, overlay and tmpfs concedes. Each fuser mount is a separate process
+# with its own state, so a file created through one mount is not visible through the other
+echo "generic/732" >> xfs_excludes.txt
+
+# TODO: requires support for shutting the filesystem down
+echo "generic/766" >> xfs_excludes.txt
+
+# Requires atomic writes, which xfs_io in this image cannot request (pwrite -A)
+echo "generic/775" >> xfs_excludes.txt
+echo "generic/778" >> xfs_excludes.txt
+
+# Requires fio, which is not installed in the test image
+echo "generic/774" >> xfs_excludes.txt
 
 # TODO: permission failure invoking FIBMAP
 echo "generic/519" >> xfs_excludes.txt
@@ -137,30 +176,6 @@ echo "generic/109" >> xfs_excludes.txt
 echo "generic/120" >> xfs_excludes.txt
 echo "generic/208" >> xfs_excludes.txt
 echo "generic/323" >> xfs_excludes.txt
-
-
-# Not sure what's wrong with these
-echo "generic/075" >> xfs_excludes.txt
-echo "generic/091" >> xfs_excludes.txt
-echo "generic/112" >> xfs_excludes.txt
-echo "generic/310" >> xfs_excludes.txt
-echo "generic/363" >> xfs_excludes.txt
-echo "generic/631" >> xfs_excludes.txt
-echo "generic/650" >> xfs_excludes.txt
-echo "generic/732" >> xfs_excludes.txt
-echo "generic/748" >> xfs_excludes.txt
-echo "generic/750" >> xfs_excludes.txt
-echo "generic/754" >> xfs_excludes.txt
-echo "generic/756" >> xfs_excludes.txt
-echo "generic/758" >> xfs_excludes.txt
-echo "generic/759" >> xfs_excludes.txt
-echo "generic/760" >> xfs_excludes.txt
-echo "generic/761" >> xfs_excludes.txt
-echo "generic/766" >> xfs_excludes.txt
-echo "generic/774" >> xfs_excludes.txt
-echo "generic/775" >> xfs_excludes.txt
-echo "generic/777" >> xfs_excludes.txt
-echo "generic/778" >> xfs_excludes.txt
 
 
 FUSER_EXTRA_MOUNT_OPTIONS="--auto-unmount" TEST_DEV="$TEST_DATA_DIR" TEST_DIR="$TEST_DIR" SCRATCH_DEV="$SCRATCH_DATA_DIR" SCRATCH_MNT="$SCRATCH_DIR" \
