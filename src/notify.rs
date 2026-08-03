@@ -9,6 +9,8 @@ use crate::Version;
 use crate::channel::ChannelSender;
 use crate::ll::flags::init_flags::InitFlags;
 use crate::ll::fuse_abi::FUSE_EXPIRE_ONLY;
+use crate::ll::fuse_abi::FUSE_KERNEL_MINOR_VERSION;
+use crate::ll::fuse_abi::FUSE_KERNEL_VERSION;
 use crate::ll::fuse_abi::FUSE_NOTIFY_INC_EPOCH_VERSION;
 use crate::ll::fuse_abi::fuse_notify_code as notify_code;
 use crate::ll::notify::Notification;
@@ -65,9 +67,10 @@ pub struct Notifier {
     /// meaningful on a kernel that supports them, and the kernel reports success
     /// regardless, so they are refused here rather than silently doing something else
     kernel_capabilities: InitFlags,
-    /// The ABI version the kernel agreed on, or `None` before init has run. Notifications
-    /// added after a given version have no capability bit to key on, so the version is
-    /// what says whether the kernel will understand them
+    /// The ABI version the kernel offered during init, or `None` before init has run.
+    /// Notifications added after a given version have no capability bit to key on, so the
+    /// version is what says whether the kernel will understand them. This is what the kernel
+    /// advertised, not what the connection settled on: see [`Notifier::negotiated_abi`]
     kernel_abi: Option<Version>,
 }
 
@@ -143,22 +146,39 @@ impl Notifier {
     /// prunes unused entries in the background.
     ///
     /// # Errors
-    /// Returns `ENOTSUP` if the kernel agreed on an ABI older than 7.44, which has no case
-    /// for this notification. Such a kernel does reject it, unlike the one
+    /// Returns `ENOTSUP` if the connection settled on an ABI older than 7.44, which has no
+    /// case for this notification. Such a kernel does reject it, unlike the one
     /// [`expire_entry()`](Self::expire_entry) guards against, but only with an `EINVAL`
     /// that says nothing about why, and a caller holding a `Notifier` has no way to check
     /// the version for itself.
     /// Returns an error if the kernel rejects the notification.
     pub fn inc_epoch(&self) -> io::Result<()> {
-        // Unknown before init has run, which is also a kernel that cannot be relied on for it
+        // None before init has run, which is also a connection nothing can be sent on yet
         if self
-            .kernel_abi
+            .negotiated_abi()
             .is_none_or(|v| v < FUSE_NOTIFY_INC_EPOCH_VERSION)
         {
             return Err(io::Error::from_raw_os_error(libc::ENOTSUP));
         }
         let notif = Notification::new_inc_epoch();
         self.send(notify_code::FUSE_NOTIFY_INC_EPOCH, &notif)
+    }
+
+    /// What the connection actually speaks: the lower of what the kernel offered during init
+    /// and what this crate replied with.
+    ///
+    /// Both halves matter. The kernel dispatches a notification on its code alone, without
+    /// consulting the version, so what it offered is what decides whether it has a case for
+    /// one at all. But it records the replied version verbatim as the connection's, so
+    /// sending something newer than that is out of protocol however tolerant the dispatch
+    /// happens to be. Taking the lower keeps to both.
+    fn negotiated_abi(&self) -> Option<Version> {
+        self.kernel_abi.map(|kernel| {
+            Version(
+                kernel.0.min(FUSE_KERNEL_VERSION),
+                kernel.1.min(FUSE_KERNEL_MINOR_VERSION),
+            )
+        })
     }
 
     /// Invalidate the kernel cache for a given inode (metadata and
@@ -267,7 +287,7 @@ mod test {
     /// kernel advertises no bit for it.
     #[test]
     fn inc_epoch_refused_below_its_abi_version() {
-        for abi in [None, Some(Version(7, 43)), Some(Version(6, 99))] {
+        for abi in [None, Some(Version(7, 43)), Some(Version(7, 6))] {
             let err = notifier_with_abi(InitFlags::all(), abi)
                 .inc_epoch()
                 .unwrap_err();
@@ -277,10 +297,24 @@ mod test {
 
     #[test]
     fn inc_epoch_sent_from_its_abi_version_on() {
-        for abi in [Version(7, 44), Version(7, 45), Version(8, 0)] {
+        for abi in [Version(7, 44), Version(7, 45), Version(7, 99)] {
             notifier_with_abi(InitFlags::empty(), Some(abi))
                 .inc_epoch()
                 .unwrap();
         }
+    }
+
+    /// A kernel offering more than this crate replies with does not make the extra versions
+    /// part of the connection, since the kernel records the reply as its own.
+    #[test]
+    fn negotiated_abi_is_capped_by_what_this_crate_replies_with() {
+        let notifier = notifier_with_abi(InitFlags::empty(), Some(Version(7, 99)));
+        assert_eq!(
+            notifier.negotiated_abi(),
+            Some(Version(FUSE_KERNEL_VERSION, FUSE_KERNEL_MINOR_VERSION))
+        );
+        // ...and a kernel offering less than that caps it the other way round
+        let notifier = notifier_with_abi(InitFlags::empty(), Some(Version(7, 31)));
+        assert_eq!(notifier.negotiated_abi(), Some(Version(7, 31)));
     }
 }

@@ -6,6 +6,10 @@
   `inval_entry()` costs one per entry and needs the names up front, so it suits a backing
   store that changed wholesale. Requires ABI 7.44, returning `ENOTSUP` below it, since the
   kernel advertises no capability bit for this and an older one answers only with `EINVAL`
+* The ABI version reported to the kernel on non-macOS platforms is now 7.44, up from 7.40, so
+  that `inc_epoch()` is in protocol rather than relying on the kernel not version-gating its
+  notification dispatch. The features 7.41 through 7.43 add are capabilities the kernel acts
+  on only once negotiated, and all three are already refused
 * Add `TryFrom<&std::fs::Metadata>` for `FileAttr` (#413), so a filesystem backed by files on
   disk can answer `getattr` and `lookup` from the underlying file's metadata. The conversion is
   fallible because `nlink`, `rdev` and `blksize` narrow to the widths the FUSE protocol gives
