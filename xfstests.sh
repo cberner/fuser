@@ -47,11 +47,6 @@ echo "generic/127" >> xfs_excludes.txt
 # TODO: requires more complete falloc support. Also fills up the entire hard disk...
 echo "generic/103" >> xfs_excludes.txt
 
-# TODO: requires ctime and mtime to be set from a single clock reading. The example takes
-# them from separate time_now() calls, so statx can see a ctime older than the mtime set
-# moments earlier in the same operation
-echo "generic/423" >> xfs_excludes.txt
-
 # TODO: requires ulimit support for limiting file size
 echo "generic/394" >> xfs_excludes.txt
 

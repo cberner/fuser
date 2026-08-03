@@ -573,9 +573,10 @@ impl SimpleFS {
         let file = OpenOptions::new().write(true).open(path).unwrap();
         file.set_len(new_length).unwrap();
 
+        let now = time_now();
         attrs.size = new_length;
-        attrs.last_metadata_changed = time_now();
-        attrs.last_modified = time_now();
+        attrs.last_metadata_changed = now;
+        attrs.last_modified = now;
 
         // Clear SETUID & SETGID on truncate, but only when the kernel asks: under killpriv v2
         // it does so exactly when the caller lacks CAP_FSETID
@@ -621,8 +622,9 @@ impl SimpleFS {
         ) {
             return Err(Errno::EACCES);
         }
-        parent_attrs.last_modified = time_now();
-        parent_attrs.last_metadata_changed = time_now();
+        let now = time_now();
+        parent_attrs.last_modified = now;
+        parent_attrs.last_metadata_changed = now;
         self.write_inode(&parent_attrs);
 
         let mut entries = self.get_directory_content(parent).unwrap();
@@ -655,13 +657,14 @@ impl Filesystem for SimpleFS {
         fs::create_dir_all(Path::new(&self.data_dir).join("contents")).unwrap();
         if self.get_inode(INodeNo::ROOT).is_err() {
             // Initialize with empty filesystem
+            let now = time_now();
             let root = InodeAttributes {
                 inode: INodeNo::ROOT.0,
                 open_file_handles: 0,
                 size: 0,
-                last_accessed: time_now(),
-                last_modified: time_now(),
-                last_metadata_changed: time_now(),
+                last_accessed: now,
+                last_modified: now,
+                last_metadata_changed: now,
                 kind: FileKind::Directory,
                 mode: 0o777,
                 hardlinks: 2,
@@ -974,8 +977,9 @@ impl Filesystem for SimpleFS {
             reply.error(Errno::EACCES);
             return;
         }
-        parent_attrs.last_modified = time_now();
-        parent_attrs.last_metadata_changed = time_now();
+        let now = time_now();
+        parent_attrs.last_modified = now;
+        parent_attrs.last_metadata_changed = now;
         self.write_inode(&parent_attrs);
 
         if _req.uid() != 0 {
@@ -1000,9 +1004,9 @@ impl Filesystem for SimpleFS {
             inode: inode.0,
             open_file_handles: 0,
             size: 0,
-            last_accessed: time_now(),
-            last_modified: time_now(),
-            last_metadata_changed: time_now(),
+            last_accessed: now,
+            last_modified: now,
+            last_metadata_changed: now,
             kind: as_file_kind(mode),
             mode: self.creation_mode(mode),
             hardlinks: 1,
@@ -1070,8 +1074,9 @@ impl Filesystem for SimpleFS {
             reply.error(Errno::EACCES);
             return;
         }
-        parent_attrs.last_modified = time_now();
-        parent_attrs.last_metadata_changed = time_now();
+        let now = time_now();
+        parent_attrs.last_modified = now;
+        parent_attrs.last_metadata_changed = now;
         self.write_inode(&parent_attrs);
 
         if _req.uid() != 0 {
@@ -1086,9 +1091,9 @@ impl Filesystem for SimpleFS {
             inode: inode.0,
             open_file_handles: 0,
             size: u64::from(BLOCK_SIZE),
-            last_accessed: time_now(),
-            last_modified: time_now(),
-            last_metadata_changed: time_now(),
+            last_accessed: now,
+            last_modified: now,
+            last_metadata_changed: now,
             kind: FileKind::Directory,
             mode: self.creation_mode(mode),
             hardlinks: 2, // Directories start with link count of 2, since they have a self link
@@ -1152,12 +1157,13 @@ impl Filesystem for SimpleFS {
             return;
         }
 
-        parent_attrs.last_metadata_changed = time_now();
-        parent_attrs.last_modified = time_now();
+        let now = time_now();
+        parent_attrs.last_metadata_changed = now;
+        parent_attrs.last_modified = now;
         self.write_inode(&parent_attrs);
 
         attrs.hardlinks -= 1;
-        attrs.last_metadata_changed = time_now();
+        attrs.last_metadata_changed = now;
         self.write_inode(&attrs);
         self.gc_inode(&attrs);
 
@@ -1218,12 +1224,13 @@ impl Filesystem for SimpleFS {
             return;
         }
 
-        parent_attrs.last_metadata_changed = time_now();
-        parent_attrs.last_modified = time_now();
+        let now = time_now();
+        parent_attrs.last_metadata_changed = now;
+        parent_attrs.last_modified = now;
         self.write_inode(&parent_attrs);
 
         attrs.hardlinks = 0;
-        attrs.last_metadata_changed = time_now();
+        attrs.last_metadata_changed = now;
         self.write_inode(&attrs);
         self.gc_inode(&attrs);
 
@@ -1262,8 +1269,9 @@ impl Filesystem for SimpleFS {
             reply.error(Errno::EACCES);
             return;
         }
-        parent_attrs.last_modified = time_now();
-        parent_attrs.last_metadata_changed = time_now();
+        let now = time_now();
+        parent_attrs.last_modified = now;
+        parent_attrs.last_metadata_changed = now;
         self.write_inode(&parent_attrs);
 
         let inode = self.allocate_next_inode();
@@ -1271,9 +1279,9 @@ impl Filesystem for SimpleFS {
             inode: inode.0,
             open_file_handles: 0,
             size: target.as_os_str().as_bytes().len() as u64,
-            last_accessed: time_now(),
-            last_modified: time_now(),
-            last_metadata_changed: time_now(),
+            last_accessed: now,
+            last_modified: now,
+            last_metadata_changed: now,
             kind: FileKind::Symlink,
             mode: 0o777,
             hardlinks: 1,
@@ -1433,15 +1441,16 @@ impl Filesystem for SimpleFS {
             );
             self.write_directory_content(parent, &entries);
 
-            parent_attrs.last_metadata_changed = time_now();
-            parent_attrs.last_modified = time_now();
+            let now = time_now();
+            parent_attrs.last_metadata_changed = now;
+            parent_attrs.last_modified = now;
             self.write_inode(&parent_attrs);
-            new_parent_attrs.last_metadata_changed = time_now();
-            new_parent_attrs.last_modified = time_now();
+            new_parent_attrs.last_metadata_changed = now;
+            new_parent_attrs.last_modified = now;
             self.write_inode(&new_parent_attrs);
-            inode_attrs.last_metadata_changed = time_now();
+            inode_attrs.last_metadata_changed = now;
             self.write_inode(&inode_attrs);
-            new_inode_attrs.last_metadata_changed = time_now();
+            new_inode_attrs.last_metadata_changed = now;
             self.write_inode(&new_inode_attrs);
 
             if inode_attrs.kind == FileKind::Directory {
@@ -1499,6 +1508,8 @@ impl Filesystem for SimpleFS {
             return;
         }
 
+        let now = time_now();
+
         // If target already exists decrement its hardlink count
         if let Ok(mut existing_inode_attrs) = self.lookup_name(newparent, newname) {
             let mut entries = self.get_directory_content(newparent).unwrap();
@@ -1510,7 +1521,7 @@ impl Filesystem for SimpleFS {
             } else {
                 existing_inode_attrs.hardlinks -= 1;
             }
-            existing_inode_attrs.last_metadata_changed = time_now();
+            existing_inode_attrs.last_metadata_changed = now;
             self.write_inode(&existing_inode_attrs);
             self.gc_inode(&existing_inode_attrs);
         }
@@ -1526,13 +1537,13 @@ impl Filesystem for SimpleFS {
         );
         self.write_directory_content(newparent, &entries);
 
-        parent_attrs.last_metadata_changed = time_now();
-        parent_attrs.last_modified = time_now();
+        parent_attrs.last_metadata_changed = now;
+        parent_attrs.last_modified = now;
         self.write_inode(&parent_attrs);
-        new_parent_attrs.last_metadata_changed = time_now();
-        new_parent_attrs.last_modified = time_now();
+        new_parent_attrs.last_metadata_changed = now;
+        new_parent_attrs.last_modified = now;
         self.write_inode(&new_parent_attrs);
-        inode_attrs.last_metadata_changed = time_now();
+        inode_attrs.last_metadata_changed = now;
         self.write_inode(&inode_attrs);
 
         if inode_attrs.kind == FileKind::Directory {
@@ -1711,8 +1722,9 @@ impl Filesystem for SimpleFS {
                         return;
                     }
                 };
-                attrs.last_metadata_changed = time_now();
-                attrs.last_modified = time_now();
+                let now = time_now();
+                attrs.last_metadata_changed = now;
+                attrs.last_modified = now;
                 if end_offset > attrs.size as usize {
                     attrs.size = end_offset as u64;
                 }
@@ -2020,8 +2032,9 @@ impl Filesystem for SimpleFS {
             reply.error(Errno::EACCES);
             return;
         }
-        parent_attrs.last_modified = time_now();
-        parent_attrs.last_metadata_changed = time_now();
+        let now = time_now();
+        parent_attrs.last_modified = now;
+        parent_attrs.last_metadata_changed = now;
         self.write_inode(&parent_attrs);
 
         if req.uid() != 0 {
@@ -2046,9 +2059,9 @@ impl Filesystem for SimpleFS {
             inode: inode.0,
             open_file_handles: 1,
             size: 0,
-            last_accessed: time_now(),
-            last_modified: time_now(),
-            last_metadata_changed: time_now(),
+            last_accessed: now,
+            last_modified: now,
+            last_metadata_changed: now,
             kind: as_file_kind(mode),
             mode: self.creation_mode(mode),
             hardlinks: 1,
@@ -2107,8 +2120,9 @@ impl Filesystem for SimpleFS {
                 let mut attrs = self.get_inode(ino).unwrap();
                 // Every fallocate mode changes the file, so the times move even when the size
                 // is pinned: a punch-hole rewrites content, and preallocation commits blocks
-                attrs.last_metadata_changed = time_now();
-                attrs.last_modified = time_now();
+                let now = time_now();
+                attrs.last_metadata_changed = now;
+                attrs.last_modified = now;
                 if mode & libc::FALLOC_FL_KEEP_SIZE == 0 && offset + length > attrs.size {
                     attrs.size = (offset + length) as u64;
                 }
@@ -2166,8 +2180,9 @@ impl Filesystem for SimpleFS {
                         file.write_all(&data).unwrap();
 
                         let mut attrs = self.get_inode(dest_inode).unwrap();
-                        attrs.last_metadata_changed = time_now();
-                        attrs.last_modified = time_now();
+                        let now = time_now();
+                        attrs.last_metadata_changed = now;
+                        attrs.last_modified = now;
                         let Ok(dest_offset_usize): Result<usize, _> = dest_offset.try_into() else {
                             reply.error(Errno::EFBIG);
                             return;
