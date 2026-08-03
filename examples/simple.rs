@@ -177,11 +177,49 @@ fn parse_xattr_namespace(key: &[u8]) -> Result<XattrNamespace, Errno> {
     return Err(Errno::ENOTSUP);
 }
 
-fn clear_suid_sgid(attr: &mut InodeAttributes) {
+/// Strip suid, and sgid where the kernel would, from a file the caller has just modified.
+///
+/// Two independent rules decide sgid. The killpriv rule drops it from a group-executable file,
+/// where it means setgid-on-exec rather than the old mandatory-locking mark. Separately, a
+/// caller outside the file's group drops it, which is why an unprivileged write to a root-owned
+/// setgid file clears the bit whatever its exec bits are. Either rule alone is enough, so a
+/// `02666` file loses the bit to an outside-group caller despite having no exec bits and no
+/// suid to clear alongside it.
+///
+/// The group tested is the one the file has now, not the one a chown in the same request is
+/// about to give it: chgrp'ing a setgid file to a group the caller is in still clears the bit
+/// when the caller was outside the group it is moving away from.
+fn clear_suid_sgid(attr: &mut InodeAttributes, req: &Request, privilege: Privilege) {
     attr.mode &= !libc::S_ISUID as u16;
-    // SGID is only suppose to be cleared if XGRP is set
-    if attr.mode & libc::S_IXGRP as u16 != 0 {
+
+    let sgid_exec = attr.mode & (libc::S_ISGID | libc::S_IXGRP) as u16
+        == (libc::S_ISGID | libc::S_IXGRP) as u16;
+    let outside_group = privilege.lacks_fsetid(req)
+        && req.gid() != attr.gid
+        && !get_groups(req.pid()).contains(&attr.gid);
+    if sgid_exec || outside_group {
         attr.mode &= !libc::S_ISGID as u16;
+    }
+}
+
+/// Whether the request already establishes that the caller lacks `CAP_FSETID`, which decides
+/// whether the outside-group half of the sgid rule applies.
+enum Privilege {
+    /// The kernel worked `CAP_FSETID` into `kill_suid_gid` itself, as `write` and `truncate`
+    /// do via `setattr_should_drop_suidgid()`. Being asked at all proves the caller lacks it,
+    /// so the capability set does not have to be read back
+    KnownLacking,
+    /// The request settles nothing: `chown` asks whatever the caller holds, and `fallocate`
+    /// and `copy_file_range` carry no signal at all. The caller has to be inspected
+    Unknown,
+}
+
+impl Privilege {
+    fn lacks_fsetid(&self, req: &Request) -> bool {
+        match self {
+            Privilege::KnownLacking => true,
+            Privilege::Unknown => !has_fsetid(req.pid(), req.uid()),
+        }
     }
 }
 
@@ -192,21 +230,23 @@ fn clear_file_capabilities(attr: &mut InodeAttributes) {
     attr.xattrs.remove(b"security.capability".as_slice());
 }
 
-/// Drop privileges for an operation the kernel hands over without telling us when to.
+/// Drop privileges for an operation the kernel hands over without saying whether to.
 ///
 /// Negotiating either killpriv capability stops the kernel removing privileges itself, but
 /// `FUSE_FALLOCATE` and `FUSE_COPY_FILE_RANGE` carry nothing like the `kill_suid_gid` argument
-/// that write, setattr, open and create get, so the filesystem cannot learn whether the caller
-/// held `CAP_FSETID`. Clearing regardless strips bits from a privileged caller that a native
-/// filesystem would keep, which is the better of the two errors available: the alternative
-/// leaves a setuid binary setuid after an unprivileged caller has rewritten it.
+/// that write, setattr, open and create get, so the filesystem has to work out for itself
+/// whether the caller holds `CAP_FSETID`, and leave suid and sgid alone if it does.
 ///
-/// This is deliberately not the conditional form used on write and truncate, where the kernel
-/// does say. Call it only when a killpriv capability was negotiated: without one the kernel
-/// still removes privileges itself, and clearing here as well would strip bits from a
-/// privileged caller for no reason
-fn clear_privileges_unconditionally(attr: &mut InodeAttributes) {
-    clear_suid_sgid(attr);
+/// File capabilities go regardless, as they do on write, chown and truncate: `CAP_FSETID` covers
+/// suid and sgid only.
+///
+/// Call this only when a killpriv capability was negotiated: without one the kernel still
+/// removes privileges itself, and clearing here as well would strip bits it had decided to keep
+fn clear_privileges_unprompted(attr: &mut InodeAttributes, req: &Request) {
+    if !has_fsetid(req.pid(), req.uid()) {
+        // The capability set has just answered the question, so do not read it a second time
+        clear_suid_sgid(attr, req, Privilege::KnownLacking);
+    }
     clear_file_capabilities(attr);
 }
 
@@ -484,8 +524,11 @@ impl SimpleFS {
         return false;
     }
 
+    /// `uid` and `gid` are the identity the access check runs against, which a caller holding a
+    /// write file handle deliberately bypasses; `req` is always the real caller
     fn truncate(
         &self,
+        req: &Request,
         inode: INodeNo,
         new_length: u64,
         uid: u32,
@@ -520,7 +563,7 @@ impl SimpleFS {
         // Clear SETUID & SETGID on truncate, but only when the kernel asks: under killpriv v2
         // it does so exactly when the caller lacks CAP_FSETID
         if kill_suid_gid {
-            clear_suid_sgid(&mut attrs);
+            clear_suid_sgid(&mut attrs, req, Privilege::KnownLacking);
         }
         clear_file_capabilities(&mut attrs);
 
@@ -743,7 +786,7 @@ impl Filesystem for SimpleFS {
             // Under killpriv v2 the kernel sends this for every chown of a non-directory, so
             // the filesystem no longer has to work out when the bits should go
             if kill_suid_gid {
-                clear_suid_sgid(&mut attrs);
+                clear_suid_sgid(&mut attrs, _req, Privilege::Unknown);
             }
             clear_file_capabilities(&mut attrs);
 
@@ -767,7 +810,7 @@ impl Filesystem for SimpleFS {
                 // with W_OK will never fail to truncate, even if the file has been subsequently
                 // chmod'ed
                 if Self::check_file_handle_write(handle.into()) {
-                    if let Err(error_code) = self.truncate(ino, size, 0, 0, kill_suid_gid) {
+                    if let Err(error_code) = self.truncate(_req, ino, size, 0, 0, kill_suid_gid) {
                         reply.error(error_code);
                         return;
                     }
@@ -776,7 +819,7 @@ impl Filesystem for SimpleFS {
                     return;
                 }
             } else if let Err(error_code) =
-                self.truncate(ino, size, _req.uid(), _req.gid(), kill_suid_gid)
+                self.truncate(_req, ino, size, _req.uid(), _req.gid(), kill_suid_gid)
             {
                 reply.error(error_code);
                 return;
@@ -1593,7 +1636,7 @@ impl Filesystem for SimpleFS {
 
     fn write(
         &self,
-        _req: &Request,
+        req: &Request,
         ino: INodeNo,
         fh: FileHandle,
         offset: u64,
@@ -1647,7 +1690,7 @@ impl Filesystem for SimpleFS {
                 // Only killpriv v2 sets this on a buffered write, which is why honoring it
                 // requires negotiating v2 rather than FUSE_HANDLE_KILLPRIV
                 if write_flags.contains(WriteFlags::FUSE_WRITE_KILL_SUIDGID) {
-                    clear_suid_sgid(&mut attrs);
+                    clear_suid_sgid(&mut attrs, req, Privilege::KnownLacking);
                 }
                 clear_file_capabilities(&mut attrs);
                 self.write_inode(&attrs);
@@ -2040,7 +2083,7 @@ impl Filesystem for SimpleFS {
                     attrs.size = (offset + length) as u64;
                 }
                 if self.killpriv_negotiated {
-                    clear_privileges_unconditionally(&mut attrs);
+                    clear_privileges_unprompted(&mut attrs, _req);
                 }
                 self.write_inode(&attrs);
                 reply.ok();
@@ -2107,7 +2150,7 @@ impl Filesystem for SimpleFS {
                             attrs.size = end_offset as u64;
                         }
                         if self.killpriv_negotiated {
-                            clear_privileges_unconditionally(&mut attrs);
+                            clear_privileges_unprompted(&mut attrs, _req);
                         }
                         self.write_inode(&attrs);
 
@@ -2172,6 +2215,32 @@ fn as_file_kind(mut mode: u32) -> FileKind {
         return FileKind::Directory;
     }
     unimplemented!("{mode}");
+}
+
+/// Whether the caller holds `CAP_FSETID`, and so keeps suid and sgid on a file it modifies.
+///
+/// Read from the caller's effective capability set rather than guessed at from its uid, so that
+/// a root process which dropped the capability is treated as the unprivileged caller it is.
+/// Falls back to the uid where the capability set cannot be read, which is all a request alone
+/// would have supported
+fn has_fsetid(pid: u32, uid: u32) -> bool {
+    // From linux/capability.h; the libc crate does not export the capability numbers
+    const CAP_FSETID: u32 = 4;
+
+    if cfg!(target_os = "linux") {
+        let path = format!("/proc/{pid}/task/{pid}/status");
+        if let Ok(file) = File::open(path) {
+            for line in BufReader::new(file).lines().map_while(Result::ok) {
+                if let Some(caps) = line.strip_prefix("CapEff:") {
+                    if let Ok(caps) = u64::from_str_radix(caps.trim(), 16) {
+                        return caps & (1 << CAP_FSETID) != 0;
+                    }
+                }
+            }
+        }
+    }
+
+    uid == 0
 }
 
 fn get_groups(pid: u32) -> Vec<u32> {

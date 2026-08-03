@@ -16,19 +16,6 @@
   them, and because a file whose type `FileType` cannot represent has no valid conversion. Note
   that `ino` is the underlying file's inode number, which a filesystem assigning its own will
   want to overwrite
-* The `simple` example now clears suid, sgid and `security.capability` in `fallocate()` and
-  `copy_file_range()`, which previously left them intact. Negotiating either killpriv capability
-  stops the kernel removing privileges on those operations, and neither carries a signal saying
-  when to, so the example clears unconditionally: that strips the bits from a caller holding
-  `CAP_FSETID` where a local filesystem would keep them, but the alternative leaves a setuid
-  binary setuid after an unprivileged caller has rewritten it
-* The `simple` example now negotiates `FUSE_HANDLE_KILLPRIV_V2` instead of
-  `FUSE_HANDLE_KILLPRIV`, and clears suid and sgid only when the kernel asks rather than on
-  every write, chown and truncate. That fixes two cases where it diverged from a native
-  filesystem: a write or truncate by a caller holding `CAP_FSETID` no longer strips the bits.
-  The unconditional clearing could not be made conditional under `FUSE_HANDLE_KILLPRIV`,
-  because the kernel only sets `FUSE_WRITE_KILL_SUIDGID` on a buffered write once v2 has been
-  negotiated
 * Support `InitFlags::FUSE_HANDLE_KILLPRIV_V2`, which the previous release refused. With it
   negotiated the kernel stops clearing suid and sgid itself and instead tells the filesystem
   which requests must clear them, so `Filesystem::setattr()`, `open()` and `create()` gain a
