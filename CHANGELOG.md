@@ -1,6 +1,12 @@
 # FUSE for Rust - Changelog
 
 ## Unreleased
+* Unmounting from within the mounting process now works with `MountOption::AutoUnmount` (#407).
+  Dropping the `BackgroundSession`, calling `umount_and_join()` or `SessionUnmounter::unmount()`
+  used to leave the unmount to the `fusermount` helper, which only acts once the process exits.
+  Until then the mountpoint was left behind as a dangling "transport endpoint is not connected",
+  and the session kept running. `auto_unmount` remains a safety net for a process that dies
+  without unmounting
 * Add `Notifier::inc_epoch()`, which invalidates every cached directory entry at once by
   incrementing the connection's epoch (#382). This costs one notification where
   `inval_entry()` costs one per entry and needs the names up front, so it suits a backing

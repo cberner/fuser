@@ -580,6 +580,32 @@ mod test {
         ManuallyDrop::into_inner(tmp);
     }
 
+    /// With `auto_unmount` the unmount used to be left to the fusermount helper, which
+    /// only acts once the mounting process exits. Until then the mountpoint was left
+    /// behind as a dangling "transport endpoint is not connected" (issue #407), so
+    /// teardown must unmount right away, like every other mount backend does.
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn mount_unmount_auto_unmount() {
+        use std::mem::ManuallyDrop;
+
+        let tmp = ManuallyDrop::new(tempfile::tempdir().unwrap());
+        // The mount table lists the canonical path
+        let mountpoint = tmp.path().canonicalize().unwrap();
+        let options = [MountOption::AutoUnmount];
+        let (file, mount) = Mount::new(&mountpoint, &options, SessionACL::default()).unwrap();
+        assert!(is_mounted(&file));
+
+        mount.umount().expect("unmount must succeed");
+        let mnt = cmd_mount();
+        assert!(
+            !mnt.contains(&*mountpoint.to_string_lossy()),
+            "auto_unmount must not defer the unmount to process exit. Our mountpoint: \
+             {mountpoint:?}\nfuse mounts:\n{mnt}"
+        );
+        ManuallyDrop::into_inner(tmp);
+    }
+
     /// After an external unmount, an unrelated replacement filesystem mounted at the
     /// same path must not be unmounted by the old session's teardown, nor may teardown
     /// probe the mountpoint through the (unserved) replacement filesystem, which would
