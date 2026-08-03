@@ -94,6 +94,12 @@ struct Args {
     #[clap(long)]
     suid: bool,
 
+    /// Allow device files on this filesystem to be opened, when run as root. Off by default,
+    /// as it is for any other filesystem: a device node the mount's own users can create is a
+    /// way to reach hardware the kernel would not otherwise let them touch
+    #[clap(long)]
+    dev: bool,
+
     #[clap(long, default_value_t = 1)]
     n_threads: usize,
 
@@ -121,6 +127,11 @@ enum FileKind {
     File,
     Directory,
     Symlink,
+    // Appended, so the ordinals of the three above survive in already-written inodes
+    CharDevice,
+    BlockDevice,
+    NamedPipe,
+    Socket,
 }
 
 impl From<FileKind> for fuser::FileType {
@@ -129,6 +140,10 @@ impl From<FileKind> for fuser::FileType {
             FileKind::File => fuser::FileType::RegularFile,
             FileKind::Directory => fuser::FileType::Directory,
             FileKind::Symlink => fuser::FileType::Symlink,
+            FileKind::CharDevice => fuser::FileType::CharDevice,
+            FileKind::BlockDevice => fuser::FileType::BlockDevice,
+            FileKind::NamedPipe => fuser::FileType::NamedPipe,
+            FileKind::Socket => fuser::FileType::Socket,
         }
     }
 }
@@ -353,6 +368,8 @@ struct InodeAttributes {
     pub hardlinks: u32,
     pub uid: u32,
     pub gid: u32,
+    /// Device number, which only a character or block device carries
+    pub rdev: u32,
     pub xattrs: BTreeMap<Vec<u8>, Vec<u8>>,
 }
 
@@ -374,7 +391,7 @@ impl From<InodeAttributes> for fuser::FileAttr {
             nlink: attrs.hardlinks,
             uid: attrs.uid,
             gid: attrs.gid,
-            rdev: 0,
+            rdev: attrs.rdev,
             blksize: BLOCK_SIZE,
             flags: 0,
         }
@@ -650,6 +667,7 @@ impl Filesystem for SimpleFS {
                 hardlinks: 2,
                 uid: 0,
                 gid: 0,
+                rdev: 0,
                 xattrs: BTreeMap::default(),
             };
             self.write_inode(&root);
@@ -914,7 +932,7 @@ impl Filesystem for SimpleFS {
         name: &OsStr,
         mut mode: u32,
         _umask: u32,
-        _rdev: u32,
+        rdev: u32,
         reply: ReplyEntry,
     ) {
         let file_type = mode & libc::S_IFMT as u32;
@@ -922,11 +940,12 @@ impl Filesystem for SimpleFS {
         if file_type != libc::S_IFREG as u32
             && file_type != libc::S_IFLNK as u32
             && file_type != libc::S_IFDIR as u32
+            && file_type != libc::S_IFCHR as u32
+            && file_type != libc::S_IFBLK as u32
+            && file_type != libc::S_IFIFO as u32
+            && file_type != libc::S_IFSOCK as u32
         {
-            // TODO
-            warn!(
-                "mknod() implementation is incomplete. Only supports regular files, symlinks, and directories. Got {mode:o}"
-            );
+            warn!("mknod() got a mode with no recognized file type: {mode:o}");
             reply.error(Errno::EPERM);
             return;
         }
@@ -989,9 +1008,17 @@ impl Filesystem for SimpleFS {
             hardlinks: 1,
             uid: _req.uid(),
             gid: creation_gid(&parent_attrs, _req.gid()),
+            rdev: match as_file_kind(mode) {
+                FileKind::CharDevice | FileKind::BlockDevice => rdev,
+                // Every other type reports 0, as a local filesystem does
+                _ => 0,
+            },
             xattrs: BTreeMap::default(),
         };
         self.write_inode(&attrs);
+        // A fifo, socket or device node holds no data of its own - the kernel services reads
+        // and writes without ever reaching this filesystem - but the empty file keeps unlink
+        // and the garbage collector uniform across every kind
         File::create(self.content_path(inode)).unwrap();
 
         if as_file_kind(mode) == FileKind::Directory {
@@ -1067,6 +1094,7 @@ impl Filesystem for SimpleFS {
             hardlinks: 2, // Directories start with link count of 2, since they have a self link
             uid: _req.uid(),
             gid: creation_gid(&parent_attrs, _req.gid()),
+            rdev: 0,
             xattrs: BTreeMap::default(),
         };
         self.write_inode(&attrs);
@@ -1251,6 +1279,7 @@ impl Filesystem for SimpleFS {
             hardlinks: 1,
             uid: _req.uid(),
             gid: creation_gid(&parent_attrs, _req.gid()),
+            rdev: 0,
             xattrs: BTreeMap::default(),
         };
 
@@ -2025,6 +2054,7 @@ impl Filesystem for SimpleFS {
             hardlinks: 1,
             uid: req.uid(),
             gid: creation_gid(&parent_attrs, req.gid()),
+            rdev: 0,
             xattrs: BTreeMap::default(),
         };
         self.write_inode(&attrs);
@@ -2213,6 +2243,14 @@ fn as_file_kind(mut mode: u32) -> FileKind {
         return FileKind::Symlink;
     } else if mode == libc::S_IFDIR as u32 {
         return FileKind::Directory;
+    } else if mode == libc::S_IFCHR as u32 {
+        return FileKind::CharDevice;
+    } else if mode == libc::S_IFBLK as u32 {
+        return FileKind::BlockDevice;
+    } else if mode == libc::S_IFIFO as u32 {
+        return FileKind::NamedPipe;
+    } else if mode == libc::S_IFSOCK as u32 {
+        return FileKind::Socket;
     }
     unimplemented!("{mode}");
 }
@@ -2366,6 +2404,10 @@ fn main() {
     if args.suid {
         info!("setuid bit support enabled");
         cfg.mount_options.push(MountOption::Suid);
+    }
+    if args.dev {
+        info!("device file support enabled");
+        cfg.mount_options.push(MountOption::Dev);
     }
     if args.auto_unmount {
         cfg.mount_options.push(MountOption::AutoUnmount);
