@@ -270,7 +270,9 @@ impl TryFrom<&std::fs::Metadata> for FileAttr {
     ///
     /// `flags` carries the BSD file flags on macOS, where the FUSE protocol has a field for
     /// them, and is zero everywhere else. `crtime` falls back to the epoch on a platform or
-    /// filesystem that does not record a creation time.
+    /// filesystem that does not record a creation time. `rdev` is taken from the metadata
+    /// only for a character or block device, being unspecified for every other kind of file,
+    /// and is zero otherwise.
     ///
     /// # Errors
     /// Returns [`io::ErrorKind::InvalidData`] if the file is of a kind [`FileType`] cannot
@@ -309,7 +311,14 @@ impl TryFrom<&std::fs::Metadata> for FileAttr {
             nlink: narrow(metadata.nlink(), "nlink")?,
             uid: metadata.uid(),
             gid: metadata.gid(),
-            rdev: narrow(metadata.rdev(), "rdev")?,
+            // `st_rdev` is only defined for device files, and reading it elsewhere gets
+            // whatever the filesystem left there: FreeBSD's UFS stores a fast symlink's
+            // target in the same inode field, so a symlink reports the first eight bytes
+            // of its target as an rdev
+            rdev: match kind {
+                FileType::CharDevice | FileType::BlockDevice => narrow(metadata.rdev(), "rdev")?,
+                _ => 0,
+            },
             blksize: narrow(metadata.blksize(), "blksize")?,
             #[cfg(target_os = "macos")]
             flags: std::os::macos::fs::MetadataExt::st_flags(metadata),
@@ -1277,6 +1286,9 @@ mod tests {
         // std exposes no accessor for the BSD flags, so they are always absent
         assert_eq!(attr.flags, 0);
 
+        // Nothing but a device file has an rdev, whatever the platform left in the field
+        assert_eq!(attr.rdev, 0);
+
         let attr = FileAttr::try_from(&std::fs::metadata(dir.path()).unwrap()).unwrap();
         assert_eq!(attr.kind, FileType::Directory);
 
@@ -1285,8 +1297,25 @@ mod tests {
         std::os::unix::fs::symlink(&file, &link).unwrap();
         let attr = FileAttr::try_from(&std::fs::symlink_metadata(&link).unwrap()).unwrap();
         assert_eq!(attr.kind, FileType::Symlink);
+        // FreeBSD's UFS keeps a fast symlink's target in the inode field that a device file
+        // uses for its rdev, so reading it here would report the target's first eight bytes
+        assert_eq!(attr.rdev, 0);
         let attr = FileAttr::try_from(&std::fs::metadata(&link).unwrap()).unwrap();
         assert_eq!(attr.kind, FileType::RegularFile);
+    }
+
+    #[test]
+    fn file_attr_from_metadata_of_a_device() {
+        use std::os::unix::fs::MetadataExt;
+
+        // Every platform this builds on has /dev/null, and it is a character device on all of
+        // them, but its device number is assigned by the system and is not worth predicting
+        let metadata = std::fs::metadata("/dev/null").unwrap();
+        let attr = FileAttr::try_from(&metadata).unwrap();
+
+        assert_eq!(attr.kind, FileType::CharDevice);
+        assert_eq!(u64::from(attr.rdev), metadata.rdev());
+        assert_ne!(attr.rdev, 0);
     }
 
     #[test]
