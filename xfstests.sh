@@ -31,10 +31,6 @@ echo "generic/484" >> xfs_excludes.txt
 # Writes directly to scratch block dev
 echo "generic/062" >> xfs_excludes.txt
 
-# TODO: requires renameat2(RENAME_WHITEOUT), which has to leave a 0/0 character device
-# behind at the source. fuser passes the flag through as RenameFlags; the example ignores it
-echo "generic/078" >> xfs_excludes.txt
-
 # TODO: takes > 10min
 echo "generic/069" >> xfs_excludes.txt
 
