@@ -785,6 +785,46 @@ mod test {
         ManuallyDrop::into_inner(tmp);
     }
 
+    /// A panic in init() must reach the caller with the filesystem unmounted. The
+    /// handshake used to run inside the session loop, so with spawn() the caller was
+    /// handed a live BackgroundSession while the kernel waited forever for an init
+    /// reply that would never come, hanging every process that touched the mountpoint
+    /// (issue #271). Running the handshake in Session::new() makes the panic unwind
+    /// through it, unmounting on the way out.
+    #[test]
+    fn panic_in_init_leaves_nothing_mounted() {
+        struct PanicInInit;
+        impl Filesystem for PanicInInit {
+            fn init(&mut self, _req: &Request, _config: &mut KernelConfig) -> io::Result<()> {
+                panic!("deliberate panic from a test filesystem's init()");
+            }
+        }
+
+        // Leak the directory on failure: it may still be a mountpoint nothing serves
+        let tmp = ManuallyDrop::new(tempfile::tempdir().unwrap());
+        // The mount table lists the canonical path
+        let mountpoint = tmp.path().canonicalize().unwrap();
+
+        let session = std::panic::catch_unwind(|| {
+            Session::new(PanicInInit, &mountpoint, &Config::default()).and_then(Session::spawn)
+        });
+        assert!(
+            session.is_err(),
+            "the panic must reach the caller, rather than a session thread it cannot see"
+        );
+
+        // Anything left mounted here has nothing serving it, so every access to the
+        // mountpoint would block indefinitely
+        let mounts = std::fs::read_to_string("/proc/self/mounts").unwrap();
+        assert!(
+            !mounts
+                .lines()
+                .any(|line| line.split(' ').nth(1) == mountpoint.to_str()),
+            "the filesystem must not be left mounted with nothing serving it:\n{mounts}"
+        );
+        ManuallyDrop::into_inner(tmp);
+    }
+
     /// Dropping a BackgroundSession must unmount the filesystem and wait for the
     /// session to end, so that Filesystem::destroy has run when drop returns.
     #[test]
