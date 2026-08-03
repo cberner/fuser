@@ -1575,12 +1575,6 @@ impl Filesystem for SimpleFS {
         let path = self.content_path(ino);
         match OpenOptions::new().write(true).open(path) {
             Ok(mut file) => {
-                file.seek(SeekFrom::Start(offset)).unwrap();
-                file.write_all(data).unwrap();
-
-                let mut attrs = self.get_inode(ino).unwrap();
-                attrs.last_metadata_changed = time_now();
-                attrs.last_modified = time_now();
                 let Ok(offset_usize): Result<usize, _> = offset.try_into() else {
                     reply.error(Errno::EFBIG);
                     return;
@@ -1589,6 +1583,27 @@ impl Filesystem for SimpleFS {
                     reply.error(Errno::EFBIG);
                     return;
                 };
+
+                file.seek(SeekFrom::Start(offset)).unwrap();
+                file.write_all(data).unwrap();
+                // Release the descriptor before opening the inode. Near RLIMIT_NOFILE this write
+                // may hold the last one, and get_inode() reports the resulting EMFILE as ENOENT,
+                // which would fail a write whose data already landed.
+                drop(file);
+
+                // Read the inode only once the data is written. Holding a copy across the write
+                // would let this write back a record that a setattr() completing in the meantime
+                // had already updated. Contents and metadata are separate files, so the inode can
+                // be unreadable even though the write itself succeeded.
+                let mut attrs = match self.get_inode(ino) {
+                    Ok(attrs) => attrs,
+                    Err(error_code) => {
+                        reply.error(error_code);
+                        return;
+                    }
+                };
+                attrs.last_metadata_changed = time_now();
+                attrs.last_modified = time_now();
                 if end_offset > attrs.size as usize {
                     attrs.size = end_offset as u64;
                 }
