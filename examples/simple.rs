@@ -565,7 +565,7 @@ impl SimpleFS {
         parent_attrs.last_metadata_changed = time_now();
         self.write_inode(&parent_attrs);
 
-        let mut entries = self.get_directory_content(parent).unwrap();
+        let mut entries = self.get_directory_content(parent)?;
         entries.insert(name.as_bytes().to_vec(), (inode.0, kind));
         self.write_directory_content(parent, &entries);
 
@@ -843,7 +843,13 @@ impl Filesystem for SimpleFS {
             self.write_inode(&attrs);
         }
 
-        let attrs = self.get_inode(ino).unwrap();
+        let attrs = match self.get_inode(ino) {
+            Ok(attrs) => attrs,
+            Err(error_code) => {
+                reply.error(error_code);
+                return;
+            }
+        };
         reply.attr(&Duration::new(0, 0), &attrs.into());
         return;
     }
@@ -958,7 +964,13 @@ impl Filesystem for SimpleFS {
             self.write_directory_content(inode, &entries);
         }
 
-        let mut entries = self.get_directory_content(parent).unwrap();
+        let mut entries = match self.get_directory_content(parent) {
+            Ok(entries) => entries,
+            Err(error_code) => {
+                reply.error(error_code);
+                return;
+            }
+        };
         entries.insert(name.as_bytes().to_vec(), (inode.0, attrs.kind));
         self.write_directory_content(parent, &entries);
 
@@ -1033,7 +1045,13 @@ impl Filesystem for SimpleFS {
         entries.insert(b"..".to_vec(), (parent.0, FileKind::Directory));
         self.write_directory_content(inode, &entries);
 
-        let mut entries = self.get_directory_content(parent).unwrap();
+        let mut entries = match self.get_directory_content(parent) {
+            Ok(entries) => entries,
+            Err(error_code) => {
+                reply.error(error_code);
+                return;
+            }
+        };
         entries.insert(name.as_bytes().to_vec(), (inode.0, FileKind::Directory));
         self.write_directory_content(parent, &entries);
 
@@ -1090,7 +1108,13 @@ impl Filesystem for SimpleFS {
         self.write_inode(&attrs);
         self.gc_inode(&attrs);
 
-        let mut entries = self.get_directory_content(parent).unwrap();
+        let mut entries = match self.get_directory_content(parent) {
+            Ok(entries) => entries,
+            Err(error_code) => {
+                reply.error(error_code);
+                return;
+            }
+        };
         entries.remove(name.as_bytes());
         self.write_directory_content(parent, &entries);
 
@@ -1116,12 +1140,14 @@ impl Filesystem for SimpleFS {
         };
 
         // Directories always have a self and parent link
-        if self
-            .get_directory_content(INodeNo(attrs.inode))
-            .unwrap()
-            .len()
-            > 2
-        {
+        let entries = match self.get_directory_content(INodeNo(attrs.inode)) {
+            Ok(entries) => entries,
+            Err(error_code) => {
+                reply.error(error_code);
+                return;
+            }
+        };
+        if entries.len() > 2 {
             reply.error(Errno::ENOTEMPTY);
             return;
         }
@@ -1156,7 +1182,13 @@ impl Filesystem for SimpleFS {
         self.write_inode(&attrs);
         self.gc_inode(&attrs);
 
-        let mut entries = self.get_directory_content(parent).unwrap();
+        let mut entries = match self.get_directory_content(parent) {
+            Ok(entries) => entries,
+            Err(error_code) => {
+                reply.error(error_code);
+                return;
+            }
+        };
         entries.remove(name.as_bytes());
         self.write_directory_content(parent, &entries);
 
@@ -1347,14 +1379,26 @@ impl Filesystem for SimpleFS {
                 }
             };
 
-            let mut entries = self.get_directory_content(newparent).unwrap();
+            let mut entries = match self.get_directory_content(newparent) {
+                Ok(entries) => entries,
+                Err(error_code) => {
+                    reply.error(error_code);
+                    return;
+                }
+            };
             entries.insert(
                 newname.as_bytes().to_vec(),
                 (inode_attrs.inode, inode_attrs.kind),
             );
             self.write_directory_content(newparent, &entries);
 
-            let mut entries = self.get_directory_content(parent).unwrap();
+            let mut entries = match self.get_directory_content(parent) {
+                Ok(entries) => entries,
+                Err(error_code) => {
+                    reply.error(error_code);
+                    return;
+                }
+            };
             entries.insert(
                 name.as_bytes().to_vec(),
                 (new_inode_attrs.inode, new_inode_attrs.kind),
@@ -1373,16 +1417,24 @@ impl Filesystem for SimpleFS {
             self.write_inode(&new_inode_attrs);
 
             if inode_attrs.kind == FileKind::Directory {
-                let mut entries = self
-                    .get_directory_content(INodeNo(inode_attrs.inode))
-                    .unwrap();
+                let mut entries = match self.get_directory_content(INodeNo(inode_attrs.inode)) {
+                    Ok(entries) => entries,
+                    Err(error_code) => {
+                        reply.error(error_code);
+                        return;
+                    }
+                };
                 entries.insert(b"..".to_vec(), (newparent.0, FileKind::Directory));
                 self.write_directory_content(INodeNo(inode_attrs.inode), &entries);
             }
             if new_inode_attrs.kind == FileKind::Directory {
-                let mut entries = self
-                    .get_directory_content(INodeNo(new_inode_attrs.inode))
-                    .unwrap();
+                let mut entries = match self.get_directory_content(INodeNo(new_inode_attrs.inode)) {
+                    Ok(entries) => entries,
+                    Err(error_code) => {
+                        reply.error(error_code);
+                        return;
+                    }
+                };
                 entries.insert(b"..".to_vec(), (parent.0, FileKind::Directory));
                 self.write_directory_content(INodeNo(new_inode_attrs.inode), &entries);
             }
@@ -1398,15 +1450,18 @@ impl Filesystem for SimpleFS {
 
         // Only overwrite an existing directory if it's empty
         if let Ok(new_name_attrs) = self.lookup_name(newparent, newname) {
-            if new_name_attrs.kind == FileKind::Directory
-                && self
-                    .get_directory_content(INodeNo(new_name_attrs.inode))
-                    .unwrap()
-                    .len()
-                    > 2
-            {
-                reply.error(Errno::ENOTEMPTY);
-                return;
+            if new_name_attrs.kind == FileKind::Directory {
+                let entries = match self.get_directory_content(INodeNo(new_name_attrs.inode)) {
+                    Ok(entries) => entries,
+                    Err(error_code) => {
+                        reply.error(error_code);
+                        return;
+                    }
+                };
+                if entries.len() > 2 {
+                    reply.error(Errno::ENOTEMPTY);
+                    return;
+                }
             }
         }
 
@@ -1429,7 +1484,13 @@ impl Filesystem for SimpleFS {
 
         // If target already exists decrement its hardlink count
         if let Ok(mut existing_inode_attrs) = self.lookup_name(newparent, newname) {
-            let mut entries = self.get_directory_content(newparent).unwrap();
+            let mut entries = match self.get_directory_content(newparent) {
+                Ok(entries) => entries,
+                Err(error_code) => {
+                    reply.error(error_code);
+                    return;
+                }
+            };
             entries.remove(newname.as_bytes());
             self.write_directory_content(newparent, &entries);
 
@@ -1443,11 +1504,23 @@ impl Filesystem for SimpleFS {
             self.gc_inode(&existing_inode_attrs);
         }
 
-        let mut entries = self.get_directory_content(parent).unwrap();
+        let mut entries = match self.get_directory_content(parent) {
+            Ok(entries) => entries,
+            Err(error_code) => {
+                reply.error(error_code);
+                return;
+            }
+        };
         entries.remove(name.as_bytes());
         self.write_directory_content(parent, &entries);
 
-        let mut entries = self.get_directory_content(newparent).unwrap();
+        let mut entries = match self.get_directory_content(newparent) {
+            Ok(entries) => entries,
+            Err(error_code) => {
+                reply.error(error_code);
+                return;
+            }
+        };
         entries.insert(
             newname.as_bytes().to_vec(),
             (inode_attrs.inode, inode_attrs.kind),
@@ -1464,9 +1537,13 @@ impl Filesystem for SimpleFS {
         self.write_inode(&inode_attrs);
 
         if inode_attrs.kind == FileKind::Directory {
-            let mut entries = self
-                .get_directory_content(INodeNo(inode_attrs.inode))
-                .unwrap();
+            let mut entries = match self.get_directory_content(INodeNo(inode_attrs.inode)) {
+                Ok(entries) => entries,
+                Err(error_code) => {
+                    reply.error(error_code);
+                    return;
+                }
+            };
             entries.insert(b"..".to_vec(), (newparent.0, FileKind::Directory));
             self.write_directory_content(INodeNo(inode_attrs.inode), &entries);
         }
@@ -1994,7 +2071,13 @@ impl Filesystem for SimpleFS {
             self.write_directory_content(inode, &entries);
         }
 
-        let mut entries = self.get_directory_content(parent).unwrap();
+        let mut entries = match self.get_directory_content(parent) {
+            Ok(entries) => entries,
+            Err(error_code) => {
+                reply.error(error_code);
+                return;
+            }
+        };
         entries.insert(name.as_bytes().to_vec(), (inode.0, attrs.kind));
         self.write_directory_content(parent, &entries);
 
@@ -2031,7 +2114,17 @@ impl Filesystem for SimpleFS {
                     reply.error(io::Error::last_os_error().into());
                     return;
                 }
-                let mut attrs = self.get_inode(ino).unwrap();
+                // Release the descriptor before opening the inode, so that the read below cannot
+                // be the open that runs into RLIMIT_NOFILE, as in write()
+                drop(file);
+
+                let mut attrs = match self.get_inode(ino) {
+                    Ok(attrs) => attrs,
+                    Err(error_code) => {
+                        reply.error(error_code);
+                        return;
+                    }
+                };
                 // Every fallocate mode changes the file, so the times move even when the size
                 // is pinned: a punch-hole rewrites content, and preallocation commits blocks
                 attrs.last_metadata_changed = time_now();
@@ -2085,14 +2178,24 @@ impl Filesystem for SimpleFS {
 
                 let mut data = vec![0; read_size as usize];
                 file.read_exact_at(&mut data, src_offset).unwrap();
+                // The contents are buffered now, so hold neither descriptor open across the
+                // opens that follow, for the same reason as in write()
+                drop(file);
 
                 let dest_path = self.content_path(dest_inode);
                 match OpenOptions::new().write(true).open(dest_path) {
                     Ok(mut file) => {
                         file.seek(SeekFrom::Start(dest_offset)).unwrap();
                         file.write_all(&data).unwrap();
+                        drop(file);
 
-                        let mut attrs = self.get_inode(dest_inode).unwrap();
+                        let mut attrs = match self.get_inode(dest_inode) {
+                            Ok(attrs) => attrs,
+                            Err(error_code) => {
+                                reply.error(error_code);
+                                return;
+                            }
+                        };
                         attrs.last_metadata_changed = time_now();
                         attrs.last_modified = time_now();
                         let Ok(dest_offset_usize): Result<usize, _> = dest_offset.try_into() else {
