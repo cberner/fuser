@@ -41,7 +41,11 @@ pub(crate) const FUSE_KERNEL_MINOR_VERSION: u32 = if cfg!(target_os = "macos") {
     // So let's declare protocol version 19 to be safe.
     19
 } else {
-    40
+    // 7.44 is what `FUSE_NOTIFY_INC_EPOCH` needs. Everything 7.41 through 7.43 added is a
+    // capability the kernel only acts on once negotiated, and all three are refused in
+    // `UNSUPPORTED_CAPABILITIES`, so declaring this adds no obligation beyond the
+    // notification itself
+    44
 };
 
 #[repr(C)]
