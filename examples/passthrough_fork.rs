@@ -185,7 +185,14 @@ impl Filesystem for ForkPassthroughFs {
         }
     }
 
-    fn open(&self, _req: &Request, ino: INodeNo, _flags: OpenFlags, reply: ReplyOpen) {
+    fn open(
+        &self,
+        _req: &Request,
+        ino: INodeNo,
+        _flags: OpenFlags,
+        _kill_suid_gid: bool,
+        reply: ReplyOpen,
+    ) {
         if ino != INodeNo(2) {
             reply.error(Errno::ENOENT);
             return;

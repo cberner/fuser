@@ -165,19 +165,10 @@ const UNSUPPORTED_CAPABILITIES: InitFlags = ALIASED_UNSUPPORTED_CAPABILITIES
     .union(InitFlags::FUSE_REQUEST_TIMEOUT);
 
 /// The refused capabilities that occupy a bit below 32, where macFUSE assigns a meaning of its
-/// own. On macOS these bits are `FUSE_EXCHANGE_DATA`, `FUSE_ALLOCATE` and `FUSE_RENAME_EXCL` -
-/// the last of which fuser requests itself - so nothing is refused there.
+/// own. On macOS these bits are `FUSE_ALLOCATE` and `FUSE_RENAME_EXCL` - the latter of which
+/// fuser requests itself - so nothing is refused there.
 #[cfg(not(target_os = "macos"))]
 const ALIASED_UNSUPPORTED_CAPABILITIES: InitFlags = InitFlags::empty()
-    // The kernel stops clearing suid and sgid itself, having set SB_NOSEC, and instead reports
-    // per request whether the caller lacked CAP_FSETID. fuser passes on only one of the three
-    // signals it sends: FUSE_WRITE_KILL_SUIDGID reaches Filesystem::write, but FATTR_KILL_SUIDGID
-    // on a chown or truncate is not among the FattrFlags that setattr decodes, and
-    // FUSE_OPEN_KILL_SUIDGID lives in the open_flags field of fuse_open_in, which fuser does not
-    // read. Those bits would survive operations that must clear them. Unlike v2, plain
-    // FUSE_HANDLE_KILLPRIV needs no such signal, since it asks the filesystem to clear them on
-    // every write, chown and truncate, which it can tell apart by opcode
-    .union(InitFlags::FUSE_HANDLE_KILLPRIV_V2)
     // Marking a submount root needs FUSE_ATTR_SUBMOUNT in the flags field of fuse_attr, which
     // fuser sends as padding. Only a transport with submounts (virtiofs) advertises this
     .union(InitFlags::FUSE_SUBMOUNTS)
@@ -507,6 +498,15 @@ pub trait Filesystem: Send + Sync + 'static {
     }
 
     /// Set file attributes.
+    ///
+    /// `kill_suid_gid` asks the filesystem to clear the suid and sgid bits of the file as part
+    /// of this request, because the caller lacks `CAP_FSETID`. It is only ever set once
+    /// [`InitFlags::FUSE_HANDLE_KILLPRIV_V2`] has been negotiated, since the kernel otherwise
+    /// clears them itself.
+    ///
+    /// Honoring it is necessary but not sufficient: that capability also makes clearing the
+    /// `security.capability` xattr on every write, chown and truncate the filesystem's job,
+    /// and no argument reports that. See [`InitFlags::FUSE_HANDLE_KILLPRIV_V2`].
     fn setattr(
         &self,
         _req: &Request,
@@ -523,11 +523,13 @@ pub trait Filesystem: Send + Sync + 'static {
         _chgtime: Option<SystemTime>,
         _bkuptime: Option<SystemTime>,
         flags: Option<BsdFileFlags>,
+        kill_suid_gid: bool,
         reply: ReplyAttr,
     ) {
         warn!(
             "[Not Implemented] setattr(ino: {ino:#x?}, mode: {mode:?}, uid: {uid:?}, \
-            gid: {gid:?}, size: {size:?}, fh: {fh:?}, flags: {flags:?})"
+            gid: {gid:?}, size: {size:?}, fh: {fh:?}, flags: {flags:?}, \
+            kill_suid_gid: {kill_suid_gid})"
         );
         reply.error(Errno::ENOSYS);
     }
@@ -644,7 +646,23 @@ pub trait Filesystem: Send + Sync + 'static {
     /// anything in fh. There are also some flags (`direct_io`, `keep_cache`) which the
     /// filesystem may set, to change the way the file is opened. See `fuse_file_info`
     /// structure in <`fuse_common.h`> for more details.
-    fn open(&self, _req: &Request, _ino: INodeNo, _flags: OpenFlags, reply: ReplyOpen) {
+    ///
+    /// `kill_suid_gid` asks the filesystem to clear the suid and sgid bits of the file, because
+    /// the open truncates it and the caller lacks `CAP_FSETID`. It is only ever set once
+    /// [`InitFlags::FUSE_HANDLE_KILLPRIV_V2`] has been negotiated, since the kernel otherwise
+    /// clears them itself.
+    ///
+    /// Honoring it is necessary but not sufficient: that capability also makes clearing the
+    /// `security.capability` xattr on every write, chown and truncate the filesystem's job,
+    /// and no argument reports that. See [`InitFlags::FUSE_HANDLE_KILLPRIV_V2`].
+    fn open(
+        &self,
+        _req: &Request,
+        _ino: INodeNo,
+        _flags: OpenFlags,
+        _kill_suid_gid: bool,
+        reply: ReplyOpen,
+    ) {
         reply.opened(FileHandle(0), FopenFlags::empty());
     }
 
@@ -909,6 +927,15 @@ pub trait Filesystem: Send + Sync + 'static {
     /// opened. See `fuse_file_info` structure in <`fuse_common.h`> for more details. If
     /// this method is not implemented or under Linux kernel versions earlier than
     /// 2.6.15, the `mknod()` and `open()` methods will be called instead.
+    ///
+    /// `kill_suid_gid` asks the filesystem to clear the suid and sgid bits of an existing file,
+    /// because the open truncates it and the caller lacks `CAP_FSETID`. It is only ever set once
+    /// [`InitFlags::FUSE_HANDLE_KILLPRIV_V2`] has been negotiated, since the kernel otherwise
+    /// clears them itself.
+    ///
+    /// Honoring it is necessary but not sufficient: that capability also makes clearing the
+    /// `security.capability` xattr on every write, chown and truncate the filesystem's job,
+    /// and no argument reports that. See [`InitFlags::FUSE_HANDLE_KILLPRIV_V2`].
     fn create(
         &self,
         _req: &Request,
@@ -917,11 +944,12 @@ pub trait Filesystem: Send + Sync + 'static {
         mode: u32,
         umask: u32,
         flags: i32,
+        kill_suid_gid: bool,
         reply: ReplyCreate,
     ) {
         warn!(
             "[Not Implemented] create(parent: {parent:#x?}, name: {name:?}, mode: {mode}, \
-            umask: {umask:#x?}, flags: {flags:#x?})"
+            umask: {umask:#x?}, flags: {flags:#x?}, kill_suid_gid: {kill_suid_gid})"
         );
         reply.error(Errno::ENOSYS);
     }
@@ -1184,9 +1212,18 @@ mod tests {
         for capability in UNSUPPORTED_CAPABILITIES {
             assert_eq!(config.add_capabilities(capability), Err(capability));
         }
+        // Now that setattr, open and create carry kill_suid_gid, this one is honored rather
+        // than refused, and must not drift back into the refused set
+        assert_eq!(
+            config.add_capabilities(InitFlags::FUSE_HANDLE_KILLPRIV_V2),
+            Ok(())
+        );
         // A capability fuser implements is still accepted from the same kernel
         assert_eq!(config.add_capabilities(InitFlags::FUSE_POSIX_ACL), Ok(()));
-        assert_eq!(config.requested, before | InitFlags::FUSE_POSIX_ACL);
+        assert_eq!(
+            config.requested,
+            before | InitFlags::FUSE_HANDLE_KILLPRIV_V2 | InitFlags::FUSE_POSIX_ACL
+        );
     }
 
     #[test]

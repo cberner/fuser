@@ -138,7 +138,14 @@ impl Filesystem for ClockFS {
         }
     }
 
-    fn open(&self, _req: &Request, ino: INodeNo, flags: OpenFlags, reply: ReplyOpen) {
+    fn open(
+        &self,
+        _req: &Request,
+        ino: INodeNo,
+        flags: OpenFlags,
+        _kill_suid_gid: bool,
+        reply: ReplyOpen,
+    ) {
         if ino == INodeNo::ROOT {
             reply.error(Errno::EISDIR);
         } else if flags.acc_mode() != OpenAccMode::O_RDONLY {

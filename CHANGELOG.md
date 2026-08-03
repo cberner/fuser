@@ -1,6 +1,16 @@
 # FUSE for Rust - Changelog
 
 ## Unreleased
+* Support `InitFlags::FUSE_HANDLE_KILLPRIV_V2`, which the previous release refused. With it
+  negotiated the kernel stops clearing suid and sgid itself and instead tells the filesystem
+  which requests must clear them, so `Filesystem::setattr()`, `open()` and `create()` gain a
+  `kill_suid_gid` argument carrying that signal (`write()` already had it via
+  `WriteFlags::FUSE_WRITE_KILL_SUIDGID`). A filesystem that does not request the capability
+  never sees it set. Note that `kill_suid_gid` covers suid and sgid only: as with plain
+  `FUSE_HANDLE_KILLPRIV`, clearing the `security.capability` xattr on every write, chown and
+  truncate is also the filesystem's job under either capability, and carries no per-request
+  signal. What v2 adds is that suid and sgid are cleared only when the caller lacks
+  `CAP_FSETID`, matching what the kernel would have done itself
 * `KernelConfig::add_capabilities()` now refuses capabilities fuser cannot honor, rather than
   requesting them and leaving the filesystem silently broken: `FUSE_SECURITY_CTX`,
   `FUSE_CREATE_SUPP_GROUP`, `FUSE_HANDLE_KILLPRIV_V2`, `FUSE_ALLOW_IDMAP`, `FUSE_HAS_INODE_DAX`,

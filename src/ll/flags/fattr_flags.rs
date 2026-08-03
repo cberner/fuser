@@ -17,6 +17,9 @@ bitflags! {
         const FATTR_MTIME_NOW = 1 << 8;
         const FATTR_LOCKOWNER = 1 << 9;
         const FATTR_CTIME = 1 << 10;
+        /// The caller lacks `CAP_FSETID`, so the filesystem must clear suid and sgid.
+        /// Only sent once `FUSE_HANDLE_KILLPRIV_V2` has been negotiated
+        const FATTR_KILL_SUIDGID = 1 << 11;
         #[cfg(target_os = "macos")]
         const FATTR_CRTIME = 1 << 28;
         #[cfg(target_os = "macos")]

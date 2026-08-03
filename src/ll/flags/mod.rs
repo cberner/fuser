@@ -8,6 +8,7 @@ pub(crate) mod fsync_flags;
 pub(crate) mod getattr_flags;
 pub(crate) mod init_flags;
 pub(crate) mod ioctl_flags;
+pub(crate) mod open_in_flags;
 pub(crate) mod poll_flags;
 pub(crate) mod read_flags;
 pub(crate) mod release_flags;
