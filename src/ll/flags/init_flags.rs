@@ -46,9 +46,14 @@ bitflags! {
         const FUSE_PARALLEL_DIROPS = 1 << 18;
         /// fs handles killing suid/sgid/cap on write/chown/trunc
         ///
-        /// The kernel stops removing those privileges itself, so the filesystem must clear
-        /// suid, sgid and the `security.capability` xattr on every write, chown and truncate.
-        /// No per-request signal accompanies this: the operation itself is the signal
+        /// The filesystem takes responsibility for clearing suid, sgid and the
+        /// `security.capability` xattr on every write, chown and truncate. No per-request
+        /// signal accompanies this: the operation itself is the signal.
+        ///
+        /// Unlike [`Self::FUSE_HANDLE_KILLPRIV_V2`] this does not set `SB_NOSEC`, so the kernel
+        /// still computes the removal and applies it through a `setattr`. What it buys is that
+        /// the kernel skips refreshing attributes first, trusting the filesystem to keep them
+        /// right
         const FUSE_HANDLE_KILLPRIV = 1 << 19;
         /// filesystem supports posix acls
         const FUSE_POSIX_ACL = 1 << 20;
@@ -68,9 +73,12 @@ bitflags! {
         const FUSE_SUBMOUNTS = 1 << 27;
         /// fs handles killing suid/sgid/cap on write/chown/trunc (v2)
         ///
-        /// As with [`Self::FUSE_HANDLE_KILLPRIV`], the kernel stops removing those privileges
-        /// itself, so clearing the `security.capability` xattr on every write, chown and
-        /// truncate remains the filesystem's job and carries no per-request signal.
+        /// As with [`Self::FUSE_HANDLE_KILLPRIV`], clearing the `security.capability` xattr on
+        /// every write, chown and truncate is the filesystem's job and carries no per-request
+        /// signal. This capability additionally sets `SB_NOSEC`, which stops the kernel doing
+        /// it, though only for an inode whose attributes are cached: fuse clears `S_NOSEC` on
+        /// every attribute refresh, since another client may have set the xattr meanwhile. A
+        /// filesystem therefore cannot rely on the kernel having done it.
         ///
         /// What v2 adds is finer control over suid and sgid alone, matching what the VFS would
         /// have done: they are cleared on a write or truncate only when the caller lacks

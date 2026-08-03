@@ -185,6 +185,13 @@ fn clear_suid_sgid(attr: &mut InodeAttributes) {
     }
 }
 
+/// Both killpriv capabilities make the kernel stop removing file capabilities, so they have to
+/// go on every write, chown and truncate. Unlike suid and sgid, no request flag reports this:
+/// the operation is itself the signal
+fn clear_file_capabilities(attr: &mut InodeAttributes) {
+    attr.xattrs.remove(b"security.capability".as_slice());
+}
+
 fn creation_gid(parent: &InodeAttributes, gid: u32) -> u32 {
     if parent.mode & libc::S_ISGID as u16 != 0 {
         return parent.gid;
@@ -460,6 +467,7 @@ impl SimpleFS {
         new_length: u64,
         uid: u32,
         gid: u32,
+        kill_suid_gid: bool,
     ) -> Result<InodeAttributes, Errno> {
         if new_length > MAX_FILE_SIZE {
             return Err(Errno::EFBIG);
@@ -486,8 +494,12 @@ impl SimpleFS {
         attrs.last_metadata_changed = time_now();
         attrs.last_modified = time_now();
 
-        // Clear SETUID & SETGID on truncate
-        clear_suid_sgid(&mut attrs);
+        // Clear SETUID & SETGID on truncate, but only when the kernel asks: under killpriv v2
+        // it does so exactly when the caller lacks CAP_FSETID
+        if kill_suid_gid {
+            clear_suid_sgid(&mut attrs);
+        }
+        clear_file_capabilities(&mut attrs);
 
         self.write_inode(&attrs);
 
@@ -544,11 +556,13 @@ impl Filesystem for SimpleFS {
         _req: &Request,
         #[allow(unused_variables)] config: &mut KernelConfig,
     ) -> io::Result<()> {
+        // v2 reports per request whether suid and sgid must go, rather than asking for them to
+        // be cleared on every write, chown and truncate as FUSE_HANDLE_KILLPRIV does
         if config
-            .add_capabilities(InitFlags::FUSE_HANDLE_KILLPRIV)
+            .add_capabilities(InitFlags::FUSE_HANDLE_KILLPRIV_V2)
             .is_err()
         {
-            info!("FUSE_HANDLE_KILLPRIV not supported");
+            info!("FUSE_HANDLE_KILLPRIV_V2 not supported");
             self.suid_support = false;
         }
 
@@ -633,7 +647,7 @@ impl Filesystem for SimpleFS {
         _chgtime: Option<SystemTime>,
         _bkuptime: Option<SystemTime>,
         _flags: Option<BsdFileFlags>,
-        _kill_suid_gid: bool,
+        kill_suid_gid: bool,
         reply: ReplyAttr,
     ) {
         let mut attrs = match self.get_inode(ino) {
@@ -701,22 +715,18 @@ impl Filesystem for SimpleFS {
                 return;
             }
 
-            if attrs.mode & (libc::S_IXUSR | libc::S_IXGRP | libc::S_IXOTH) as u16 != 0 {
-                // SUID & SGID are suppose to be cleared when chown'ing an executable file
+            // Under killpriv v2 the kernel sends this for every chown of a non-directory, so
+            // the filesystem no longer has to work out when the bits should go
+            if kill_suid_gid {
                 clear_suid_sgid(&mut attrs);
             }
+            clear_file_capabilities(&mut attrs);
 
             if let Some(uid) = uid {
                 attrs.uid = uid;
-                // Clear SETUID on owner change
-                attrs.mode &= !libc::S_ISUID as u16;
             }
             if let Some(gid) = gid {
                 attrs.gid = gid;
-                // Clear SETGID unless user is root
-                if _req.uid() != 0 {
-                    attrs.mode &= !libc::S_ISGID as u16;
-                }
             }
             attrs.last_metadata_changed = time_now();
             self.write_inode(&attrs);
@@ -732,7 +742,7 @@ impl Filesystem for SimpleFS {
                 // with W_OK will never fail to truncate, even if the file has been subsequently
                 // chmod'ed
                 if Self::check_file_handle_write(handle.into()) {
-                    if let Err(error_code) = self.truncate(ino, size, 0, 0) {
+                    if let Err(error_code) = self.truncate(ino, size, 0, 0, kill_suid_gid) {
                         reply.error(error_code);
                         return;
                     }
@@ -740,7 +750,9 @@ impl Filesystem for SimpleFS {
                     reply.error(Errno::EACCES);
                     return;
                 }
-            } else if let Err(error_code) = self.truncate(ino, size, _req.uid(), _req.gid()) {
+            } else if let Err(error_code) =
+                self.truncate(ino, size, _req.uid(), _req.gid(), kill_suid_gid)
+            {
                 reply.error(error_code);
                 return;
             }
@@ -1561,7 +1573,7 @@ impl Filesystem for SimpleFS {
         fh: FileHandle,
         offset: u64,
         data: &[u8],
-        _write_flags: WriteFlags,
+        write_flags: WriteFlags,
         _flags: OpenFlags,
         _lock_owner: Option<LockOwner>,
         reply: ReplyWrite,
@@ -1592,12 +1604,12 @@ impl Filesystem for SimpleFS {
                 if end_offset > attrs.size as usize {
                     attrs.size = end_offset as u64;
                 }
-                // if flags & FUSE_WRITE_KILL_PRIV as i32 != 0 {
-                //     clear_suid_sgid(&mut attrs);
-                // }
-                // XXX: In theory we should only need to do this when WRITE_KILL_PRIV is set for 7.31+
-                // However, xfstests fail in that case
-                clear_suid_sgid(&mut attrs);
+                // Only killpriv v2 sets this on a buffered write, which is why honoring it
+                // requires negotiating v2 rather than FUSE_HANDLE_KILLPRIV
+                if write_flags.contains(WriteFlags::FUSE_WRITE_KILL_SUIDGID) {
+                    clear_suid_sgid(&mut attrs);
+                }
+                clear_file_capabilities(&mut attrs);
                 self.write_inode(&attrs);
 
                 reply.written(data.len() as u32);
