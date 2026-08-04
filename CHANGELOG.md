@@ -1,6 +1,12 @@
 # FUSE for Rust - Changelog
 
 ## Unreleased
+* Add `Filesystem::syncfs()`, which the kernel calls for `syncfs(2)` (#359, ABI 7.34). Leaving
+  it unimplemented reports `ENOSYS`, which makes the kernel stop asking for the lifetime of the
+  connection, so this changes nothing for a filesystem that does not want it. Note that the
+  kernel only propagates `syncfs(2)` on `fuseblk` and virtiofs connections, neither of which
+  fuser mounts, so this is reachable only for a session built with `Session::from_fd` on such
+  a connection
 * Unmounting from within the mounting process now works with `MountOption::AutoUnmount` (#407).
   Dropping the `BackgroundSession`, calling `umount_and_join()` or `SessionUnmounter::unmount()`
   used to leave the unmount to the `fusermount` helper, which only acts once the process exits.

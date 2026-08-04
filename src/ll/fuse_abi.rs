@@ -166,6 +166,7 @@ pub(crate) enum fuse_opcode {
     FUSE_RENAME2 = 45,
     FUSE_LSEEK = 46,
     FUSE_COPY_FILE_RANGE = 47,
+    FUSE_SYNCFS = 50,
 
     #[cfg(target_os = "macos")]
     FUSE_SETVOLNAME = 61,
@@ -775,6 +776,12 @@ pub(crate) struct fuse_lseek_in {
 #[derive(Debug, IntoBytes, KnownLayout, Immutable)]
 pub(crate) struct fuse_lseek_out {
     pub(crate) offset: i64,
+}
+
+#[repr(C)]
+#[derive(Debug, FromBytes, KnownLayout, Immutable)]
+pub(crate) struct fuse_syncfs_in {
+    pub(crate) padding: u64,
 }
 
 #[repr(C)]
