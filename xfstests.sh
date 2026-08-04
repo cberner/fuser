@@ -62,9 +62,12 @@ echo "generic/294" >> xfs_excludes.txt
 echo "generic/306" >> xfs_excludes.txt
 echo "generic/452" >> xfs_excludes.txt
 
-# TODO: requires atime support
+# TODO: exercises the noatime, relatime and strictatime mount options, and a read-only
+# mount. fuse-xfstests cannot ask for any of them: _fuser_mount reads $4 for suid and drops
+# the rest, so "_scratch_mount -o relatime" and "_scratch_cycle_mount noatime" both arrive as
+# a plain mount. The example implements the kernel default, relatime, which is what the first
+# phase wants; the noatime and strictatime phases need the option to reach the filesystem
 echo "generic/003" >> xfs_excludes.txt
-echo "generic/192" >> xfs_excludes.txt
 
 # TODO: Passes, but takes ~10min and writes > 20GB. Needs support for writing files with large holes,
 # for this test to be fast

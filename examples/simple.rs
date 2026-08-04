@@ -509,6 +509,34 @@ impl SimpleFS {
         }
     }
 
+    /// Record that an inode was read, following the kernel's default `relatime` policy.
+    ///
+    /// Moving atime on every read would mean a write per read, so it only moves when it is no
+    /// newer than mtime or ctime - that is, when nothing has read the inode since it last
+    /// changed - or when it has gone stale by more than a day. That preserves the one thing a
+    /// reader can draw from atime: an atime older than mtime means nobody has looked since the
+    /// last write.
+    ///
+    /// A mount can ask for `noatime` or `strictatime` instead, but no FUSE request reports
+    /// which the mount used and this example takes no option for it, so the kernel's default
+    /// is the only policy on offer.
+    ///
+    /// `O_NOATIME` on the caller's handle is honored by `read()`, which is given the flag, on
+    /// Linux - neither macOS nor FreeBSD has the flag.
+    /// `readdir()` and `copy_file_range()` are not, and would have to carry it over from the
+    /// `open()` that set it, so a caller using it there still moves atime
+    fn touch_atime(&self, attrs: &mut InodeAttributes) {
+        let now = time_now();
+        let a_day_ago = now.0 - 24 * 60 * 60;
+        if attrs.last_accessed <= attrs.last_modified
+            || attrs.last_accessed <= attrs.last_metadata_changed
+            || attrs.last_accessed.0 < a_day_ago
+        {
+            attrs.last_accessed = now;
+            self.write_inode(attrs);
+        }
+    }
+
     fn write_inode(&self, inode: &InodeAttributes) {
         let path = Path::new(&self.data_dir)
             .join("inodes")
@@ -920,6 +948,9 @@ impl Filesystem for SimpleFS {
                 let file_size = file.metadata().unwrap().len();
                 let mut buffer = vec![0; file_size as usize];
                 file.read_exact(&mut buffer).unwrap();
+                if let Ok(mut attrs) = self.get_inode(ino) {
+                    self.touch_atime(&mut attrs);
+                }
                 reply.data(&buffer);
             }
             _ => {
@@ -1706,6 +1737,18 @@ impl Filesystem for SimpleFS {
 
                 let mut buffer = vec![0; read_size as usize];
                 file.read_exact_at(&mut buffer, offset as u64).unwrap();
+                // A reader that asked for O_NOATIME wants to leave no trace, and a read
+                // request carries the flag, so it can be honored here. The flag is Linux's;
+                // neither macOS nor FreeBSD defines it
+                #[cfg(target_os = "linux")]
+                let no_atime = _flags.0 & libc::O_NOATIME != 0;
+                #[cfg(not(target_os = "linux"))]
+                let no_atime = false;
+                if !no_atime {
+                    if let Ok(mut attrs) = self.get_inode(ino) {
+                        self.touch_atime(&mut attrs);
+                    }
+                }
                 reply.data(&buffer);
             }
             _ => {
@@ -1861,6 +1904,9 @@ impl Filesystem for SimpleFS {
                 return;
             }
         };
+        if let Ok(mut attrs) = self.get_inode(ino) {
+            self.touch_atime(&mut attrs);
+        }
 
         for (index, entry) in entries.iter().skip(offset as usize).enumerate() {
             let (name, (inode, file_type)) = entry;
@@ -2212,6 +2258,10 @@ impl Filesystem for SimpleFS {
 
                 let mut data = vec![0; read_size as usize];
                 file.read_exact_at(&mut data, src_offset).unwrap();
+                // Copying reads the source, and Linux moves its atime accordingly
+                if let Ok(mut src_attrs) = self.get_inode(src_inode) {
+                    self.touch_atime(&mut src_attrs);
+                }
 
                 let dest_path = self.content_path(dest_inode);
                 match OpenOptions::new().write(true).open(dest_path) {
