@@ -17,6 +17,7 @@ use std::io::SeekFrom;
 use std::io::Write;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::FileExt;
+use std::os::unix::fs::MetadataExt;
 #[cfg(target_os = "linux")]
 use std::os::unix::io::AsRawFd;
 use std::path::Path;
@@ -476,6 +477,46 @@ impl SimpleFS {
             .join(inode.to_string())
     }
 
+    /// Whether the backing directory looks able to take a preallocation of `length` bytes at
+    /// `offset`.
+    ///
+    /// The range is rounded out to whole backing blocks before being compared, since a range
+    /// that starts mid-block touches one more block than its length alone implies.
+    ///
+    /// This is a preflight rather than a reservation, and cannot be exact: the backing
+    /// filesystem spends blocks on its own metadata, and nothing holds the space between this
+    /// answer and the call it guards. It exists to refuse the requests that are impossible by
+    /// orders of magnitude, not to predict the last block. An unreadable backing store is
+    /// therefore allowed through rather than refused, so that a `statvfs` this filesystem
+    /// cannot answer does not turn every preallocation into ENOSPC.
+    ///
+    /// The counts widen to `u64` explicitly because `statvfs` reports them in types whose
+    /// width varies by platform: 64 bits on Linux, 32 on macOS.
+    ///
+    /// Gated to match its only caller, the `fallocate` that FUSE offers on Linux alone
+    #[cfg(target_os = "linux")]
+    fn backing_store_can_take(&self, offset: u64, length: u64) -> bool {
+        let Ok(stat) = nix::sys::statvfs::statvfs(Path::new(&self.data_dir)) else {
+            return true;
+        };
+        let block_size = (stat.fragment_size() as u64).max(1);
+        let first_block = offset / block_size;
+        let last_block = offset.saturating_add(length).div_ceil(block_size);
+        last_block.saturating_sub(first_block) <= stat.blocks_available() as u64
+    }
+
+    /// Attributes as the kernel sees them. The block count comes from the backing file rather
+    /// than from the size, so that a file with holes reports the space it actually occupies
+    fn file_attr(&self, attrs: InodeAttributes) -> fuser::FileAttr {
+        let fallback = attrs.size.div_ceil(u64::from(BLOCK_SIZE));
+        let blocks = fs::metadata(self.content_path(INodeNo(attrs.inode)))
+            .map_or(fallback, |metadata| metadata.blocks());
+        fuser::FileAttr {
+            blocks,
+            ..attrs.into()
+        }
+    }
+
     fn get_directory_content(&self, inode: INodeNo) -> Result<DirectoryDescriptor, Errno> {
         let path = Path::new(&self.data_dir)
             .join("contents")
@@ -734,7 +775,11 @@ impl Filesystem for SimpleFS {
         }
 
         match self.lookup_name(parent, name) {
-            Ok(attrs) => reply.entry(&Duration::new(0, 0), &attrs.into(), fuser::Generation(0)),
+            Ok(attrs) => reply.entry(
+                &Duration::new(0, 0),
+                &self.file_attr(attrs),
+                fuser::Generation(0),
+            ),
             Err(error_code) => reply.error(error_code),
         }
     }
@@ -743,7 +788,7 @@ impl Filesystem for SimpleFS {
 
     fn getattr(&self, _req: &Request, ino: INodeNo, _fh: Option<FileHandle>, reply: ReplyAttr) {
         match self.get_inode(ino) {
-            Ok(attrs) => reply.attr(&Duration::new(0, 0), &attrs.into()),
+            Ok(attrs) => reply.attr(&Duration::new(0, 0), &self.file_attr(attrs)),
             Err(error_code) => reply.error(error_code),
         }
     }
@@ -804,7 +849,7 @@ impl Filesystem for SimpleFS {
             }
             attrs.last_metadata_changed = time_now();
             self.write_inode(&attrs);
-            reply.attr(&Duration::new(0, 0), &attrs.into());
+            reply.attr(&Duration::new(0, 0), &self.file_attr(attrs));
             return;
         }
 
@@ -847,7 +892,7 @@ impl Filesystem for SimpleFS {
             }
             attrs.last_metadata_changed = time_now();
             self.write_inode(&attrs);
-            reply.attr(&Duration::new(0, 0), &attrs.into());
+            reply.attr(&Duration::new(0, 0), &self.file_attr(attrs));
             return;
         }
 
@@ -936,7 +981,7 @@ impl Filesystem for SimpleFS {
         }
 
         let attrs = self.get_inode(ino).unwrap();
-        reply.attr(&Duration::new(0, 0), &attrs.into());
+        reply.attr(&Duration::new(0, 0), &self.file_attr(attrs));
         return;
     }
 
@@ -1068,7 +1113,11 @@ impl Filesystem for SimpleFS {
         self.write_directory_content(parent, &entries);
 
         // TODO: implement flags
-        reply.entry(&Duration::new(0, 0), &attrs.into(), fuser::Generation(0));
+        reply.entry(
+            &Duration::new(0, 0),
+            &self.file_attr(attrs),
+            fuser::Generation(0),
+        );
     }
 
     fn mkdir(
@@ -1144,7 +1193,11 @@ impl Filesystem for SimpleFS {
         entries.insert(name.as_bytes().to_vec(), (inode.0, FileKind::Directory));
         self.write_directory_content(parent, &entries);
 
-        reply.entry(&Duration::new(0, 0), &attrs.into(), fuser::Generation(0));
+        reply.entry(
+            &Duration::new(0, 0),
+            &self.file_attr(attrs),
+            fuser::Generation(0),
+        );
     }
 
     fn unlink(&self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEmpty) {
@@ -1338,7 +1391,11 @@ impl Filesystem for SimpleFS {
             .unwrap();
         file.write_all(target.as_os_str().as_bytes()).unwrap();
 
-        reply.entry(&Duration::new(0, 0), &attrs.into(), fuser::Generation(0));
+        reply.entry(
+            &Duration::new(0, 0),
+            &self.file_attr(attrs),
+            fuser::Generation(0),
+        );
     }
 
     fn rename(
@@ -1650,7 +1707,11 @@ impl Filesystem for SimpleFS {
             attrs.hardlinks += 1;
             attrs.last_metadata_changed = time_now();
             self.write_inode(&attrs);
-            reply.entry(&Duration::new(0, 0), &attrs.into(), fuser::Generation(0));
+            reply.entry(
+                &Duration::new(0, 0),
+                &self.file_attr(attrs),
+                fuser::Generation(0),
+            );
         }
     }
 
@@ -1941,14 +2002,29 @@ impl Filesystem for SimpleFS {
     }
 
     fn statfs(&self, _req: &Request, _ino: INodeNo, reply: ReplyStatfs) {
-        warn!("statfs() implementation is a stub");
-        // TODO: real implementation of this
+        // Pass through the backing directory's capacity, rescaled to this filesystem's block
+        // size. Callers that size their work to the free space, `df` among them, read this
+        let stat = match nix::sys::statvfs::statvfs(Path::new(&self.data_dir)) {
+            Ok(stat) => stat,
+            Err(error) => {
+                reply.error(io::Error::from(error).into());
+                return;
+            }
+        };
+        // Widened explicitly: statvfs reports these in types whose width varies by platform,
+        // 64 bits on Linux and 32 on macOS
+        let fragment_size = stat.fragment_size() as u64;
+        let in_blocks = |count: u64| count.saturating_mul(fragment_size) / u64::from(BLOCK_SIZE);
+        // Every inode here costs two in the backing directory, one under `inodes` for the
+        // metadata and one under `contents` for the data, so the backing store runs out of
+        // them twice as fast as a pass-through count would suggest
+        let in_inodes = |count: u64| count / 2;
         reply.statfs(
-            10_000,
-            10_000,
-            10_000,
-            1,
-            10_000,
+            in_blocks(stat.blocks() as u64),
+            in_blocks(stat.blocks_free() as u64),
+            in_blocks(stat.blocks_available() as u64),
+            in_inodes(stat.files() as u64),
+            in_inodes(stat.files_free() as u64),
             BLOCK_SIZE,
             MAX_NAME_LENGTH,
             BLOCK_SIZE,
@@ -2182,7 +2258,7 @@ impl Filesystem for SimpleFS {
         // TODO: implement flags
         reply.created(
             &Duration::new(0, 0),
-            &attrs.into(),
+            &self.file_attr(attrs),
             fuser::Generation(0),
             FileHandle(self.allocate_next_file_handle(read, write)),
             FopenFlags::empty(),
@@ -2201,7 +2277,30 @@ impl Filesystem for SimpleFS {
         reply: ReplyEmpty,
     ) {
         let path = self.content_path(ino);
-        match OpenOptions::new().write(true).open(path) {
+
+        // A filesystem knows roughly what it has and refuses an impossible request outright.
+        // Handing it to the backing store instead fills the disk before failing, and this
+        // filesystem cannot write even its own metadata once that has happened.
+        //
+        // The whole range is charged for, without crediting what the file already occupies.
+        // Only the blocks inside the requested range are free to reuse, and working out which
+        // those are needs a SEEK_HOLE/SEEK_DATA walk of the range. Crediting the file's total
+        // block count instead would let through exactly what this rejects: a 1 GiB file whose
+        // blocks all sit below the offset can ask for another 1 GiB on a device with less than
+        // that free. Erring towards ENOSPC costs a preallocation that would have fit.
+        //
+        // The modes that give space back are exempt, since they need none to succeed. Only
+        // punching can arrive here today - the FUSE kernel driver forwards KEEP_SIZE,
+        // PUNCH_HOLE and ZERO_RANGE and refuses the rest before the filesystem sees them -
+        // but the condition is written about what the modes mean rather than about what the
+        // driver currently sends
+        const FREES_SPACE: i32 = libc::FALLOC_FL_PUNCH_HOLE | libc::FALLOC_FL_COLLAPSE_RANGE;
+        if mode & FREES_SPACE == 0 && !self.backing_store_can_take(offset, length) {
+            reply.error(Errno::ENOSPC);
+            return;
+        }
+
+        match OpenOptions::new().write(true).open(&path) {
             Ok(file) => {
                 // Must not consume `file`, otherwise its descriptor is leaked. Tests that punch
                 // thousands of holes exhaust RLIMIT_NOFILE within a single run.

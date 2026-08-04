@@ -120,12 +120,20 @@ echo "generic/750" >> xfs_excludes.txt
 # dmesg's complaint about it shows up in the output
 echo "generic/310" >> xfs_excludes.txt
 
-# Setting sysctls is not allowed inside Docker: /proc/sys is mounted read-only. Both tests
-# toggle fs.protected_symlinks / fs.protected_regular, and sysctl's refusal to do so lands in
-# the output. Making /proc/sys writable would let them through, but those knobs are global, so
-# the container would be reaching out and changing the host's
+# Setting sysctls is not allowed inside Docker: /proc/sys is mounted read-only. 597 and 598
+# toggle fs.protected_symlinks / fs.protected_regular and 460 the vm dirty ratios, and
+# sysctl's refusal to do so lands in the output - 460's body otherwise passes. Making
+# /proc/sys writable would let them through, but those knobs are global, so the container
+# would be reaching out and changing the host's
+echo "generic/460" >> xfs_excludes.txt
 echo "generic/597" >> xfs_excludes.txt
 echo "generic/598" >> xfs_excludes.txt
+
+# Sizes its AIO working set from the filesystem's free space, so now that statfs reports the
+# real figure it queues writes by the gigabyte. Its own guard against that reads `free`, which
+# inside Docker reports the host's memory rather than the container's limit, so it overshoots
+# and the OOM killer takes it
+echo "generic/551" >> xfs_excludes.txt
 
 # fsx against hugepage-backed buffers, which cannot be set up here: MADV_COLLAPSE is refused
 # and init_hugepages_buf fails before any filesystem operation runs
