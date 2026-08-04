@@ -127,13 +127,6 @@ echo "generic/310" >> xfs_excludes.txt
 echo "generic/597" >> xfs_excludes.txt
 echo "generic/598" >> xfs_excludes.txt
 
-# TODO: getcap and setcap now let this one run, and it finds that the filesystem does not drop
-# security.capability when an unprivileged user writes the file. The write it uses is a
-# fallocate, which comes back EPERM without ever reaching the filesystem, because the kernel
-# sends the removal under the writer's credentials and the filesystem wants root for a
-# security.* key. Drop this exclusion once the simple example lets that removal through
-echo "generic/688" >> xfs_excludes.txt
-
 # fsx against hugepage-backed buffers, which cannot be set up here: MADV_COLLAPSE is refused
 # and init_hugepages_buf fails before any filesystem operation runs
 echo "generic/759" >> xfs_excludes.txt
