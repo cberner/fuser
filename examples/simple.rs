@@ -2037,9 +2037,18 @@ impl Filesystem for SimpleFS {
 
     fn removexattr(&self, request: &Request, inode: INodeNo, key: &OsStr, reply: ReplyEmpty) {
         if let Ok(mut attrs) = self.get_inode(inode) {
-            if let Err(error) = xattr_access_check(key.as_bytes(), libc::W_OK, &attrs, request) {
-                reply.error(error);
-                return;
+            // The kernel drops `security.capability` on behalf of whoever is writing the file,
+            // and sends that removal under their credentials rather than its own. Refusing it
+            // because they are not root fails the operation it was part of - a `fallocate` by
+            // an unprivileged user returns EPERM without ever reaching this filesystem. So
+            // this one key is removable by anyone: doing so only ever takes privilege away.
+            // Setting it still needs root, as it does for any other `security.*` key
+            if key.as_bytes() != b"security.capability" {
+                if let Err(error) = xattr_access_check(key.as_bytes(), libc::W_OK, &attrs, request)
+                {
+                    reply.error(error);
+                    return;
+                }
             }
 
             if attrs.xattrs.remove(key.as_bytes()).is_none() {
