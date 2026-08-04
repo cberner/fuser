@@ -167,6 +167,7 @@ pub(crate) enum fuse_opcode {
     FUSE_LSEEK = 46,
     FUSE_COPY_FILE_RANGE = 47,
     FUSE_SYNCFS = 50,
+    FUSE_TMPFILE = 51,
 
     #[cfg(target_os = "macos")]
     FUSE_SETVOLNAME = 61,

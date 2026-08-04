@@ -825,6 +825,180 @@ mod test {
         ManuallyDrop::into_inner(tmp);
     }
 
+    /// An O_TMPFILE open must reach Filesystem::tmpfile() with the mode and flags it was
+    /// made with, and hand back a working descriptor. The kernel takes ENOSYS from this as
+    /// permanent, so a filesystem that does implement it has one chance to say so.
+    ///
+    /// Naming the file afterwards is the other half of what it is for, and reaches
+    /// Filesystem::link() with the inode tmpfile() replied with.
+    #[test]
+    fn tmpfile_open_and_link() {
+        use std::os::fd::AsRawFd;
+        use std::time::Duration;
+        use std::time::SystemTime;
+
+        use crate::FileAttr;
+        use crate::FileType;
+        use crate::FopenFlags;
+        use crate::Generation;
+        use crate::INodeNo;
+        use crate::ReplyCreate;
+
+        const TMPFILE_INO: INodeNo = INodeNo(2);
+
+        struct TmpFileFs {
+            seen: Arc<Mutex<Option<(u32, i32)>>>,
+            linked: Arc<Mutex<Option<INodeNo>>>,
+        }
+        impl TmpFileFs {
+            fn attr(ino: INodeNo, kind: FileType, perm: u16) -> FileAttr {
+                let now = SystemTime::now();
+                FileAttr {
+                    ino,
+                    size: 0,
+                    blocks: 0,
+                    atime: now,
+                    mtime: now,
+                    ctime: now,
+                    crtime: now,
+                    kind,
+                    perm,
+                    nlink: if kind == FileType::Directory { 2 } else { 0 },
+                    uid: geteuid().as_raw(),
+                    gid: 0,
+                    rdev: 0,
+                    blksize: 4096,
+                    flags: 0,
+                }
+            }
+        }
+        impl Filesystem for TmpFileFs {
+            fn lookup(
+                &self,
+                _req: &Request,
+                _parent: INodeNo,
+                _name: &std::ffi::OsStr,
+                reply: crate::ReplyEntry,
+            ) {
+                // The name the link below creates must not exist yet
+                reply.error(Errno::ENOENT);
+            }
+            fn link(
+                &self,
+                _req: &Request,
+                ino: INodeNo,
+                _newparent: INodeNo,
+                _newname: &std::ffi::OsStr,
+                reply: crate::ReplyEntry,
+            ) {
+                *self.linked.lock() = Some(ino);
+                reply.entry(
+                    &Duration::from_secs(0),
+                    &Self::attr(ino, FileType::RegularFile, 0o600),
+                    Generation(0),
+                );
+            }
+            fn getattr(
+                &self,
+                _req: &Request,
+                ino: INodeNo,
+                _fh: Option<crate::FileHandle>,
+                reply: crate::ReplyAttr,
+            ) {
+                let attr = if ino == TMPFILE_INO {
+                    Self::attr(ino, FileType::RegularFile, 0o600)
+                } else {
+                    Self::attr(ino, FileType::Directory, 0o755)
+                };
+                reply.attr(&Duration::from_secs(0), &attr);
+            }
+            fn tmpfile(
+                &self,
+                _req: &Request,
+                _parent: INodeNo,
+                mode: u32,
+                _umask: u32,
+                flags: i32,
+                _kill_suid_gid: bool,
+                reply: ReplyCreate,
+            ) {
+                *self.seen.lock() = Some((mode, flags));
+                reply.created(
+                    &Duration::from_secs(0),
+                    &Self::attr(TMPFILE_INO, FileType::RegularFile, 0o600),
+                    Generation(0),
+                    crate::FileHandle(1),
+                    FopenFlags::empty(),
+                );
+            }
+        }
+
+        let tmp = ManuallyDrop::new(tempfile::tempdir().unwrap());
+        let mountpoint = tmp.path().canonicalize().unwrap();
+        let seen = Arc::new(Mutex::new(None));
+        let linked = Arc::new(Mutex::new(None));
+        let session = Session::new(
+            TmpFileFs {
+                seen: seen.clone(),
+                linked: linked.clone(),
+            },
+            &mountpoint,
+            &Config::default(),
+        )
+        .unwrap();
+        // FUSE_TMPFILE arrived in ABI 7.37, and a kernel without it has no tmpfile inode
+        // operation at all, so it answers O_TMPFILE itself without asking the filesystem
+        // anything. fuser supports back to 7.6, so that is not a failure of this change
+        let supported = session.proto_version.is_some_and(|v| v >= Version(7, 37));
+        let bg = session.spawn().unwrap();
+        if !supported {
+            eprintln!("skipping tmpfile_open: the kernel's FUSE protocol predates 7.37");
+            bg.umount_and_join().unwrap();
+            ManuallyDrop::into_inner(tmp);
+            return;
+        }
+
+        let opened = nix::fcntl::open(
+            &mountpoint,
+            nix::fcntl::OFlag::O_TMPFILE | nix::fcntl::OFlag::O_RDWR,
+            nix::sys::stat::Mode::from_bits_truncate(0o600),
+        );
+        // Give the anonymous file a name, which is what it exists to allow. Going through
+        // /proc/self/fd rather than AT_EMPTY_PATH, which would need CAP_DAC_READ_SEARCH
+        let named = opened.as_ref().map_err(|err| *err).and_then(|fd| {
+            let by_fd = format!("/proc/self/fd/{}", fd.as_raw_fd());
+            nix::unistd::linkat(
+                nix::fcntl::AT_FDCWD,
+                by_fd.as_str(),
+                nix::fcntl::AT_FDCWD,
+                mountpoint.join("named.txt").as_path(),
+                nix::fcntl::AtFlags::AT_SYMLINK_FOLLOW,
+            )
+        });
+
+        let seen = seen.lock().take();
+        let linked = linked.lock().take();
+        let opened = opened.map(drop);
+        drop(bg);
+        ManuallyDrop::into_inner(tmp);
+
+        opened.expect("the descriptor the filesystem replied with must reach the caller");
+        named.expect("linking the anonymous file must reach the filesystem");
+        assert_eq!(
+            linked,
+            Some(TMPFILE_INO),
+            "the link must name the inode tmpfile() replied with"
+        );
+        let (mode, flags) = seen.expect("O_TMPFILE must reach Filesystem::tmpfile");
+        // The kernel insists on S_IFREG for these, and applies the umask itself
+        assert_eq!(mode & libc::S_IFMT, libc::S_IFREG);
+        assert_eq!(
+            flags & libc::O_TMPFILE,
+            libc::O_TMPFILE,
+            "flags {flags:#x} must carry O_TMPFILE"
+        );
+    }
+
     /// The kernel fills a request's uid, gid and pid from the task that caused it, for
     /// every operation that goes through fuse_simple_request(). Every access decision
     /// fuser makes rests on that - SessionACL, and which operations are exempt from it

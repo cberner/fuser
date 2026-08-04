@@ -550,6 +550,17 @@ impl<'a> RequestWithSender<'a> {
             ll::Operation::SyncFs(_x) => {
                 filesystem.syncfs(self.request_header(), self.request.nodeid(), self.reply());
             }
+            ll::Operation::TmpFile(x) => {
+                filesystem.tmpfile(
+                    self.request_header(),
+                    self.request.nodeid(),
+                    x.mode(),
+                    x.umask(),
+                    x.flags(),
+                    x.kill_suid_gid(),
+                    self.reply(),
+                );
+            }
             #[cfg(target_os = "macos")]
             ll::Operation::SetVolName(x) => {
                 filesystem.setvolname(self.request_header(), x.name(), self.reply());

@@ -1174,6 +1174,33 @@ pub trait Filesystem: Send + Sync + 'static {
         reply.error(Errno::ENOSYS);
     }
 
+    /// Create an anonymous file, for `open()` with `O_TMPFILE`.
+    ///
+    /// The file has no name and belongs to no directory. `parent` is the directory it was
+    /// created in, which is where it will live if it is later given a name with `linkat()`;
+    /// until then nothing can reach it by path. Reply as for [`Filesystem::create`], with
+    /// an inode and an open file handle.
+    ///
+    /// Answering `ENOSYS`, which is the default, is permanent: the kernel stops offering
+    /// `O_TMPFILE` on this connection and reports `EOPNOTSUPP` to the caller without
+    /// asking again.
+    fn tmpfile(
+        &self,
+        _req: &Request,
+        parent: INodeNo,
+        mode: u32,
+        umask: u32,
+        flags: i32,
+        kill_suid_gid: bool,
+        reply: ReplyCreate,
+    ) {
+        warn!(
+            "[Not Implemented] tmpfile(parent: {parent:#x?}, mode: {mode}, umask: {umask:#x?}, \
+            flags: {flags:#x?}, kill_suid_gid: {kill_suid_gid})"
+        );
+        reply.error(Errno::ENOSYS);
+    }
+
     /// Synchronize the whole filesystem, for the `syncfs(2)` system call.
     ///
     /// `ino` is the root inode. Replying before everything the filesystem holds is durable
