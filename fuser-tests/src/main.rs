@@ -9,6 +9,7 @@ mod experimental;
 mod features;
 mod fuse_conf;
 mod fusermount;
+mod hidden_fusermount;
 mod libfuse;
 mod mount_util;
 mod unmount;

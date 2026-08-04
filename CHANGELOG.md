@@ -1,6 +1,16 @@
 # FUSE for Rust - Changelog
 
 ## Unreleased
+* `MountOption::AutoUnmount` now works on systems that ship no `fusermount` helper (#283).
+  Unmounting once the mounting process is gone takes something that outlives it, which was
+  always left to that helper; where there is none, fuser forks a watcher of its own, which
+  works wherever the process may mount directly. Where neither is available the mount now
+  fails naming `auto_unmount` as what needed them, rather than only reporting a missing
+  helper - which said nothing about mounting without the option being fine
+* Android now selects the pure Rust mount implementation, as the other Linux targets do.
+  Building for Android without the `libfuse` feature previously failed outright, because the
+  build script fell through to searching for libfuse. This is what makes the `auto_unmount`
+  change above reach the platform it was reported from
 * Unmounting from within the mounting process now works with `MountOption::AutoUnmount` (#407).
   Dropping the `BackgroundSession`, calling `umount_and_join()` or `SessionUnmounter::unmount()`
   used to leave the unmount to the `fusermount` helper, which only acts once the process exits.

@@ -52,12 +52,15 @@ jobs:
         if: steps.rust-cache.outputs.cache-hit != 'true'
         run: |
           rustup target add x86_64-unknown-linux-musl
+          rustup target add aarch64-linux-android
 
       - name: Run tests
         run: |
           cargo build --all --all-targets --features=libfuse,${{ matrix.features }}
           cargo build --all --all-targets --features=${{ matrix.features }}
           cargo build --target=x86_64-unknown-linux-musl
+          # No Android runner to test on, but the pure Rust mount path must keep building
+          cargo check --target=aarch64-linux-android
           cargo test --all --features=libfuse,${{ matrix.features }}
           cargo test --all --features=${{ matrix.features }}
           cargo doc --all --no-deps --features=${{ matrix.features }}

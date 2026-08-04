@@ -231,17 +231,19 @@ impl Errno {
     pub const EFTYPE: Errno = errno!(libc::EFTYPE);
 
     /// No data available
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     pub const ENODATA: Errno = errno!(libc::ENODATA);
     #[doc = no_xattr_doc!()]
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     pub const NO_XATTR: Errno = Self::ENODATA;
 
     /// Attribute not found
-    #[cfg(not(target_os = "linux"))]
+    // Android has no ENOATTR of its own: libc deprecates it there in favour of ENODATA,
+    // which is the same value, so it follows Linux above
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
     pub const ENOATTR: Errno = errno!(libc::ENOATTR);
     #[doc = no_xattr_doc!()]
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
     pub const NO_XATTR: Errno = Self::ENOATTR;
 
     /// Make errno from `i32`, defaulting to `EIO` if it is not positive.

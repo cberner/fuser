@@ -21,6 +21,7 @@ use crate::features::features_to_flags;
 use crate::fuse_conf::fuse_conf_remove_user_allow_other;
 use crate::fuse_conf::fuse_conf_write_user_allow_other;
 use crate::fusermount::Fusermount;
+use crate::hidden_fusermount::HiddenFusermount;
 use crate::libfuse::Libfuse;
 use crate::mount_util::assert_no_fuse_mount;
 use crate::mount_util::wait_for_fuse_mount;
@@ -43,6 +44,7 @@ async fn run_mount_tests_inner(libfuse: Libfuse) -> anyhow::Result<()> {
     run_test(&[], Unmount::Manual, Fusermount::False, 1, false).await?;
     run_test(&[], Unmount::Auto, libfuse.fusermount(), 1, false).await?;
     test_no_user_allow_other(&[], &libfuse).await?;
+    test_auto_unmount_without_helper().await?;
 
     // Tests with libfuse
     run_test(
@@ -213,6 +215,48 @@ async fn run_test_inner(
     kill_and_unmount(fuse_process, unmount, mount_path_str).await?;
 
     green!("OK {description}");
+
+    Ok(())
+}
+
+/// Without a mount helper there is nothing to keep watch for auto_unmount, so fuser forks
+/// a watcher of its own, which only a process that may mount directly can do (issue #283).
+/// Hiding the helper is what takes fuser down that path.
+async fn test_auto_unmount_without_helper() -> anyhow::Result<()> {
+    eprintln!("\n=== Running test_auto_unmount_without_helper ===");
+
+    // Restored when this is dropped, including when a step below fails
+    let _hidden = HiddenFusermount::hide().await?;
+
+    let mount_dir = CanonicalTempDir::new()?;
+    let mount_path = mount_dir.path();
+    eprintln!("Mount dir: {}", mount_path.display());
+
+    // The watcher lives in the pure Rust mount implementation, so no libfuse feature
+    let hello_exe = cargo_build_example("hello", &[]).await?;
+    let fuse_process = Command::new(&hello_exe)
+        .arg(mount_path)
+        .arg("--auto-unmount")
+        // An override would give fuser a helper again, defeating the test
+        .env_remove(Fusermount::ENV_VAR)
+        .kill_on_drop(true)
+        .spawn()
+        .context("Failed to start hello example")?;
+
+    wait_for_fuse_mount(mount_path).await?;
+
+    let content = tokio::fs::read_to_string(mount_path.join("hello.txt"))
+        .await
+        .context("Failed to read hello.txt")?;
+    if content != "Hello World!\n" {
+        bail!("hello.txt content mismatch: expected 'Hello World!', got '{content}'");
+    }
+
+    // Killing the filesystem outright is what auto_unmount is for: nothing gets the
+    // chance to unmount by hand, so only the watcher can clean the mountpoint up
+    kill_and_unmount(fuse_process, Unmount::Auto, mount_path.to_str().unwrap()).await?;
+
+    green!("OK auto_unmount without a mount helper");
 
     Ok(())
 }

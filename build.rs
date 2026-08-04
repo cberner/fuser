@@ -9,7 +9,7 @@ fn main() {
 
     if matches!(
         target_os.as_str(),
-        "linux" | "freebsd" | "dragonfly" | "openbsd" | "netbsd"
+        "linux" | "android" | "freebsd" | "dragonfly" | "openbsd" | "netbsd"
     ) && cfg!(not(feature = "libfuse"))
     {
         println!("cargo::rustc-cfg=fuser_mount_impl=\"pure-rust\"");

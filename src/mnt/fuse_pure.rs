@@ -25,6 +25,7 @@ use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::Command;
 use std::process::Stdio;
+use std::ptr;
 use std::sync::Arc;
 
 use log::debug;
@@ -107,14 +108,13 @@ fn fuse_mount_pure(
     acl: SessionACL,
 ) -> Result<(DevFuse, Option<UnixStream>), io::Error> {
     if options.contains(&MountOption::AutoUnmount) {
-        // Auto unmount is only supported via fusermount
-        return fuse_mount_fusermount(mountpoint, options, acl);
+        return fuse_mount_auto_unmount(mountpoint, options, acl);
     }
 
     // The direct mount path is currently implemented only for Linux and macOS.
     // Other supported Unix targets (such as the BSDs) rely on the setuid
     // mount helper, which mirrors libfuse's approach.
-    if cfg!(target_os = "linux") || cfg!(target_os = "macos") {
+    if cfg!(any(target_os = "linux", target_os = "android")) || cfg!(target_os = "macos") {
         let res = fuse_mount_sys(mountpoint, options, acl)?;
         match res {
             Some(file) => return Ok((file, None)),
@@ -124,7 +124,218 @@ fn fuse_mount_pure(
         }
     }
 
-    fuse_mount_fusermount(mountpoint, options, acl)
+    fuse_mount_fusermount(&detect_fusermount_bin()?, mountpoint, options, acl)
+}
+
+/// `auto_unmount` needs something that outlives this process to do the unmount, which is
+/// normally the fusermount helper: it keeps running holding the other end of a socket, and
+/// unmounts once this process has let go of it. Systems that ship no FUSE userspace at all
+/// have no such helper (issue #283), so where this process may mount by itself, keep that
+/// watch here instead.
+fn fuse_mount_auto_unmount(
+    mountpoint: &OsStr,
+    options: &[MountOption],
+    acl: SessionACL,
+) -> Result<(DevFuse, Option<UnixStream>), Error> {
+    // Naming the option matters: mounting without it may well work, and nothing else
+    // says that the helper was needed only because auto_unmount asked for it
+    let no_helper = match detect_fusermount_bin() {
+        Ok(fusermount_bin) => {
+            return fuse_mount_fusermount(&fusermount_bin, mountpoint, options, acl)
+                .map_err(|err| crate::mnt::context("mounting with auto_unmount", err));
+        }
+        Err(err) => err,
+    };
+
+    // Unmounting takes the same privilege as mounting by hand does, so wherever this
+    // succeeds the watcher can finish the job
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    {
+        let (watcher_socket, session_socket) = UnixStream::pair()?;
+        // Fork before the FUSE device is opened, so that the watcher never holds it: a
+        // live device descriptor keeps the connection alive after this process is gone,
+        // leaving every access to the mountpoint blocked rather than failing
+        spawn_unmount_watcher(mountpoint, &watcher_socket, &session_socket)?;
+        if let Some(file) = fuse_mount_sys(mountpoint, options, acl)? {
+            return Ok((file, Some(session_socket)));
+        }
+        // Unprivileged, so dropping the socket ends the watcher, which then finds the
+        // mountpoint unmounted and leaves it alone
+    }
+
+    Err(crate::mnt::context(
+        "mounting with auto_unmount, which needs either a FUSE mount helper or the \
+         privilege to mount directly",
+        no_helper,
+    ))
+}
+
+/// Fork a watcher that unmounts `mountpoint` once `socket` reaches EOF, which is once
+/// every copy of the session's end is closed - including by this process dying, which is
+/// what `auto_unmount` is for.
+///
+/// Unlike the setuid fusermount helper, the watcher keeps this process's credentials, so
+/// it can always tell an unserved mount of its own from one it may not look at. That
+/// distinction is what fusermount needs `allow_other` for.
+///
+/// Forks twice, so that the watcher is init's child rather than this process's: nothing
+/// here would ever reap it, and a caller reaping its own children must not find one it
+/// never started.
+///
+/// The watcher reports itself over a pipe rather than through an exit status, because a
+/// caller that reaps its own children takes that status first and leaves nothing to read.
+/// A mount whose watcher silently failed to start is one that outlives the process that
+/// asked for it to be unmounted, so this has to be known rather than assumed.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn spawn_unmount_watcher(
+    mountpoint: &OsStr,
+    socket: &UnixStream,
+    session_socket: &UnixStream,
+) -> io::Result<()> {
+    // Everything the watcher touches has to be ready before the fork, because only
+    // async-signal-safe work is allowed afterwards, and that rules out allocating
+    let mountpoint = CString::new(mountpoint.as_bytes())?;
+    let socket_fd = socket.as_raw_fd();
+    // The watcher inherits this end too, and holding the only other writer would keep it
+    // from ever reaching EOF, so it closes this before anything else
+    let session_fd = session_socket.as_raw_fd();
+    let (started_read, started_write) = nix::unistd::pipe2(OFlag::O_CLOEXEC)?;
+    let started_write_fd = started_write.as_raw_fd();
+
+    match unsafe { nix::unistd::fork() }? {
+        nix::unistd::ForkResult::Child => match unsafe { nix::unistd::fork() } {
+            Ok(nix::unistd::ForkResult::Child) => {
+                unmount_watcher(&mountpoint, socket_fd, session_fd, started_write_fd)
+            }
+            // Whether or not there is a watcher, this exit closes the copy of the pipe
+            // that came with the fork, and orphans any watcher onto init
+            Ok(nix::unistd::ForkResult::Parent { .. }) | Err(_) => unsafe { libc::_exit(0) },
+        },
+        nix::unistd::ForkResult::Parent { child } => {
+            // Leaves the watcher as the only writer, so that the read below ends either
+            // with its byte or, if there is no watcher, with end of file
+            drop(started_write);
+            // The intermediate exits as soon as it has forked. Its status says nothing
+            // reliable, but it still has to be reaped by someone, and a caller reaping
+            // children of its own may have taken it already
+            while let Err(nix::errno::Errno::EINTR) = nix::sys::wait::waitpid(child, None) {}
+
+            // A signal handler the caller installed without SA_RESTART interrupts this
+            // read, which says nothing about whether there is a watcher
+            let mut started = [0u8; 1];
+            let started = loop {
+                match nix::unistd::read(&started_read, &mut started) {
+                    Ok(read) => break read == 1,
+                    Err(nix::errno::Errno::EINTR) => continue,
+                    Err(_) => break false,
+                }
+            };
+            if started {
+                Ok(())
+            } else {
+                Err(Error::other(
+                    "auto_unmount: failed to fork a watcher to unmount the filesystem",
+                ))
+            }
+        }
+    }
+}
+
+/// Close everything the watcher inherited except `keep` and stdio.
+///
+/// This is not tidiness: the watcher outlives the process it was forked from, so a FUSE
+/// device it holds for some other mount of that process keeps that mount's connection
+/// alive with nothing left to serve it, and every access to it blocks rather than
+/// failing. `close_range()` does it in one call, but it needs Linux 5.9, which the
+/// systems without a mount helper are the least likely to have, so fall back to closing
+/// them one at a time as libfuse does.
+///
+/// Runs in a forked child: async-signal-safe calls only.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn close_inherited_fds(keep: RawFd) {
+    /// Bounds the fallback when the descriptor limit is unset or absurd. Well above any
+    /// real one, and the sweep only ever runs once
+    const MAX_SWEPT_FD: RawFd = 1 << 20;
+
+    unsafe {
+        let above = libc::syscall(
+            libc::SYS_close_range,
+            keep as libc::c_uint + 1,
+            libc::c_uint::MAX,
+            0,
+        ) == 0;
+        let below = keep <= libc::STDERR_FILENO + 1
+            || libc::syscall(
+                libc::SYS_close_range,
+                libc::STDERR_FILENO as libc::c_uint + 1,
+                keep as libc::c_uint - 1,
+                0,
+            ) == 0;
+        if above && below {
+            return;
+        }
+
+        // rlim_cur is not the same width on every target, and may be RLIM_INFINITY
+        let mut limit: libc::rlimit = mem::zeroed();
+        let last = if libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit) == 0 {
+            RawFd::try_from(limit.rlim_cur).unwrap_or(MAX_SWEPT_FD)
+        } else {
+            MAX_SWEPT_FD
+        }
+        .min(MAX_SWEPT_FD);
+        for fd in (libc::STDERR_FILENO + 1)..last {
+            if fd != keep {
+                libc::close(fd);
+            }
+        }
+    }
+}
+
+/// Runs in a forked child, so every call it makes must be async-signal-safe: no
+/// allocation, and no way to report an error even if one occurs.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn unmount_watcher(mountpoint: &CStr, socket_fd: RawFd, session_fd: RawFd, started_fd: RawFd) -> ! {
+    unsafe {
+        // Holding the session's end here would keep the read below from ever reaching
+        // EOF. The sweep further down would close it too, but it is bounded by a
+        // descriptor limit that this one descriptor must not depend on
+        libc::close(session_fd);
+
+        // Leave the caller's session and block its signals, so that a Ctrl-C on its
+        // terminal cannot kill the watcher before it has done its job. Blocking them
+        // first also keeps the handshake below from being interrupted
+        libc::setsid();
+        let mut signals: libc::sigset_t = mem::zeroed();
+        libc::sigfillset(&mut signals);
+        libc::sigprocmask(libc::SIG_BLOCK, &signals, ptr::null_mut());
+
+        // Reaching this at all is what the caller is waiting to hear: everything from
+        // here on either cannot fail or does not decide whether there is a watcher. The
+        // sweep below closes the pipe, which is all that is left to do with it
+        libc::write(started_fd, [1u8].as_ptr().cast(), 1);
+
+        close_inherited_fds(socket_fd);
+
+        let mut buf = [0u8; 16];
+        loop {
+            let read = libc::read(socket_fd, buf.as_mut_ptr().cast(), buf.len());
+            if read == 0 || (read < 0 && nix::errno::Errno::last() != nix::errno::Errno::EINTR) {
+                break;
+            }
+        }
+
+        // Unmount only a mountpoint that is still this filesystem and no longer served,
+        // which is exactly when opening it fails with ENOTCONN. A successful open means
+        // it was unmounted already, or that something else has taken the path since, and
+        // unmounting would then take out the wrong filesystem
+        let fd = libc::open(mountpoint.as_ptr(), libc::O_RDONLY | libc::O_CLOEXEC);
+        if fd >= 0 {
+            libc::close(fd);
+        } else if nix::errno::Errno::last() == nix::errno::Errno::ENOTCONN {
+            libc::umount2(mountpoint.as_ptr(), libc::MNT_DETACH);
+        }
+        libc::_exit(0)
+    }
 }
 
 /// Only reached once `libc_umount()` has failed with EPERM, i.e. unprivileged, so
@@ -244,19 +455,18 @@ unsafe fn clear_cloexec_in_pre_exec(command: &mut Command, fd: BorrowedFd<'_>) {
 }
 
 fn fuse_mount_fusermount(
+    fusermount_bin: &str,
     mountpoint: &OsStr,
     options: &[MountOption],
     acl: SessionACL,
 ) -> Result<(DevFuse, Option<UnixStream>), Error> {
-    let fusermount_bin = detect_fusermount_bin()?;
-
     if fusermount_bin.ends_with(MOUNT_FUSEFS_BIN) {
-        return fuse_mount_mount_fusefs(&fusermount_bin, mountpoint, options, acl);
+        return fuse_mount_mount_fusefs(fusermount_bin, mountpoint, options, acl);
     }
 
     let (child_socket, receive_socket) = UnixStream::pair()?;
 
-    let mut builder = Command::new(&fusermount_bin);
+    let mut builder = Command::new(fusermount_bin);
     builder.stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut options_strs: Vec<String> = options.iter().map(option_to_escaped_string).collect();
     options_strs.extend(acl.to_mount_option().map(|s| s.to_owned()));
@@ -372,7 +582,7 @@ fn fuse_mount_mount_fusefs(
 }
 
 // If returned option is none. Then fusermount binary should be tried
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(any(target_os = "linux", target_os = "android", target_os = "macos"))]
 fn fuse_mount_sys(
     mountpoint: &OsStr,
     options: &[MountOption],
@@ -385,9 +595,6 @@ fn fuse_mount_sys(
         .metadata()?
         .permissions()
         .mode();
-
-    // Auto unmount requests must be sent to fusermount binary
-    assert!(!options.contains(&MountOption::AutoUnmount));
 
     let file = DevFuse::open()?;
     assert!(
@@ -416,14 +623,14 @@ fn fuse_mount_sys(
         mount_options.push_str(acl_option);
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     let mut flags = nix::mount::MsFlags::empty();
     #[cfg(target_os = "macos")]
     let mut flags = nix::mount::MntFlags::empty();
 
     if !options.contains(&MountOption::Dev) {
         // Default to nodev
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "android"))]
         {
             flags |= nix::mount::MsFlags::MS_NODEV;
         }
@@ -434,7 +641,7 @@ fn fuse_mount_sys(
     }
     if !options.contains(&MountOption::Suid) {
         // Default to nosuid
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "android"))]
         {
             flags |= nix::mount::MsFlags::MS_NOSUID;
         }
@@ -465,7 +672,7 @@ fn fuse_mount_sys(
         source = name;
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     let result = nix::mount::mount(
         Some(source),
         mountpoint,
@@ -488,7 +695,7 @@ fn fuse_mount_sys(
     }
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[cfg(not(any(target_os = "linux", target_os = "android", target_os = "macos")))]
 fn fuse_mount_sys(
     _mountpoint: &OsStr,
     _options: &[MountOption],

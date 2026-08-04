@@ -43,7 +43,14 @@ pub enum MountOption {
     /* Parameterless options */
     /// Automatically unmount when the mounting process exits
     ///
-    /// `AutoUnmount` requires `AllowOther` or `AllowRoot`. If `AutoUnmount` is set and neither `Allow...` is set, the FUSE configuration must permit `allow_other`, otherwise mounting will fail.
+    /// Unmounting once that process is gone takes something that outlives it: normally the
+    /// `fusermount` helper, or, on systems that ship no FUSE userspace, a watcher fuser
+    /// forks itself, which takes the privilege to mount directly. With neither available
+    /// the mount fails, rather than quietly not honouring the option.
+    ///
+    /// Requires a [`SessionACL`](crate::SessionACL) other than `SessionACL::Owner`, because
+    /// the helper does its unmount as root, and a filesystem that admits only its owner
+    /// refuses root the look at the mountpoint that decides whether to unmount.
     AutoUnmount,
     /// Enable permission checking in the kernel
     DefaultPermissions,
@@ -144,7 +151,7 @@ pub(crate) fn check_option_values(options: &[MountOption]) -> Result<(), io::Err
             // Linux is the only platform where every consumer of fsname either takes it
             // verbatim (as the mount(2) source) or decodes the escapes added by
             // option_to_escaped_string
-            MountOption::FSName(name) if cfg!(target_os = "linux") => {
+            MountOption::FSName(name) if cfg!(any(target_os = "linux", target_os = "android")) => {
                 check_option_value(option, name, &['\0'])?;
             }
             MountOption::FSName(value)
@@ -268,7 +275,7 @@ pub(crate) fn option_group(option: &MountOption) -> MountOptionGroup {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 #[allow(dead_code)]
 pub(crate) fn option_to_flag(option: &MountOption) -> io::Result<nix::mount::MsFlags> {
     match option {
@@ -393,7 +400,7 @@ mod test {
         // Only on Linux can fsname be escaped everywhere it is used
         assert_eq!(
             check_option_values(&[FSName("comma,and\\backslash".to_owned())]).is_ok(),
-            cfg!(target_os = "linux")
+            cfg!(any(target_os = "linux", target_os = "android"))
         );
         assert!(
             check_option_values(&[FSName("plain".to_owned()), CUSTOM("plain".to_owned())]).is_ok()
