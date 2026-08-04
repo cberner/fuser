@@ -1174,6 +1174,22 @@ pub trait Filesystem: Send + Sync + 'static {
         reply.error(Errno::ENOSYS);
     }
 
+    /// Synchronize the whole filesystem, for the `syncfs(2)` system call.
+    ///
+    /// `ino` is the root inode. Replying before everything the filesystem holds is durable
+    /// defeats the point of the call, so a filesystem that cannot make that guarantee is
+    /// better off leaving this unimplemented, which reports `ENOSYS` and makes the kernel
+    /// stop asking for the lifetime of the connection.
+    ///
+    /// Note that the kernel only propagates `syncfs(2)` on `fuseblk` and virtiofs
+    /// connections. A filesystem mounted by fuser is neither, so this is reachable only
+    /// for a session built with [`Session::from_fd`] on such a connection. Everywhere
+    /// else `syncfs(2)` succeeds without asking the filesystem anything.
+    fn syncfs(&self, _req: &Request, ino: INodeNo, reply: ReplyEmpty) {
+        warn!("[Not Implemented] syncfs(ino: {ino:#x?})");
+        reply.error(Errno::ENOSYS);
+    }
+
     /// macOS only: Rename the volume. Set `fuse_init_out.flags` during init to
     /// `FUSE_VOL_RENAME` to enable
     #[cfg(target_os = "macos")]

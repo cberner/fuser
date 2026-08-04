@@ -1603,6 +1603,20 @@ mod op {
         }
     }
 
+    /// Synchronize the whole filesystem.
+    ///
+    /// The kernel sends this for `syncfs(2)`, and only on connections where it
+    /// propagates that call at all, which are `fuseblk` and virtiofs mounts. It carries
+    /// no arguments beyond the root inode the request is addressed to.
+    #[derive(Debug)]
+    pub(crate) struct SyncFs<'a> {
+        #[expect(dead_code)]
+        header: &'a fuse_in_header,
+        /// Read to check the length the kernel sent, and reserved by the protocol
+        #[expect(dead_code)]
+        arg: &'a fuse_syncfs_in,
+    }
+
     /// `MacOS` only: Rename the volume. Set `fuse_init_out.flags` during init to
     /// `FUSE_VOL_RENAME` to enable
     #[cfg(target_os = "macos")]
@@ -1910,6 +1924,10 @@ mod op {
                 header,
                 arg: data.fetch()?,
             }),
+            fuse_opcode::FUSE_SYNCFS => Operation::SyncFs(SyncFs {
+                header,
+                arg: data.fetch()?,
+            }),
 
             #[cfg(target_os = "macos")]
             fuse_opcode::FUSE_SETVOLNAME => Operation::SetVolName(SetVolName {
@@ -1984,6 +2002,7 @@ pub(crate) enum Operation<'a> {
     Rename2(Rename2<'a>),
     Lseek(Lseek<'a>),
     CopyFileRange(CopyFileRange<'a>),
+    SyncFs(SyncFs<'a>),
 
     #[cfg(target_os = "macos")]
     SetVolName(SetVolName<'a>),
@@ -2160,6 +2179,7 @@ impl fmt::Display for Operation<'_> {
                 x.dest(),
                 x.len()
             ),
+            Operation::SyncFs(_) => write!(f, "SYNCFS"),
 
             #[cfg(target_os = "macos")]
             Operation::SetVolName(x) => write!(f, "SETVOLNAME name {:?}", x.name()),
@@ -2666,5 +2686,46 @@ mod tests {
             }
             _ => panic!("Unexpected request operation"),
         }
+    }
+
+    // 40 byte header + 8 byte fuse_syncfs_in, addressed to the root inode
+    #[cfg(target_endian = "little")]
+    const SYNCFS_REQUEST: AlignedData<[u8; 48]> = AlignedData([
+        0x30, 0x00, 0x00, 0x00, 0x32, 0x00, 0x00, 0x00, // len, opcode
+        0x0d, 0xf0, 0xad, 0xba, 0xef, 0xbe, 0xad, 0xde, // unique
+        0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // nodeid
+        0x0d, 0xd0, 0x01, 0xc0, 0xfe, 0xca, 0x01, 0xc0, // uid, gid
+        0x5e, 0xba, 0xde, 0xc0, 0x00, 0x00, 0x00, 0x00, // pid, padding
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // padding
+    ]);
+
+    #[cfg(target_endian = "big")]
+    const SYNCFS_REQUEST: AlignedData<[u8; 48]> = AlignedData([
+        0x00, 0x00, 0x00, 0x30, 0x00, 0x00, 0x00, 0x32, // len, opcode
+        0xde, 0xad, 0xbe, 0xef, 0xba, 0xad, 0xf0, 0x0d, // unique
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, // nodeid
+        0xc0, 0x01, 0xd0, 0x0d, 0xc0, 0x01, 0xca, 0xfe, // uid, gid
+        0xc0, 0xde, 0xba, 0x5e, 0x00, 0x00, 0x00, 0x00, // pid, padding
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // padding
+    ]);
+
+    #[test]
+    fn syncfs() {
+        let req = AnyRequest::try_from(&SYNCFS_REQUEST[..]).unwrap();
+        assert_eq!(req.header.opcode, 50);
+        assert_eq!(req.nodeid(), INodeNo::ROOT);
+        assert!(matches!(req.operation().unwrap(), Operation::SyncFs(_)));
+    }
+
+    /// The kernel sends the whole `fuse_syncfs_in`, and a request whose header is honest
+    /// about carrying none of it is not one this can answer
+    #[test]
+    fn syncfs_without_its_argument() {
+        let mut short = AlignedData([0u8; 40]);
+        short.0.copy_from_slice(&SYNCFS_REQUEST[..40]);
+        short.0[..4].copy_from_slice(&40u32.to_ne_bytes());
+
+        let req = AnyRequest::try_from(&short[..]).unwrap();
+        assert!(req.operation().is_err());
     }
 }

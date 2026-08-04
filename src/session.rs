@@ -825,6 +825,64 @@ mod test {
         ManuallyDrop::into_inner(tmp);
     }
 
+    /// The kernel fills a request's uid, gid and pid from the task that caused it, for
+    /// every operation that goes through fuse_simple_request(). Every access decision
+    /// fuser makes rests on that - SessionACL, and which operations are exempt from it
+    /// because the kernel issues them with no caller - so it is worth pinning down rather
+    /// than assuming. `FUSE_ARGS()` zero-initializes, so a header fuser had merely copied
+    /// from there would carry uid 0 and pid 0.
+    #[test]
+    fn requests_carry_the_calling_task() {
+        struct CallerFs {
+            seen: Arc<Mutex<Option<(u32, u32)>>>,
+        }
+        impl Filesystem for CallerFs {
+            fn getattr(
+                &self,
+                req: &Request,
+                _ino: crate::INodeNo,
+                _fh: Option<crate::FileHandle>,
+                reply: crate::ReplyAttr,
+            ) {
+                *self.seen.lock() = Some((req.uid(), req.pid()));
+                reply.error(Errno::ENOSYS);
+            }
+        }
+
+        let tmp = ManuallyDrop::new(tempfile::tempdir().unwrap());
+        let mountpoint = tmp.path().canonicalize().unwrap();
+        let seen = Arc::new(Mutex::new(None));
+        let bg = Session::new(
+            CallerFs { seen: seen.clone() },
+            &mountpoint,
+            &Config::default(),
+        )
+        .unwrap()
+        .spawn()
+        .unwrap();
+
+        // Any operation will do; this one is answered from the mountpoint's root inode
+        let _ = std::fs::metadata(&mountpoint);
+        let seen = seen.lock().take();
+        drop(bg);
+        ManuallyDrop::into_inner(tmp);
+
+        let (uid, pid) = seen.expect("the filesystem must have been asked for the root inode");
+        assert_eq!(
+            uid,
+            geteuid().as_raw(),
+            "the request must carry the caller's uid"
+        );
+        // Discriminating even when the test runs as root, where the uid above is 0 either
+        // way. The kernel takes this from task_pid(current), so it is the id of the thread
+        // that made the call rather than of the process
+        assert_eq!(
+            pid,
+            nix::unistd::gettid().as_raw() as u32,
+            "the request must carry the calling thread's id"
+        );
+    }
+
     /// Dropping a BackgroundSession must unmount the filesystem and wait for the
     /// session to end, so that Filesystem::destroy has run when drop returns.
     #[test]
