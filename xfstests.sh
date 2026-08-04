@@ -135,6 +135,12 @@ echo "generic/598" >> xfs_excludes.txt
 # and the OOM killer takes it
 echo "generic/551" >> xfs_excludes.txt
 
+# TODO: requires reporting inode flags through statx, which FUSE_GETATTR has no field for.
+# The kernel fills stx_attributes from its own inode flags, and it never learns about ours,
+# so every flag the test sets reads back as unset. FUSE_STATX (ABI 7.38) carries
+# stx_attributes and would let this run, but fuser does not implement that opcode yet
+echo "generic/424" >> xfs_excludes.txt
+
 # fsx against hugepage-backed buffers, which cannot be set up here: MADV_COLLAPSE is refused
 # and init_hugepages_buf fails before any filesystem operation runs
 echo "generic/759" >> xfs_excludes.txt

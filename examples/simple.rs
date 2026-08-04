@@ -110,6 +110,27 @@ struct Args {
 }
 
 const BLOCK_SIZE: u32 = 512;
+
+// Inode flags, as `chattr` sets them and `lsattr` reports them. Only these three change
+// behavior, and only Linux has the ioctls that set them - but the fields they gate are not
+// themselves Linux-only, so the constants are not gated either
+const FS_IMMUTABLE_FL: u32 = 0x0000_0010;
+const FS_APPEND_FL: u32 = 0x0000_0020;
+const FS_NOATIME_FL: u32 = 0x0000_0080;
+
+// The rest are stored and reported so that they round-trip, which only the Linux ioctls do
+#[cfg(target_os = "linux")]
+const FS_SECRM_FL: u32 = 0x0000_0001;
+#[cfg(target_os = "linux")]
+const FS_UNRM_FL: u32 = 0x0000_0002;
+#[cfg(target_os = "linux")]
+const FS_SYNC_FL: u32 = 0x0000_0008;
+#[cfg(target_os = "linux")]
+const FS_NODUMP_FL: u32 = 0x0000_0040;
+#[cfg(target_os = "linux")]
+const FS_DIRSYNC_FL: u32 = 0x0001_0000;
+#[cfg(target_os = "linux")]
+const FS_TOPDIR_FL: u32 = 0x0002_0000;
 const MAX_NAME_LENGTH: u32 = 255;
 const MAX_FILE_SIZE: u64 = 1024 * 1024 * 1024 * 1024;
 
@@ -118,6 +139,78 @@ const MAX_FILE_SIZE: u64 = 1024 * 1024 * 1024 * 1024;
 // is just a toy
 const FILE_HANDLE_READ_BIT: u64 = 1 << 63;
 const FILE_HANDLE_WRITE_BIT: u64 = 1 << 62;
+
+/// The flags above are the whole set this filesystem accepts. Refusing the others is what
+/// tells `chattr` that, say, compression is unavailable here
+#[cfg(target_os = "linux")]
+const SUPPORTED_FS_FLAGS: u32 = FS_SECRM_FL
+    | FS_UNRM_FL
+    | FS_SYNC_FL
+    | FS_IMMUTABLE_FL
+    | FS_APPEND_FL
+    | FS_NODUMP_FL
+    | FS_NOATIME_FL
+    | FS_DIRSYNC_FL
+    | FS_TOPDIR_FL;
+
+// The same flags in the unrelated encoding that `fsxattr` uses, which is the one `xfs_io
+// chattr` and `xfs_io lsattr` speak
+#[cfg(target_os = "linux")]
+const FS_XFLAG_IMMUTABLE: u32 = 0x0000_0008;
+#[cfg(target_os = "linux")]
+const FS_XFLAG_APPEND: u32 = 0x0000_0010;
+#[cfg(target_os = "linux")]
+const FS_XFLAG_SYNC: u32 = 0x0000_0020;
+#[cfg(target_os = "linux")]
+const FS_XFLAG_NOATIME: u32 = 0x0000_0040;
+#[cfg(target_os = "linux")]
+const FS_XFLAG_NODUMP: u32 = 0x0000_0080;
+
+/// `struct fsxattr`, of which only the leading `fsx_xflags` is meaningful here
+#[cfg(target_os = "linux")]
+const FSXATTR_SIZE: usize = 28;
+
+// The kernel turns chattr(1), lsattr(1) and their xfs_io equivalents into these four ioctls
+#[cfg(target_os = "linux")]
+const FS_IOC_GETFLAGS: u32 = nix::request_code_read!('f', 1, size_of::<libc::c_long>()) as u32;
+#[cfg(target_os = "linux")]
+const FS_IOC_SETFLAGS: u32 = nix::request_code_write!('f', 2, size_of::<libc::c_long>()) as u32;
+#[cfg(target_os = "linux")]
+const FS_IOC_FSGETXATTR: u32 = nix::request_code_read!('X', 31, FSXATTR_SIZE) as u32;
+#[cfg(target_os = "linux")]
+const FS_IOC_FSSETXATTR: u32 = nix::request_code_write!('X', 32, FSXATTR_SIZE) as u32;
+
+/// The `FS_*_FL` flags this filesystem honors, in the `fsxattr` encoding
+#[cfg(target_os = "linux")]
+const FLAG_TO_XFLAG: [(u32, u32); 5] = [
+    (FS_IMMUTABLE_FL, FS_XFLAG_IMMUTABLE),
+    (FS_APPEND_FL, FS_XFLAG_APPEND),
+    (FS_SYNC_FL, FS_XFLAG_SYNC),
+    (FS_NOATIME_FL, FS_XFLAG_NOATIME),
+    (FS_NODUMP_FL, FS_XFLAG_NODUMP),
+];
+
+#[cfg(target_os = "linux")]
+fn xflags_from_flags(flags: u32) -> u32 {
+    FLAG_TO_XFLAG
+        .iter()
+        .filter(|(flag, _)| flags & flag != 0)
+        .fold(0, |xflags, (_, xflag)| xflags | xflag)
+}
+
+/// The inverse of [`xflags_from_flags`], or `None` if a flag with no counterpart was asked for
+#[cfg(target_os = "linux")]
+fn flags_from_xflags(xflags: u32) -> Option<u32> {
+    let known = FLAG_TO_XFLAG
+        .iter()
+        .fold(0, |known, (_, xflag)| known | xflag);
+    (xflags & !known == 0).then(|| {
+        FLAG_TO_XFLAG
+            .iter()
+            .filter(|(_, xflag)| xflags & xflag != 0)
+            .fold(0, |flags, (flag, _)| flags | flag)
+    })
+}
 
 const FMODE_EXEC: i32 = 0x20;
 
@@ -280,6 +373,12 @@ fn xattr_access_check(
     inode_attrs: &InodeAttributes,
     request: &Request,
 ) -> Result<(), Errno> {
+    // Extended attributes are part of the inode, so both flags cover them: neither an
+    // immutable nor an append-only inode accepts a change to one
+    if access_mask != libc::R_OK {
+        inode_attrs.check_removable()?;
+    }
+
     match parse_xattr_namespace(key)? {
         XattrNamespace::Security => {
             if access_mask != libc::R_OK && request.uid() != 0 {
@@ -371,7 +470,41 @@ struct InodeAttributes {
     pub gid: u32,
     /// Device number, which only a character or block device carries
     pub rdev: u32,
+    /// Inode flags, in the `FS_*_FL` encoding that `chattr` uses
+    pub flags: u32,
     pub xattrs: BTreeMap<Vec<u8>, Vec<u8>>,
+}
+
+impl InodeAttributes {
+    fn is_immutable(&self) -> bool {
+        self.flags & FS_IMMUTABLE_FL != 0
+    }
+
+    fn is_append_only(&self) -> bool {
+        self.flags & FS_APPEND_FL != 0
+    }
+
+    fn is_noatime(&self) -> bool {
+        self.flags & FS_NOATIME_FL != 0
+    }
+
+    /// Nothing writes to an immutable inode. A directory counts: adding an entry to one is a
+    /// write to the directory, so a create inside it fails before permissions are consulted
+    fn check_writable(&self) -> Result<(), Errno> {
+        if self.is_immutable() {
+            return Err(Errno::EPERM);
+        }
+        Ok(())
+    }
+
+    /// Unlinking or renaming needs this of both the entry and its parent. Append-only refuses
+    /// as well, since it exists to keep what has already been written
+    fn check_removable(&self) -> Result<(), Errno> {
+        if self.is_immutable() || self.is_append_only() {
+            return Err(Errno::EPERM);
+        }
+        Ok(())
+    }
 }
 
 impl From<InodeAttributes> for fuser::FileAttr {
@@ -567,6 +700,12 @@ impl SimpleFS {
     /// `readdir()` and `copy_file_range()` are not, and would have to carry it over from the
     /// `open()` that set it, so a caller using it there still moves atime
     fn touch_atime(&self, attrs: &mut InodeAttributes) {
+        // `chattr +A` asks for exactly this: leave the access time alone. Honoring it here
+        // covers every caller, including the readdir and copy_file_range that cannot see the
+        // opener's O_NOATIME
+        if attrs.is_noatime() {
+            return;
+        }
         let now = time_now();
         let a_day_ago = now.0 - 24 * 60 * 60;
         if attrs.last_accessed <= attrs.last_modified
@@ -627,6 +766,12 @@ impl SimpleFS {
 
         let mut attrs = self.get_inode(inode)?;
 
+        // Both flags refuse a truncate: immutable admits no change at all, and append-only
+        // admits none that could drop what is already there
+        if attrs.is_immutable() || attrs.is_append_only() {
+            return Err(Errno::EPERM);
+        }
+
         if !check_access(
             attrs.uid,
             attrs.gid,
@@ -680,6 +825,7 @@ impl SimpleFS {
         }
 
         let mut parent_attrs = self.get_inode(parent)?;
+        parent_attrs.check_writable()?;
 
         if !check_access(
             parent_attrs.uid,
@@ -740,6 +886,7 @@ impl Filesystem for SimpleFS {
                 uid: 0,
                 gid: 0,
                 rdev: 0,
+                flags: 0,
                 xattrs: BTreeMap::default(),
             };
             self.write_inode(&root);
@@ -819,6 +966,21 @@ impl Filesystem for SimpleFS {
                 return;
             }
         };
+
+        // An immutable inode takes no attribute change at all. An append-only one takes only
+        // the timestamp updates that writing it produces, not an explicit time, mode or owner
+        if attrs.is_immutable()
+            || (attrs.is_append_only()
+                && (mode.is_some()
+                    || uid.is_some()
+                    || gid.is_some()
+                    || size.is_some()
+                    || matches!(_atime, Some(TimeOrNow::SpecificTime(_)))
+                    || matches!(_mtime, Some(TimeOrNow::SpecificTime(_)))))
+        {
+            reply.error(Errno::EPERM);
+            return;
+        }
 
         if let Some(mode) = mode {
             debug!("chmod() called with {ino:?}, {mode:o}");
@@ -1042,6 +1204,11 @@ impl Filesystem for SimpleFS {
             }
         };
 
+        if let Err(error_code) = parent_attrs.check_writable() {
+            reply.error(error_code);
+            return;
+        }
+
         if !check_access(
             parent_attrs.uid,
             parent_attrs.gid,
@@ -1093,6 +1260,7 @@ impl Filesystem for SimpleFS {
                 // Every other type reports 0, as a local filesystem does
                 _ => 0,
             },
+            flags: 0,
             xattrs: BTreeMap::default(),
         };
         self.write_inode(&attrs);
@@ -1143,6 +1311,11 @@ impl Filesystem for SimpleFS {
             }
         };
 
+        if let Err(error_code) = parent_attrs.check_writable() {
+            reply.error(error_code);
+            return;
+        }
+
         if !check_access(
             parent_attrs.uid,
             parent_attrs.gid,
@@ -1180,6 +1353,7 @@ impl Filesystem for SimpleFS {
             uid: _req.uid(),
             gid: creation_gid(&parent_attrs, _req.gid()),
             rdev: 0,
+            flags: 0,
             xattrs: BTreeMap::default(),
         };
         self.write_inode(&attrs);
@@ -1217,6 +1391,14 @@ impl Filesystem for SimpleFS {
                 return;
             }
         };
+
+        if let Err(error_code) = parent_attrs
+            .check_removable()
+            .and_then(|()| attrs.check_removable())
+        {
+            reply.error(error_code);
+            return;
+        }
 
         if !check_access(
             parent_attrs.uid,
@@ -1276,6 +1458,16 @@ impl Filesystem for SimpleFS {
             }
         };
 
+        // Ahead of the emptiness check, as Linux tests the flags before it reaches the
+        // filesystem at all: an immutable directory refuses the removal whatever is in it
+        if let Err(error_code) = parent_attrs
+            .check_removable()
+            .and_then(|()| attrs.check_removable())
+        {
+            reply.error(error_code);
+            return;
+        }
+
         // Directories always have a self and parent link
         if self
             .get_directory_content(INodeNo(attrs.inode))
@@ -1286,6 +1478,7 @@ impl Filesystem for SimpleFS {
             reply.error(Errno::ENOTEMPTY);
             return;
         }
+
         if !check_access(
             parent_attrs.uid,
             parent_attrs.gid,
@@ -1342,6 +1535,11 @@ impl Filesystem for SimpleFS {
             }
         };
 
+        if let Err(error_code) = parent_attrs.check_writable() {
+            reply.error(error_code);
+            return;
+        }
+
         if !check_access(
             parent_attrs.uid,
             parent_attrs.gid,
@@ -1372,6 +1570,7 @@ impl Filesystem for SimpleFS {
             uid: _req.uid(),
             gid: creation_gid(&parent_attrs, _req.gid()),
             rdev: 0,
+            flags: 0,
             xattrs: BTreeMap::default(),
         };
 
@@ -1481,6 +1680,23 @@ impl Filesystem for SimpleFS {
                     return;
                 }
             }
+        }
+
+        // A rename removes an entry from one directory and creates one in another, so every
+        // inode it touches has to allow its side of that
+        let destination = self.lookup_name(newparent, newname);
+        if let Err(error_code) = parent_attrs
+            .check_removable()
+            .and_then(|()| inode_attrs.check_removable())
+            .and_then(|()| new_parent_attrs.check_writable())
+            .and_then(|()| {
+                destination
+                    .as_ref()
+                    .map_or(Ok(()), InodeAttributes::check_removable)
+            })
+        {
+            reply.error(error_code);
+            return;
         }
 
         // Linux's RENAME_EXCHANGE and macOS's RENAME_SWAP both mean: atomically exchange the
@@ -1647,6 +1863,7 @@ impl Filesystem for SimpleFS {
                 uid: _req.uid(),
                 gid: creation_gid(&parent_attrs, _req.gid()),
                 rdev: 0,
+                flags: 0,
                 xattrs: BTreeMap::default(),
             };
             self.write_inode(&whiteout_attrs);
@@ -1701,7 +1918,10 @@ impl Filesystem for SimpleFS {
                 return;
             }
         };
-        if let Err(error_code) = self.insert_link(_req, newparent, newname, ino, attrs.kind) {
+        if let Err(error_code) = attrs
+            .check_removable()
+            .and_then(|()| self.insert_link(_req, newparent, newname, ino, attrs.kind))
+        {
             reply.error(error_code);
         } else {
             attrs.hardlinks += 1;
@@ -1744,6 +1964,19 @@ impl Filesystem for SimpleFS {
 
         match self.get_inode(_ino) {
             Ok(mut attr) => {
+                // Opening for write is where both flags bite. Linux checks here rather than on
+                // every write, so a file made immutable afterwards stays writable through a
+                // descriptor that was already open
+                if write && attr.is_immutable() {
+                    reply.error(Errno::EPERM);
+                    return;
+                }
+                if attr.is_append_only()
+                    && ((write && flags.0 & libc::O_APPEND == 0) || flags.0 & libc::O_TRUNC != 0)
+                {
+                    reply.error(Errno::EPERM);
+                    return;
+                }
                 if check_access(
                     attr.uid,
                     attr.gid,
@@ -2192,6 +2425,11 @@ impl Filesystem for SimpleFS {
             }
         };
 
+        if let Err(error_code) = parent_attrs.check_writable() {
+            reply.error(error_code);
+            return;
+        }
+
         if !check_access(
             parent_attrs.uid,
             parent_attrs.gid,
@@ -2239,6 +2477,7 @@ impl Filesystem for SimpleFS {
             uid: req.uid(),
             gid: creation_gid(&parent_attrs, req.gid()),
             rdev: 0,
+            flags: 0,
             xattrs: BTreeMap::default(),
         };
         self.write_inode(&attrs);
@@ -2265,6 +2504,79 @@ impl Filesystem for SimpleFS {
         );
     }
 
+    /// Serves the four ioctls the kernel turns chattr(1) and lsattr(1) into. The kernel does
+    /// the ownership and `CAP_LINUX_IMMUTABLE` checks before sending them, so all that is left
+    /// here is to store the flags and to refuse the ones this filesystem does not honor
+    #[cfg(target_os = "linux")]
+    fn ioctl(
+        &self,
+        _req: &Request,
+        ino: INodeNo,
+        _fh: FileHandle,
+        _flags: fuser::IoctlFlags,
+        cmd: u32,
+        in_data: &[u8],
+        _out_size: u32,
+        reply: fuser::ReplyIoctl,
+    ) {
+        let mut attrs = match self.get_inode(ino) {
+            Ok(attrs) => attrs,
+            Err(error_code) => {
+                reply.error(error_code);
+                return;
+            }
+        };
+
+        // Both setters arrive as the full new flag set, not as a delta
+        let new_flags = match cmd {
+            FS_IOC_GETFLAGS => {
+                reply.ioctl(0, &attrs.flags.to_ne_bytes());
+                return;
+            }
+            FS_IOC_FSGETXATTR => {
+                let mut fsxattr = [0; FSXATTR_SIZE];
+                fsxattr[..size_of::<u32>()]
+                    .copy_from_slice(&xflags_from_flags(attrs.flags).to_ne_bytes());
+                reply.ioctl(0, &fsxattr);
+                return;
+            }
+            FS_IOC_SETFLAGS => {
+                let Ok(requested) = in_data.try_into().map(u32::from_ne_bytes) else {
+                    reply.error(Errno::EINVAL);
+                    return;
+                };
+                if requested & !SUPPORTED_FS_FLAGS != 0 {
+                    reply.error(Errno::EOPNOTSUPP);
+                    return;
+                }
+                requested
+            }
+            FS_IOC_FSSETXATTR => {
+                if in_data.len() != FSXATTR_SIZE {
+                    reply.error(Errno::EINVAL);
+                    return;
+                }
+                let xflags = u32::from_ne_bytes(in_data[..size_of::<u32>()].try_into().unwrap());
+                let Some(flags) = flags_from_xflags(xflags) else {
+                    reply.error(Errno::EOPNOTSUPP);
+                    return;
+                };
+                flags
+            }
+            _ => {
+                reply.error(Errno::ENOTTY);
+                return;
+            }
+        };
+
+        if new_flags != attrs.flags {
+            attrs.flags = new_flags;
+            attrs.last_metadata_changed = time_now();
+            self.write_inode(&attrs);
+        }
+        reply.ioctl(0, &[]);
+    }
+
     #[cfg(target_os = "linux")]
     fn fallocate(
         &self,
@@ -2276,6 +2588,22 @@ impl Filesystem for SimpleFS {
         mode: i32,
         reply: ReplyEmpty,
     ) {
+        let attrs = match self.get_inode(ino) {
+            Ok(attrs) => attrs,
+            Err(error_code) => {
+                reply.error(error_code);
+                return;
+            }
+        };
+        // Preallocation past the end is the one mode an append-only file accepts, since it
+        // adds space without touching what is there. An immutable one accepts none
+        if attrs.is_immutable()
+            || (attrs.is_append_only() && mode & !libc::FALLOC_FL_KEEP_SIZE != 0)
+        {
+            reply.error(Errno::EPERM);
+            return;
+        }
+
         let path = self.content_path(ino);
 
         // A filesystem knows roughly what it has and refuses an impossible request outright.
@@ -2355,6 +2683,20 @@ impl Filesystem for SimpleFS {
         if !Self::check_file_handle_write(dest_fh.into()) {
             reply.error(Errno::EACCES);
             return;
+        }
+        // Unlike a plain write, this is checked against the destination's flags every time
+        // rather than only at open, matching what Linux does for the copy_file_range syscall
+        match self.get_inode(dest_inode) {
+            Ok(attrs) => {
+                if let Err(error_code) = attrs.check_writable() {
+                    reply.error(error_code);
+                    return;
+                }
+            }
+            Err(error_code) => {
+                reply.error(error_code);
+                return;
+            }
         }
 
         let src_path = self.content_path(src_inode);
