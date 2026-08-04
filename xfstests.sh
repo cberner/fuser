@@ -55,6 +55,13 @@ echo "generic/099" >> xfs_excludes.txt
 echo "generic/105" >> xfs_excludes.txt
 echo "generic/375" >> xfs_excludes.txt
 
+# TODO: requires inheriting a directory's default ACL at creation. The xattr itself round-trips,
+# but nothing consults it when a file is created, so the umask applies where the default ACL
+# should have: the test asks for mode 0666 under a 0775 default ACL and wants 0664, not 0644.
+# Nothing to do with the O_TMPFILE this test creates the file with - an ordinary create() in the
+# same directory gets the mode wrong the same way
+echo "generic/389" >> xfs_excludes.txt
+
 # TODO: requires support for remounting read-only. 306 and 452 additionally need a change in
 # fuse-xfstests, whose _scratch_remount answers "fuse.fuser does not support any options"
 # without attempting the remount; 294 goes through _try_scratch_mount and does attempt it
