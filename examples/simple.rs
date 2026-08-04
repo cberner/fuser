@@ -730,6 +730,17 @@ impl SimpleFS {
         rmp_serde::encode::write(&mut file, inode).unwrap();
     }
 
+    /// Drops one open handle and reclaims the inode if that was the last thing keeping it.
+    /// The decrement has to be written back before [`Self::gc_inode`] is consulted, since an
+    /// inode with no links is held on disk only by its open handles - an anonymous file from
+    /// [`Filesystem::tmpfile`] has never had a link, and a file unlinked while open has lost
+    /// its last one, and either way closing the final handle is what makes it collectable
+    fn close_handle(&self, attrs: &mut InodeAttributes) {
+        attrs.open_file_handles = attrs.open_file_handles.saturating_sub(1);
+        self.write_inode(attrs);
+        self.gc_inode(attrs);
+    }
+
     // Check whether a file should be removed from storage. Should be called after decrementing
     // the link count, or closing a file handle
     fn gc_inode(&self, inode: &InodeAttributes) -> bool {
@@ -2132,7 +2143,7 @@ impl Filesystem for SimpleFS {
         reply: ReplyEmpty,
     ) {
         if let Ok(mut attrs) = self.get_inode(_ino) {
-            attrs.open_file_handles -= 1;
+            self.close_handle(&mut attrs);
         }
         reply.ok();
     }
@@ -2229,7 +2240,7 @@ impl Filesystem for SimpleFS {
         reply: ReplyEmpty,
     ) {
         if let Ok(mut attrs) = self.get_inode(_ino) {
-            attrs.open_file_handles -= 1;
+            self.close_handle(&mut attrs);
         }
         reply.ok();
     }
@@ -2575,6 +2586,107 @@ impl Filesystem for SimpleFS {
             self.write_inode(&attrs);
         }
         reply.ioctl(0, &[]);
+    }
+
+    /// Creates a file that no name reaches, for `open(..., O_TMPFILE)`. It belongs to
+    /// `parent`'s directory - that is where its space is accounted, and where it will live if
+    /// `link()` later gives it a name - but no entry points at it, so the descriptor replied
+    /// with here is the only way to it. Answering at all is what keeps the kernel offering
+    /// O_TMPFILE on this connection: the default ENOSYS turns it off permanently
+    fn tmpfile(
+        &self,
+        req: &Request,
+        parent: INodeNo,
+        mut mode: u32,
+        _umask: u32,
+        flags: i32,
+        _kill_suid_gid: bool,
+        reply: ReplyCreate,
+    ) {
+        debug!("tmpfile() called with {parent:?} {mode:o}");
+        let (read, write) = match flags & libc::O_ACCMODE {
+            libc::O_WRONLY => (false, true),
+            libc::O_RDWR => (true, true),
+            // An anonymous file that cannot be written is of no use, and the kernel rejects
+            // the combination before it reaches a filesystem
+            _ => {
+                reply.error(Errno::EINVAL);
+                return;
+            }
+        };
+
+        let parent_attrs = match self.get_inode(parent) {
+            Ok(attrs) => attrs,
+            Err(error_code) => {
+                reply.error(error_code);
+                return;
+            }
+        };
+
+        if parent_attrs.kind != FileKind::Directory {
+            reply.error(Errno::ENOTDIR);
+            return;
+        }
+
+        // The directory has to be writable even though nothing is written to it, and
+        // searchable even though nothing is looked up in it: `vfs_tmpfile` asks its own
+        // filesystems for `MAY_WRITE | MAY_EXEC` here. Unlike create(), neither is implied by
+        // anything the kernel has already checked - the directory is the operand rather than
+        // a path component, so no lookup has passed through it
+        if let Err(error_code) = parent_attrs.check_writable() {
+            reply.error(error_code);
+            return;
+        }
+
+        if !check_access(
+            parent_attrs.uid,
+            parent_attrs.gid,
+            parent_attrs.mode,
+            req.uid(),
+            req.gid(),
+            AccessFlags::W_OK | AccessFlags::X_OK,
+        ) {
+            reply.error(Errno::EACCES);
+            return;
+        }
+
+        // Unlike create(), the parent's timestamps are left alone: no entry is added to it
+
+        if req.uid() != 0 {
+            mode &= !(libc::S_ISUID | libc::S_ISGID) as u32;
+        }
+
+        let now = time_now();
+        let inode = self.allocate_next_inode();
+        let attrs = InodeAttributes {
+            inode: inode.0,
+            open_file_handles: 1,
+            size: 0,
+            last_accessed: now,
+            last_modified: now,
+            last_metadata_changed: now,
+            // The kernel only ever asks for a regular file here
+            kind: FileKind::File,
+            mode: self.creation_mode(mode),
+            // What makes it anonymous. Closing the last handle without linking it collects it,
+            // and link() takes it from here to 1
+            hardlinks: 0,
+            uid: req.uid(),
+            gid: creation_gid(&parent_attrs, req.gid()),
+            rdev: 0,
+            flags: 0,
+            xattrs: BTreeMap::default(),
+        };
+        self.write_inode(&attrs);
+        File::create(self.content_path(inode)).unwrap();
+
+        reply.created(
+            &Duration::new(0, 0),
+            &self.file_attr(attrs),
+            fuser::Generation(0),
+            FileHandle(self.allocate_next_file_handle(read, write)),
+            FopenFlags::empty(),
+        );
     }
 
     #[cfg(target_os = "linux")]
