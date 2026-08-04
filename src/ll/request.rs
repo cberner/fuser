@@ -1296,6 +1296,46 @@ mod op {
         }
     }
 
+    /// Create an anonymous file, for `open()` with `O_TMPFILE`.
+    ///
+    /// The file has no name and belongs to no directory: only the directory it is created
+    /// in is given, so that the filesystem knows where it will live if it is later given a
+    /// name with `linkat()`. The kernel does send a name, but it is the placeholder `/`
+    /// that the VFS gives every anonymous dentry, so it says nothing and is not passed on.
+    ///
+    /// Answering with `ENOSYS` is permanent: the kernel stops offering `O_TMPFILE` on this
+    /// connection and reports `EOPNOTSUPP` without asking again.
+    #[derive(Debug)]
+    pub(crate) struct TmpFile<'a> {
+        #[expect(dead_code)]
+        header: &'a fuse_in_header,
+        arg: &'a fuse_create_in,
+        /// The placeholder the VFS names anonymous dentries, read only to check the
+        /// length the kernel sent
+        #[expect(dead_code)]
+        name: &'a Path,
+    }
+    impl TmpFile<'_> {
+        pub(crate) fn mode(&self) -> u32 {
+            self.arg.mode
+        }
+        /// Flags as passed to the `open()` call
+        pub(crate) fn flags(&self) -> i32 {
+            self.arg.flags
+        }
+        pub(crate) fn umask(&self) -> u32 {
+            self.arg.umask
+        }
+        /// Whether the filesystem must clear suid and sgid as part of this request.
+        ///
+        /// Only ever true once `FUSE_HANDLE_KILLPRIV_V2` has been negotiated, since the kernel
+        /// otherwise clears them itself.
+        pub(crate) fn kill_suid_gid(&self) -> bool {
+            OpenInFlags::from_bits_retain(self.arg.open_flags)
+                .contains(OpenInFlags::FUSE_OPEN_KILL_SUIDGID)
+        }
+    }
+
     /// If a process issuing a FUSE filesystem request is interrupted, the
     /// following will happen:
     ///
@@ -1928,6 +1968,11 @@ mod op {
                 header,
                 arg: data.fetch()?,
             }),
+            fuse_opcode::FUSE_TMPFILE => Operation::TmpFile(TmpFile {
+                header,
+                arg: data.fetch()?,
+                name: data.fetch_str()?.as_ref(),
+            }),
 
             #[cfg(target_os = "macos")]
             fuse_opcode::FUSE_SETVOLNAME => Operation::SetVolName(SetVolName {
@@ -2003,6 +2048,7 @@ pub(crate) enum Operation<'a> {
     Lseek(Lseek<'a>),
     CopyFileRange(CopyFileRange<'a>),
     SyncFs(SyncFs<'a>),
+    TmpFile(TmpFile<'a>),
 
     #[cfg(target_os = "macos")]
     SetVolName(SetVolName<'a>),
@@ -2180,6 +2226,13 @@ impl fmt::Display for Operation<'_> {
                 x.len()
             ),
             Operation::SyncFs(_) => write!(f, "SYNCFS"),
+            Operation::TmpFile(x) => write!(
+                f,
+                "TMPFILE mode {:#05o}, umask {:#05o}, flags {:#x?}",
+                x.mode(),
+                x.umask(),
+                x.flags()
+            ),
 
             #[cfg(target_os = "macos")]
             Operation::SetVolName(x) => write!(f, "SETVOLNAME name {:?}", x.name()),
@@ -2727,5 +2780,50 @@ mod tests {
 
         let req = AnyRequest::try_from(&short[..]).unwrap();
         assert!(req.operation().is_err());
+    }
+
+    // 40 byte header + 16 byte fuse_create_in + the placeholder name "/".
+    // O_TMPFILE, and so this operation, exists on Linux alone
+    #[cfg(all(target_os = "linux", target_endian = "little"))]
+    const TMPFILE_REQUEST: AlignedData<[u8; 58]> = AlignedData([
+        0x3a, 0x00, 0x00, 0x00, 0x33, 0x00, 0x00, 0x00, // len, opcode
+        0x0d, 0xf0, 0xad, 0xba, 0xef, 0xbe, 0xad, 0xde, // unique
+        0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, // nodeid
+        0x0d, 0xd0, 0x01, 0xc0, 0xfe, 0xca, 0x01, 0xc0, // uid, gid
+        0x5e, 0xba, 0xde, 0xc0, 0x00, 0x00, 0x00, 0x00, // pid, padding
+        0x02, 0x00, 0x41, 0x00, 0xa0, 0x81, 0x00, 0x00, // flags (O_RDWR|O_TMPFILE), mode
+        0x12, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // umask, open_flags
+        0x2f, 0x00, // name ("/")
+    ]);
+
+    #[cfg(all(target_os = "linux", target_endian = "big"))]
+    const TMPFILE_REQUEST: AlignedData<[u8; 58]> = AlignedData([
+        0x00, 0x00, 0x00, 0x3a, 0x00, 0x00, 0x00, 0x33, // len, opcode
+        0xde, 0xad, 0xbe, 0xef, 0xba, 0xad, 0xf0, 0x0d, // unique
+        0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, // nodeid
+        0xc0, 0x01, 0xd0, 0x0d, 0xc0, 0x01, 0xca, 0xfe, // uid, gid
+        0xc0, 0xde, 0xba, 0x5e, 0x00, 0x00, 0x00, 0x00, // pid, padding
+        0x00, 0x41, 0x00, 0x02, 0x00, 0x00, 0x81, 0xa0, // flags (O_RDWR|O_TMPFILE), mode
+        0x00, 0x00, 0x00, 0x12, 0x00, 0x00, 0x00, 0x00, // umask, open_flags
+        0x2f, 0x00, // name ("/")
+    ]);
+
+    /// A tmpfile request is a create request on the wire, minus a name that means anything
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn tmpfile() {
+        let req = AnyRequest::try_from(&TMPFILE_REQUEST[..]).unwrap();
+        assert_eq!(req.header.opcode, 51);
+        assert_eq!(req.nodeid(), INodeNo(0x1122_3344_5566_7788));
+        match req.operation().unwrap() {
+            Operation::TmpFile(x) => {
+                assert_eq!(x.mode(), 0o100_640);
+                assert_eq!(x.umask(), 0o22);
+                // O_TMPFILE is O_DIRECTORY | 0o20_000_000 on every architecture fuser builds for
+                assert_eq!(x.flags(), libc::O_RDWR | libc::O_TMPFILE);
+                assert!(!x.kill_suid_gid());
+            }
+            _ => panic!("Unexpected request operation"),
+        }
     }
 }

@@ -1,6 +1,11 @@
 # FUSE for Rust - Changelog
 
 ## Unreleased
+* Add `Filesystem::tmpfile()`, which the kernel calls for `open()` with `O_TMPFILE` (#366,
+  ABI 7.37). The file has no name and belongs to no directory until `linkat()` gives it one,
+  so unlike `create()` this is told only which directory it was made in. Leaving it
+  unimplemented reports `ENOSYS`, which the kernel takes as permanent: it stops offering
+  `O_TMPFILE` on that connection and answers `EOPNOTSUPP`, which is what happened before
 * Add `Filesystem::syncfs()`, which the kernel calls for `syncfs(2)` (#359, ABI 7.34). Leaving
   it unimplemented reports `ENOSYS`, which makes the kernel stop asking for the lifetime of the
   connection, so this changes nothing for a filesystem that does not want it. Note that the
