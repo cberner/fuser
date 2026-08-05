@@ -21,6 +21,7 @@ use crate::Errno;
 use crate::FileAttr;
 use crate::FileType;
 use crate::PollEvents;
+use crate::StatxAttr;
 use crate::channel::ChannelSender;
 use crate::ll::Generation;
 use crate::ll::INodeNo;
@@ -297,6 +298,35 @@ impl ReplyAttr {
     pub fn attr(self, ttl: &Duration, attr: &FileAttr) {
         self.reply
             .send_ll(&ll::ResponseStruct::new_attr(ttl, &attr.into()));
+    }
+
+    /// Reply to a request with the given error code
+    pub fn error(self, err: Errno) {
+        self.reply.error(err);
+    }
+}
+
+///
+/// Statx Reply
+///
+#[derive(Debug)]
+pub struct ReplyStatx {
+    reply: ReplyRaw,
+}
+
+impl Reply for ReplyStatx {
+    fn new(unique: ll::RequestId, sender: ReplySender) -> ReplyStatx {
+        ReplyStatx {
+            reply: Reply::new(unique, sender),
+        }
+    }
+}
+
+impl ReplyStatx {
+    /// Reply to a request with the given attributes
+    pub fn statx(self, ttl: &Duration, attr: &StatxAttr) {
+        self.reply
+            .send_ll(&ll::ResponseStruct::new_statx(ttl, attr));
     }
 
     /// Reply to a request with the given error code

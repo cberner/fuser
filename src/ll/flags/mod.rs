@@ -12,4 +12,5 @@ pub(crate) mod open_in_flags;
 pub(crate) mod poll_flags;
 pub(crate) mod read_flags;
 pub(crate) mod release_flags;
+pub(crate) mod statx_flags;
 pub(crate) mod write_flags;

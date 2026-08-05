@@ -268,6 +268,7 @@ mod op {
     use crate::ll::flags::open_in_flags::OpenInFlags;
     use crate::ll::flags::read_flags::ReadFlags;
     use crate::ll::flags::release_flags::ReleaseFlags;
+    use crate::ll::flags::statx_flags::StatxMask;
     use crate::ll::request::FileHandle;
     use crate::ll::request::FilenameInDir;
     use crate::ll::request::INodeNo;
@@ -340,6 +341,39 @@ mod op {
             } else {
                 None
             }
+        }
+    }
+
+    /// Get extended file attributes, for `statx(2)`.
+    #[derive(Debug)]
+    pub(crate) struct StatX<'a> {
+        #[expect(dead_code)]
+        header: &'a fuse_in_header,
+        arg: &'a fuse_statx_in,
+    }
+
+    impl StatX<'_> {
+        pub(crate) fn file_handle(&self) -> Option<FileHandle> {
+            if GetattrFlags::from_bits_retain(self.arg.getattr_flags)
+                .contains(GetattrFlags::FUSE_GETATTR_FH)
+            {
+                Some(FileHandle(self.arg.fh))
+            } else {
+                None
+            }
+        }
+
+        /// The `AT_STATX_*` sync flags the caller passed. The kernel sends zero for now,
+        /// having no way to act on them yet
+        pub(crate) fn flags(&self) -> u32 {
+            self.arg.sx_flags
+        }
+
+        /// What the caller asked for, which is a request rather than an obligation: answering
+        /// with more than this costs nothing, and answering with less is what
+        /// `StatxAttr`'s own mask reports
+        pub(crate) fn mask(&self) -> StatxMask {
+            StatxMask::from_bits_retain(self.arg.sx_mask)
         }
     }
 
@@ -1973,6 +2007,10 @@ mod op {
                 arg: data.fetch()?,
                 name: data.fetch_str()?.as_ref(),
             }),
+            fuse_opcode::FUSE_STATX => Operation::StatX(StatX {
+                header,
+                arg: data.fetch()?,
+            }),
 
             #[cfg(target_os = "macos")]
             fuse_opcode::FUSE_SETVOLNAME => Operation::SetVolName(SetVolName {
@@ -2006,6 +2044,7 @@ pub(crate) enum Operation<'a> {
     Lookup(Lookup<'a>),
     Forget(Forget<'a>),
     GetAttr(GetAttr<'a>),
+    StatX(StatX<'a>),
     SetAttr(SetAttr<'a>),
     ReadLink(#[expect(dead_code)] ReadLink<'a>),
     SymLink(SymLink<'a>),
@@ -2067,6 +2106,7 @@ impl fmt::Display for Operation<'_> {
             Operation::Lookup(x) => write!(f, "LOOKUP name {:?}", x.name()),
             Operation::Forget(x) => write!(f, "FORGET nlookup {}", x.nlookup()),
             Operation::GetAttr(_) => write!(f, "GETATTR"),
+            Operation::StatX(x) => write!(f, "STATX mask {:?}", x.mask()),
             Operation::SetAttr(x) => x.fmt(f),
             Operation::ReadLink(_) => write!(f, "READLINK"),
             Operation::SymLink(x) => {
@@ -2364,6 +2404,7 @@ mod tests {
     use std::ffi::OsStr;
     use std::path::Path;
 
+    use crate::StatxMask;
     use crate::ll::request::*;
     use crate::ll::test::AlignedData;
 
@@ -2807,6 +2848,64 @@ mod tests {
         0x00, 0x00, 0x00, 0x12, 0x00, 0x00, 0x00, 0x00, // umask, open_flags
         0x2f, 0x00, // name ("/")
     ]);
+
+    // 40 byte header + 24 byte fuse_statx_in
+    #[cfg(target_endian = "little")]
+    const STATX_REQUEST: AlignedData<[u8; 64]> = AlignedData([
+        0x40, 0x00, 0x00, 0x00, 0x34, 0x00, 0x00, 0x00, // len, opcode (52)
+        0x0d, 0xf0, 0xad, 0xba, 0xef, 0xbe, 0xad, 0xde, // unique
+        0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, // nodeid
+        0x0d, 0xd0, 0x01, 0xc0, 0xfe, 0xca, 0x01, 0xc0, // uid, gid
+        0x5e, 0xba, 0xde, 0xc0, 0x00, 0x00, 0x00, 0x00, // pid, padding
+        0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // getattr_flags (FH), reserved
+        0xbb, 0xaa, 0x99, 0x88, 0x77, 0x66, 0x55, 0x44, // fh
+        0x00, 0x00, 0x00, 0x00, 0xff, 0x0f, 0x00, 0x00, // sx_flags, sx_mask
+    ]);
+
+    #[cfg(target_endian = "big")]
+    const STATX_REQUEST: AlignedData<[u8; 64]> = AlignedData([
+        0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x34, // len, opcode (52)
+        0xde, 0xad, 0xbe, 0xef, 0xba, 0xad, 0xf0, 0x0d, // unique
+        0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, // nodeid
+        0xc0, 0x01, 0xd0, 0x0d, 0xc0, 0x01, 0xca, 0xfe, // uid, gid
+        0xc0, 0xde, 0xba, 0x5e, 0x00, 0x00, 0x00, 0x00, // pid, padding
+        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, // getattr_flags (FH), reserved
+        0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, // fh
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0f, 0xff, // sx_flags, sx_mask
+    ]);
+
+    #[test]
+    fn statx() {
+        let req = AnyRequest::try_from(&STATX_REQUEST[..]).unwrap();
+        assert_eq!(req.header.opcode, 52);
+        assert_eq!(req.nodeid(), INodeNo(0x1122_3344_5566_7788));
+        match req.operation().unwrap() {
+            Operation::StatX(x) => {
+                assert_eq!(x.file_handle(), Some(FileHandle(0x4455_6677_8899_aabb)));
+                assert_eq!(x.flags(), 0);
+                // What the kernel asks for: STATX_BASIC_STATS | STATX_BTIME
+                assert_eq!(x.mask(), StatxMask::BASIC_STATS | StatxMask::BTIME);
+            }
+            _ => panic!("Unexpected request operation"),
+        }
+    }
+
+    /// Without `FUSE_GETATTR_FH` the handle is absent whatever the field holds, as for getattr
+    #[test]
+    fn statx_without_file_handle() {
+        let mut data = STATX_REQUEST;
+        // getattr_flags occupies bytes 40..44; its low byte is where FUSE_GETATTR_FH sits
+        data.0[if cfg!(target_endian = "little") {
+            40
+        } else {
+            43
+        }] = 0x00;
+        let req = AnyRequest::try_from(&data[..]).unwrap();
+        match req.operation().unwrap() {
+            Operation::StatX(x) => assert_eq!(x.file_handle(), None),
+            _ => panic!("Unexpected request operation"),
+        }
+    }
 
     /// A tmpfile request is a create request on the wire, minus a name that means anything
     #[test]

@@ -4,7 +4,6 @@ use std::io::IoSlice;
 use std::os::unix::prelude::OsStrExt;
 use std::path::Path;
 use std::time::Duration;
-#[cfg(target_os = "macos")]
 use std::time::SystemTime;
 
 use smallvec::SmallVec;
@@ -355,6 +354,77 @@ pub(crate) fn fuse_attr_from_attr(attr: &crate::FileAttr) -> abi::fuse_attr {
     }
 }
 
+impl ResponseStruct<abi::fuse_statx_out> {
+    pub(crate) fn new_statx(ttl: &Duration, attr: &crate::StatxAttr) -> Self {
+        ResponseStruct(abi::fuse_statx_out {
+            attr_valid: ttl.as_secs(),
+            attr_valid_nsec: ttl.subsec_nanos(),
+            flags: 0,
+            spare: [0; 2],
+            stat: fuse_statx_from_attr(attr),
+        })
+    }
+}
+
+/// Splits a device number the way `struct statx` reports it, as a major and minor pair rather
+/// than the single encoded number `fuse_attr` carries.
+///
+/// This is the kernel's `new_decode_dev()`, which is what it applies to `fuse_attr.rdev`, and
+/// it re-encodes the pair with `new_encode_dev()` on the way back out of a statx reply
+fn major_minor(rdev: u32) -> (u32, u32) {
+    let major = (rdev & 0x000f_ff00) >> 8;
+    let minor = (rdev & 0xff) | ((rdev >> 12) & 0x000f_ff00);
+    (major, minor)
+}
+
+fn sx_time(time: &SystemTime) -> abi::fuse_sx_time {
+    let (secs, nanos) = time_from_system_time(time);
+    abi::fuse_sx_time {
+        tv_sec: secs,
+        tv_nsec: nanos,
+        __reserved: 0,
+    }
+}
+
+/// Returns a `fuse_statx` from `StatxAttr`. The mask is derived from what was actually
+/// filled in rather than taken from the caller, so it cannot claim a field that is not there
+pub(crate) fn fuse_statx_from_attr(attr: &crate::StatxAttr) -> abi::fuse_statx {
+    let (rdev_major, rdev_minor) = major_minor(attr.attr.rdev);
+    let mode = mode_from_kind_and_perm(attr.attr.kind, attr.attr.perm);
+    let mut mask = crate::StatxMask::BASIC_STATS;
+    if attr.btime.is_some() {
+        mask |= crate::StatxMask::BTIME;
+    }
+
+    abi::fuse_statx {
+        mask: mask.bits(),
+        blksize: attr.attr.blksize,
+        attributes: attr.attributes.bits(),
+        nlink: attr.attr.nlink,
+        uid: attr.attr.uid,
+        gid: attr.attr.gid,
+        // `struct statx` narrows this to 16 bits, which every file type and permission bit
+        // fits in - the width is all that differs from `fuse_attr`
+        mode: mode as u16,
+        __spare0: [0; 1],
+        ino: attr.attr.ino.0,
+        size: attr.attr.size,
+        blocks: attr.attr.blocks,
+        attributes_mask: attr.attributes_mask.bits(),
+        atime: sx_time(&attr.attr.atime),
+        btime: attr.btime.as_ref().map(sx_time).unwrap_or_default(),
+        ctime: sx_time(&attr.attr.ctime),
+        mtime: sx_time(&attr.attr.mtime),
+        rdev_major,
+        rdev_minor,
+        // The device the file lives on is the kernel's to fill in: it knows the connection's
+        // anonymous device number, and the filesystem does not
+        dev_major: 0,
+        dev_minor: 0,
+        __spare2: [0; 14],
+    }
+}
+
 // TODO: Add methods for creating this without making a `FileAttr` first.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Attr {
@@ -550,6 +620,17 @@ impl DirEntPlusList {
 
 #[cfg(test)]
 mod test {
+    /// The pair has to come back out the way the kernel encoded it, including a minor number
+    /// too large for its low byte, which is the case the shifts exist for
+    #[test]
+    fn statx_major_minor() {
+        // /dev/null and /dev/fuse, as `stat` reports them
+        assert_eq!(super::major_minor(0x0000_0103), (1, 3));
+        assert_eq!(super::major_minor(0x0000_0ae5), (10, 229));
+        // A minor that does not fit in 8 bits, so the high bits are in use
+        assert_eq!(super::major_minor(0x1110_fa70), (250, 70_000));
+    }
+
     use std::num::NonZeroI32;
     use std::time::UNIX_EPOCH;
 

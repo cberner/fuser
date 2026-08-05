@@ -168,6 +168,7 @@ pub(crate) enum fuse_opcode {
     FUSE_COPY_FILE_RANGE = 47,
     FUSE_SYNCFS = 50,
     FUSE_TMPFILE = 51,
+    FUSE_STATX = 52,
 
     #[cfg(target_os = "macos")]
     FUSE_SETVOLNAME = 61,
@@ -196,6 +197,70 @@ pub(crate) enum fuse_notify_code {
 /// ABI version that added `FUSE_NOTIFY_INC_EPOCH`. An older kernel has no case for the
 /// code and answers the write with `EINVAL`
 pub(crate) const FUSE_NOTIFY_INC_EPOCH_VERSION: Version = Version(7, 44);
+
+/// ABI version that added `FUSE_STATX`. An older kernel never sends the opcode, and answers
+/// `statx(2)` out of what `FUSE_GETATTR` gives it, so nothing outside the tests has to ask -
+/// and only the Linux ones, since `statx(2)` is Linux's
+#[cfg(all(test, target_os = "linux"))]
+pub(crate) const FUSE_STATX_VERSION: Version = Version(7, 38);
+
+/// A timestamp as `struct statx` carries one, which unlike `fuse_attr`'s pair of fields is a
+/// signed second count with its own padding
+#[repr(C)]
+#[derive(Debug, Default, IntoBytes, Clone, Copy, KnownLayout, Immutable)]
+pub(crate) struct fuse_sx_time {
+    pub(crate) tv_sec: i64,
+    pub(crate) tv_nsec: u32,
+    pub(crate) __reserved: i32,
+}
+
+/// The `struct statx` payload, laid out as the kernel's `fuse_statx`. Every field the caller
+/// did not ask for is still sent, and `mask` is what says which of them mean anything
+#[repr(C)]
+#[derive(Debug, Default, IntoBytes, Clone, Copy, KnownLayout, Immutable)]
+pub(crate) struct fuse_statx {
+    pub(crate) mask: u32,
+    pub(crate) blksize: u32,
+    pub(crate) attributes: u64,
+    pub(crate) nlink: u32,
+    pub(crate) uid: u32,
+    pub(crate) gid: u32,
+    pub(crate) mode: u16,
+    pub(crate) __spare0: [u16; 1],
+    pub(crate) ino: u64,
+    pub(crate) size: u64,
+    pub(crate) blocks: u64,
+    pub(crate) attributes_mask: u64,
+    pub(crate) atime: fuse_sx_time,
+    pub(crate) btime: fuse_sx_time,
+    pub(crate) ctime: fuse_sx_time,
+    pub(crate) mtime: fuse_sx_time,
+    pub(crate) rdev_major: u32,
+    pub(crate) rdev_minor: u32,
+    pub(crate) dev_major: u32,
+    pub(crate) dev_minor: u32,
+    pub(crate) __spare2: [u64; 14],
+}
+
+#[repr(C)]
+#[derive(Debug, FromBytes, KnownLayout, Immutable)]
+pub(crate) struct fuse_statx_in {
+    pub(crate) getattr_flags: u32,
+    pub(crate) reserved: u32,
+    pub(crate) fh: u64,
+    pub(crate) sx_flags: u32,
+    pub(crate) sx_mask: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, IntoBytes, KnownLayout, Immutable)]
+pub(crate) struct fuse_statx_out {
+    pub(crate) attr_valid: u64,
+    pub(crate) attr_valid_nsec: u32,
+    pub(crate) flags: u32,
+    pub(crate) spare: [u64; 2],
+    pub(crate) stat: fuse_statx,
+}
 
 #[repr(C)]
 #[derive(Debug, IntoBytes, KnownLayout, Immutable)]

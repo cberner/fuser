@@ -1,6 +1,15 @@
 # FUSE for Rust - Changelog
 
 ## Unreleased
+* Add `Filesystem::statx()`, which the kernel calls for `statx(2)` (ABI 7.38), along with
+  `StatxAttr` and `ReplyStatx`. This exists to report a creation time, which no other request
+  can carry: `fuse_attr` has a field for it on macOS alone, so on Linux `statx(2)` otherwise
+  reports whatever the kernel cached. Leaving it unimplemented reports `ENOSYS`, which the
+  kernel takes as permanent: it stops sending `FUSE_STATX` on that connection and answers
+  `statx(2)` out of `getattr()`, which is what happened before. Note that `StatxAttr` also
+  carries the `STATX_ATTR_*` properties, such as immutable and append-only, because the wire
+  format does - but the kernel discards them from a FUSE reply, so setting them does not make
+  `chattr +i` visible to `statx(2)`
 * Add `Filesystem::tmpfile()`, which the kernel calls for `open()` with `O_TMPFILE` (#366,
   ABI 7.37). The file has no name and belongs to no directory until `linkat()` gives it one,
   so unlike `create()` this is told only which directory it was made in. Leaving it

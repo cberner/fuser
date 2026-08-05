@@ -550,6 +550,16 @@ impl<'a> RequestWithSender<'a> {
             ll::Operation::SyncFs(_x) => {
                 filesystem.syncfs(self.request_header(), self.request.nodeid(), self.reply());
             }
+            ll::Operation::StatX(x) => {
+                filesystem.statx(
+                    self.request_header(),
+                    self.request.nodeid(),
+                    x.file_handle(),
+                    x.flags(),
+                    x.mask(),
+                    self.reply(),
+                );
+            }
             ll::Operation::TmpFile(x) => {
                 filesystem.tmpfile(
                     self.request_header(),
