@@ -462,6 +462,8 @@ struct InodeAttributes {
     pub last_accessed: (i64, u32),
     pub last_modified: (i64, u32),
     pub last_metadata_changed: (i64, u32),
+    /// Time of creation, which `statx(2)` reports as `stx_btime` and nothing ever changes
+    pub created: (i64, u32),
     pub kind: FileKind,
     // Permissions and special mode bits
     pub mode: u16,
@@ -519,7 +521,7 @@ impl From<InodeAttributes> for fuser::FileAttr {
                 attrs.last_metadata_changed.0,
                 attrs.last_metadata_changed.1,
             ),
-            crtime: SystemTime::UNIX_EPOCH,
+            crtime: system_time_from_time(attrs.created.0, attrs.created.1),
             kind: attrs.kind.into(),
             perm: attrs.mode,
             nlink: attrs.hardlinks,
@@ -891,6 +893,7 @@ impl Filesystem for SimpleFS {
                 last_accessed: now,
                 last_modified: now,
                 last_metadata_changed: now,
+                created: now,
                 kind: FileKind::Directory,
                 mode: 0o777,
                 hardlinks: 2,
@@ -1261,6 +1264,7 @@ impl Filesystem for SimpleFS {
             last_accessed: now,
             last_modified: now,
             last_metadata_changed: now,
+            created: now,
             kind: as_file_kind(mode),
             mode: self.creation_mode(mode),
             hardlinks: 1,
@@ -1358,6 +1362,7 @@ impl Filesystem for SimpleFS {
             last_accessed: now,
             last_modified: now,
             last_metadata_changed: now,
+            created: now,
             kind: FileKind::Directory,
             mode: self.creation_mode(mode),
             hardlinks: 2, // Directories start with link count of 2, since they have a self link
@@ -1575,6 +1580,7 @@ impl Filesystem for SimpleFS {
             last_accessed: now,
             last_modified: now,
             last_metadata_changed: now,
+            created: now,
             kind: FileKind::Symlink,
             mode: 0o777,
             hardlinks: 1,
@@ -1868,6 +1874,7 @@ impl Filesystem for SimpleFS {
                 last_accessed: now,
                 last_modified: now,
                 last_metadata_changed: now,
+                created: now,
                 kind: FileKind::CharDevice,
                 mode: 0,
                 hardlinks: 1,
@@ -2482,6 +2489,7 @@ impl Filesystem for SimpleFS {
             last_accessed: now,
             last_modified: now,
             last_metadata_changed: now,
+            created: now,
             kind: as_file_kind(mode),
             mode: self.creation_mode(mode),
             hardlinks: 1,
@@ -2512,6 +2520,57 @@ impl Filesystem for SimpleFS {
             fuser::Generation(0),
             FileHandle(self.allocate_next_file_handle(read, write)),
             FopenFlags::empty(),
+        );
+    }
+
+    /// Answers `statx(2)`, which differs from `getattr()` in carrying a creation time. That
+    /// is the whole reason to implement it: `fuse_attr` has no field for one on Linux, so
+    /// without this the kernel reports whatever it last cached
+    #[cfg(target_os = "linux")]
+    fn statx(
+        &self,
+        _req: &Request,
+        ino: INodeNo,
+        _fh: Option<FileHandle>,
+        _flags: u32,
+        _mask: fuser::StatxMask,
+        reply: fuser::ReplyStatx,
+    ) {
+        debug!("statx() called with {ino:?}");
+        let attrs = match self.get_inode(ino) {
+            Ok(attrs) => attrs,
+            Err(error_code) => {
+                reply.error(error_code);
+                return;
+            }
+        };
+
+        // The inode flags this filesystem honors, in the encoding statx uses. The kernel
+        // discards these today - fuse_do_statx() takes the creation time and the basic stats
+        // out of the reply and nothing else - so `chattr +i` stays invisible to statx(2)
+        // whatever is reported here. Filled in anyway, since it costs nothing and is what the
+        // field is for if the kernel starts reading it
+        let mut attributes = fuser::StatxAttributes::empty();
+        attributes.set(fuser::StatxAttributes::IMMUTABLE, attrs.is_immutable());
+        attributes.set(fuser::StatxAttributes::APPEND, attrs.is_append_only());
+        attributes.set(
+            fuser::StatxAttributes::NODUMP,
+            attrs.flags & FS_NODUMP_FL != 0,
+        );
+
+        let btime = system_time_from_time(attrs.created.0, attrs.created.1);
+        reply.statx(
+            &Duration::new(0, 0),
+            &fuser::StatxAttr {
+                btime: Some(btime),
+                attributes,
+                // The three above are the ones this filesystem can speak to. Leaving the rest
+                // out is what tells a caller "cannot say" rather than "not set"
+                attributes_mask: fuser::StatxAttributes::IMMUTABLE
+                    | fuser::StatxAttributes::APPEND
+                    | fuser::StatxAttributes::NODUMP,
+                ..self.file_attr(attrs).into()
+            },
         );
     }
 
@@ -2665,6 +2724,7 @@ impl Filesystem for SimpleFS {
             last_accessed: now,
             last_modified: now,
             last_metadata_changed: now,
+            created: now,
             // The kernel only ever asks for a regular file here
             kind: FileKind::File,
             mode: self.creation_mode(mode),
