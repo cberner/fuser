@@ -134,11 +134,8 @@ fn default_init_flags(capabilities: InitFlags) -> InitFlags {
     flags
 }
 
-/// The value [`Request::uid`] and [`Request::gid`] carry when the kernel withheld the caller's
-/// ids, which it does on an idmapped mount for every request that does not create an inode.
-///
-/// Only reachable once [`InitFlags::FUSE_ALLOW_IDMAP`] has been negotiated.
-pub const FUSE_INVALID_UIDGID: u32 = u32::MAX;
+/// What the kernel puts in a request header in place of ids it is not sending.
+pub(crate) const FUSE_INVALID_UIDGID: u32 = u32::MAX;
 
 /// Capabilities fuser has no implementation behind, whatever the kernel advertises.
 ///
@@ -182,6 +179,21 @@ const ALIASED_UNSUPPORTED_CAPABILITIES: InitFlags = InitFlags::empty()
     .union(InitFlags::FUSE_MAP_ALIGNMENT);
 #[cfg(target_os = "macos")]
 const ALIASED_UNSUPPORTED_CAPABILITIES: InitFlags = InitFlags::empty();
+
+/// Who a newly created inode belongs to.
+///
+/// The kernel decides this rather than the filesystem, and on an idmapped mount it is not the
+/// same as the caller's ids: it is those ids mapped through the mount's idmapping. It is given
+/// to the requests that create an inode, and to no others, which is why it is an argument to
+/// those rather than something [`Request`] carries. A rename is one of them only with
+/// `RENAME_WHITEOUT`, so it takes an `Option<Owner>`.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct Owner {
+    /// Owning user
+    pub uid: u32,
+    /// Owning group, before any setgid inheritance the filesystem applies
+    pub gid: u32,
+}
 
 /// File types
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -742,6 +754,7 @@ pub trait Filesystem: Send + Sync + 'static {
         mode: u32,
         umask: u32,
         rdev: u32,
+        _owner: Owner,
         reply: ReplyEntry,
     ) {
         warn!(
@@ -759,6 +772,7 @@ pub trait Filesystem: Send + Sync + 'static {
         name: &OsStr,
         mode: u32,
         umask: u32,
+        _owner: Owner,
         reply: ReplyEntry,
     ) {
         warn!(
@@ -786,6 +800,7 @@ pub trait Filesystem: Send + Sync + 'static {
         parent: INodeNo,
         link_name: &OsStr,
         target: &Path,
+        _owner: Owner,
         reply: ReplyEntry,
     ) {
         warn!(
@@ -806,6 +821,7 @@ pub trait Filesystem: Send + Sync + 'static {
         newparent: INodeNo,
         newname: &OsStr,
         flags: RenameFlags,
+        _owner: Option<Owner>,
         reply: ReplyEmpty,
     ) {
         warn!(
@@ -1137,6 +1153,7 @@ pub trait Filesystem: Send + Sync + 'static {
         umask: u32,
         flags: i32,
         kill_suid_gid: bool,
+        _owner: Owner,
         reply: ReplyCreate,
     ) {
         warn!(
@@ -1314,6 +1331,7 @@ pub trait Filesystem: Send + Sync + 'static {
         umask: u32,
         flags: i32,
         kill_suid_gid: bool,
+        _owner: Owner,
         reply: ReplyCreate,
     ) {
         warn!(

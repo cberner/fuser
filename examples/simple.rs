@@ -43,6 +43,7 @@ use fuser::LockOwner;
 use fuser::MountOption;
 use fuser::OpenAccMode;
 use fuser::OpenFlags;
+use fuser::Owner;
 use fuser::RenameFlags;
 use fuser::ReplyAttr;
 use fuser::ReplyCreate;
@@ -304,7 +305,7 @@ fn clear_suid_sgid(attr: &mut InodeAttributes, req: &Request, privilege: Privile
     let sgid_exec = attr.mode & (libc::S_ISGID | libc::S_IXGRP) as u16
         == (libc::S_ISGID | libc::S_IXGRP) as u16;
     let outside_group = privilege.lacks_fsetid(req)
-        && req.gid() != attr.gid
+        && caller_gid(req) != attr.gid
         && !get_groups(req.pid()).contains(&attr.gid);
     if sgid_exec || outside_group {
         attr.mode &= !libc::S_ISGID as u16;
@@ -327,7 +328,7 @@ impl Privilege {
     fn lacks_fsetid(&self, req: &Request) -> bool {
         match self {
             Privilege::KnownLacking => true,
-            Privilege::Unknown => !has_fsetid(req.pid(), req.uid()),
+            Privilege::Unknown => !has_fsetid(req.pid(), caller_uid(req)),
         }
     }
 }
@@ -352,7 +353,7 @@ fn clear_file_capabilities(attr: &mut InodeAttributes) {
 /// Call this only when a killpriv capability was negotiated: without one the kernel still
 /// removes privileges itself, and clearing here as well would strip bits it had decided to keep
 fn clear_privileges_unprompted(attr: &mut InodeAttributes, req: &Request) {
-    if !has_fsetid(req.pid(), req.uid()) {
+    if !has_fsetid(req.pid(), caller_uid(req)) {
         // The capability set has just answered the question, so do not read it a second time
         clear_suid_sgid(attr, req, Privilege::KnownLacking);
     }
@@ -381,12 +382,12 @@ fn xattr_access_check(
 
     match parse_xattr_namespace(key)? {
         XattrNamespace::Security => {
-            if access_mask != libc::R_OK && request.uid() != 0 {
+            if access_mask != libc::R_OK && caller_uid(request) != 0 {
                 return Err(Errno::EPERM);
             }
         }
         XattrNamespace::Trusted => {
-            if request.uid() != 0 {
+            if caller_uid(request) != 0 {
                 return Err(Errno::EPERM);
             }
         }
@@ -396,13 +397,13 @@ fn xattr_access_check(
                     inode_attrs.uid,
                     inode_attrs.gid,
                     inode_attrs.mode,
-                    request.uid(),
-                    request.gid(),
+                    caller_uid(request),
+                    caller_gid(request),
                     AccessFlags::from_bits_retain(access_mask),
                 ) {
                     return Err(Errno::EPERM);
                 }
-            } else if request.uid() != 0 {
+            } else if caller_uid(request) != 0 {
                 return Err(Errno::EPERM);
             }
         }
@@ -411,8 +412,8 @@ fn xattr_access_check(
                 inode_attrs.uid,
                 inode_attrs.gid,
                 inode_attrs.mode,
-                request.uid(),
-                request.gid(),
+                caller_uid(request),
+                caller_gid(request),
                 AccessFlags::from_bits_retain(access_mask),
             ) {
                 return Err(Errno::EPERM);
@@ -421,6 +422,19 @@ fn xattr_access_check(
     }
 
     Ok(())
+}
+
+/// The caller's uid, which this filesystem is always given. The kernel withholds ids only on
+/// an idmapped mount, which needs `FUSE_ALLOW_IDMAP`, and this example does not request it
+fn caller_uid(req: &Request) -> u32 {
+    req.uid()
+        .expect("ids are withheld only on an idmapped mount")
+}
+
+/// The caller's gid, always present for the same reason as [`caller_uid`]
+fn caller_gid(req: &Request) -> u32 {
+    req.gid()
+        .expect("ids are withheld only on an idmapped mount")
 }
 
 fn time_now() -> (i64, u32) {
@@ -844,8 +858,8 @@ impl SimpleFS {
             parent_attrs.uid,
             parent_attrs.gid,
             parent_attrs.mode,
-            req.uid(),
-            req.gid(),
+            caller_uid(req),
+            caller_gid(req),
             AccessFlags::W_OK,
         ) {
             return Err(Errno::EACCES);
@@ -927,8 +941,8 @@ impl Filesystem for SimpleFS {
             parent_attrs.uid,
             parent_attrs.gid,
             parent_attrs.mode,
-            _req.uid(),
-            _req.gid(),
+            caller_uid(_req),
+            caller_gid(_req),
             AccessFlags::X_OK,
         ) {
             reply.error(Errno::EACCES);
@@ -1001,7 +1015,7 @@ impl Filesystem for SimpleFS {
             #[cfg(target_os = "freebsd")]
             {
                 // FreeBSD: sticky bit only valid on directories; otherwise EFTYPE
-                if _req.uid() != 0
+                if caller_uid(_req) != 0
                     && (mode as u16 & libc::S_ISVTX as u16) != 0
                     && attrs.kind != FileKind::Directory
                 {
@@ -1009,12 +1023,12 @@ impl Filesystem for SimpleFS {
                     return;
                 }
             }
-            if _req.uid() != 0 && _req.uid() != attrs.uid {
+            if caller_uid(_req) != 0 && caller_uid(_req) != attrs.uid {
                 reply.error(Errno::EPERM);
                 return;
             }
-            if _req.uid() != 0
-                && _req.gid() != attrs.gid
+            if caller_uid(_req) != 0
+                && caller_gid(_req) != attrs.gid
                 && !get_groups(_req.pid()).contains(&attrs.gid)
             {
                 // If SGID is set and the file belongs to a group that the caller is not part of
@@ -1033,22 +1047,22 @@ impl Filesystem for SimpleFS {
             debug!("chown() called with {ino:?} {uid:?} {gid:?}");
             if let Some(gid) = gid {
                 // Non-root users can only change gid to a group they're in
-                if _req.uid() != 0 && !get_groups(_req.pid()).contains(&gid) {
+                if caller_uid(_req) != 0 && !get_groups(_req.pid()).contains(&gid) {
                     reply.error(Errno::EPERM);
                     return;
                 }
             }
             if let Some(uid) = uid {
-                if _req.uid() != 0
+                if caller_uid(_req) != 0
                     // but no-op changes by the owner are not an error
-                    && !(uid == attrs.uid && _req.uid() == attrs.uid)
+                    && !(uid == attrs.uid && caller_uid(_req) == attrs.uid)
                 {
                     reply.error(Errno::EPERM);
                     return;
                 }
             }
             // Only owner may change the group
-            if gid.is_some() && _req.uid() != 0 && _req.uid() != attrs.uid {
+            if gid.is_some() && caller_uid(_req) != 0 && caller_uid(_req) != attrs.uid {
                 reply.error(Errno::EPERM);
                 return;
             }
@@ -1088,9 +1102,14 @@ impl Filesystem for SimpleFS {
                     reply.error(Errno::EACCES);
                     return;
                 }
-            } else if let Err(error_code) =
-                self.truncate(_req, ino, size, _req.uid(), _req.gid(), kill_suid_gid)
-            {
+            } else if let Err(error_code) = self.truncate(
+                _req,
+                ino,
+                size,
+                caller_uid(_req),
+                caller_gid(_req),
+                kill_suid_gid,
+            ) {
                 reply.error(error_code);
                 return;
             }
@@ -1100,18 +1119,18 @@ impl Filesystem for SimpleFS {
         if let Some(atime) = _atime {
             debug!("utimens() called with {ino:?}, atime={atime:?}");
 
-            if attrs.uid != _req.uid() && _req.uid() != 0 && atime != Now {
+            if attrs.uid != caller_uid(_req) && caller_uid(_req) != 0 && atime != Now {
                 reply.error(Errno::EPERM);
                 return;
             }
 
-            if attrs.uid != _req.uid()
+            if attrs.uid != caller_uid(_req)
                 && !check_access(
                     attrs.uid,
                     attrs.gid,
                     attrs.mode,
-                    _req.uid(),
-                    _req.gid(),
+                    caller_uid(_req),
+                    caller_gid(_req),
                     AccessFlags::W_OK,
                 )
             {
@@ -1129,18 +1148,18 @@ impl Filesystem for SimpleFS {
         if let Some(mtime) = _mtime {
             debug!("utimens() called with {ino:?}, mtime={mtime:?}");
 
-            if attrs.uid != _req.uid() && _req.uid() != 0 && mtime != Now {
+            if attrs.uid != caller_uid(_req) && caller_uid(_req) != 0 && mtime != Now {
                 reply.error(Errno::EPERM);
                 return;
             }
 
-            if attrs.uid != _req.uid()
+            if attrs.uid != caller_uid(_req)
                 && !check_access(
                     attrs.uid,
                     attrs.gid,
                     attrs.mode,
-                    _req.uid(),
-                    _req.gid(),
+                    caller_uid(_req),
+                    caller_gid(_req),
                     AccessFlags::W_OK,
                 )
             {
@@ -1188,6 +1207,7 @@ impl Filesystem for SimpleFS {
         mut mode: u32,
         _umask: u32,
         rdev: u32,
+        owner: Owner,
         reply: ReplyEntry,
     ) {
         let file_type = mode & libc::S_IFMT as u32;
@@ -1227,8 +1247,8 @@ impl Filesystem for SimpleFS {
             parent_attrs.uid,
             parent_attrs.gid,
             parent_attrs.mode,
-            _req.uid(),
-            _req.gid(),
+            caller_uid(_req),
+            caller_gid(_req),
             AccessFlags::W_OK,
         ) {
             reply.error(Errno::EACCES);
@@ -1239,7 +1259,7 @@ impl Filesystem for SimpleFS {
         parent_attrs.last_metadata_changed = now;
         self.write_inode(&parent_attrs);
 
-        if _req.uid() != 0 {
+        if caller_uid(_req) != 0 {
             mode &= !(libc::S_ISUID | libc::S_ISGID) as u32;
         }
 
@@ -1247,7 +1267,7 @@ impl Filesystem for SimpleFS {
         {
             let kind = as_file_kind(mode);
             // FreeBSD: sticky bit only valid on directories; otherwise EFTYPE
-            if _req.uid() != 0
+            if caller_uid(_req) != 0
                 && (mode as u16 & libc::S_ISVTX as u16) != 0
                 && kind != FileKind::Directory
             {
@@ -1268,8 +1288,8 @@ impl Filesystem for SimpleFS {
             kind: as_file_kind(mode),
             mode: self.creation_mode(mode),
             hardlinks: 1,
-            uid: _req.uid(),
-            gid: creation_gid(&parent_attrs, _req.gid()),
+            uid: owner.uid,
+            gid: creation_gid(&parent_attrs, owner.gid),
             rdev: match as_file_kind(mode) {
                 FileKind::CharDevice | FileKind::BlockDevice => rdev,
                 // Every other type reports 0, as a local filesystem does
@@ -1310,6 +1330,7 @@ impl Filesystem for SimpleFS {
         name: &OsStr,
         mut mode: u32,
         _umask: u32,
+        owner: Owner,
         reply: ReplyEntry,
     ) {
         debug!("mkdir() called with {parent:?} {name:?} {mode:o}");
@@ -1335,8 +1356,8 @@ impl Filesystem for SimpleFS {
             parent_attrs.uid,
             parent_attrs.gid,
             parent_attrs.mode,
-            _req.uid(),
-            _req.gid(),
+            caller_uid(_req),
+            caller_gid(_req),
             AccessFlags::W_OK,
         ) {
             reply.error(Errno::EACCES);
@@ -1347,7 +1368,7 @@ impl Filesystem for SimpleFS {
         parent_attrs.last_metadata_changed = now;
         self.write_inode(&parent_attrs);
 
-        if _req.uid() != 0 {
+        if caller_uid(_req) != 0 {
             mode &= !(libc::S_ISUID | libc::S_ISGID) as u32;
         }
         if parent_attrs.mode & libc::S_ISGID as u16 != 0 {
@@ -1366,8 +1387,8 @@ impl Filesystem for SimpleFS {
             kind: FileKind::Directory,
             mode: self.creation_mode(mode),
             hardlinks: 2, // Directories start with link count of 2, since they have a self link
-            uid: _req.uid(),
-            gid: creation_gid(&parent_attrs, _req.gid()),
+            uid: owner.uid,
+            gid: creation_gid(&parent_attrs, owner.gid),
             rdev: 0,
             flags: 0,
             xattrs: BTreeMap::default(),
@@ -1420,15 +1441,15 @@ impl Filesystem for SimpleFS {
             parent_attrs.uid,
             parent_attrs.gid,
             parent_attrs.mode,
-            _req.uid(),
-            _req.gid(),
+            caller_uid(_req),
+            caller_gid(_req),
             AccessFlags::W_OK,
         ) {
             reply.error(Errno::EACCES);
             return;
         }
 
-        let uid = _req.uid();
+        let uid = caller_uid(_req);
         // "Sticky bit" handling
         if parent_attrs.mode & libc::S_ISVTX as u16 != 0
             && uid != 0
@@ -1499,8 +1520,8 @@ impl Filesystem for SimpleFS {
             parent_attrs.uid,
             parent_attrs.gid,
             parent_attrs.mode,
-            _req.uid(),
-            _req.gid(),
+            caller_uid(_req),
+            caller_gid(_req),
             AccessFlags::W_OK,
         ) {
             reply.error(Errno::EACCES);
@@ -1509,9 +1530,9 @@ impl Filesystem for SimpleFS {
 
         // "Sticky bit" handling
         if parent_attrs.mode & libc::S_ISVTX as u16 != 0
-            && _req.uid() != 0
-            && _req.uid() != parent_attrs.uid
-            && _req.uid() != attrs.uid
+            && caller_uid(_req) != 0
+            && caller_uid(_req) != parent_attrs.uid
+            && caller_uid(_req) != attrs.uid
         {
             reply.error(Errno::EACCES);
             return;
@@ -1540,6 +1561,7 @@ impl Filesystem for SimpleFS {
         parent: INodeNo,
         link_name: &OsStr,
         target: &Path,
+        owner: Owner,
         reply: ReplyEntry,
     ) {
         debug!("symlink() called with {parent:?} {link_name:?} {target:?}");
@@ -1560,8 +1582,8 @@ impl Filesystem for SimpleFS {
             parent_attrs.uid,
             parent_attrs.gid,
             parent_attrs.mode,
-            _req.uid(),
-            _req.gid(),
+            caller_uid(_req),
+            caller_gid(_req),
             AccessFlags::W_OK,
         ) {
             reply.error(Errno::EACCES);
@@ -1584,8 +1606,8 @@ impl Filesystem for SimpleFS {
             kind: FileKind::Symlink,
             mode: 0o777,
             hardlinks: 1,
-            uid: _req.uid(),
-            gid: creation_gid(&parent_attrs, _req.gid()),
+            uid: owner.uid,
+            gid: creation_gid(&parent_attrs, owner.gid),
             rdev: 0,
             flags: 0,
             xattrs: BTreeMap::default(),
@@ -1622,6 +1644,7 @@ impl Filesystem for SimpleFS {
         newparent: INodeNo,
         newname: &OsStr,
         flags: RenameFlags,
+        owner: Option<Owner>,
         reply: ReplyEmpty,
     ) {
         debug!(
@@ -1648,8 +1671,8 @@ impl Filesystem for SimpleFS {
             parent_attrs.uid,
             parent_attrs.gid,
             parent_attrs.mode,
-            _req.uid(),
-            _req.gid(),
+            caller_uid(_req),
+            caller_gid(_req),
             AccessFlags::W_OK,
         ) {
             reply.error(Errno::EACCES);
@@ -1658,9 +1681,9 @@ impl Filesystem for SimpleFS {
 
         // "Sticky bit" handling
         if parent_attrs.mode & libc::S_ISVTX as u16 != 0
-            && _req.uid() != 0
-            && _req.uid() != parent_attrs.uid
-            && _req.uid() != inode_attrs.uid
+            && caller_uid(_req) != 0
+            && caller_uid(_req) != parent_attrs.uid
+            && caller_uid(_req) != inode_attrs.uid
         {
             reply.error(Errno::EACCES);
             return;
@@ -1678,8 +1701,8 @@ impl Filesystem for SimpleFS {
             new_parent_attrs.uid,
             new_parent_attrs.gid,
             new_parent_attrs.mode,
-            _req.uid(),
-            _req.gid(),
+            caller_uid(_req),
+            caller_gid(_req),
             AccessFlags::W_OK,
         ) {
             reply.error(Errno::EACCES);
@@ -1689,9 +1712,9 @@ impl Filesystem for SimpleFS {
         // "Sticky bit" handling in new_parent
         if new_parent_attrs.mode & libc::S_ISVTX as u16 != 0 {
             if let Ok(existing_attrs) = self.lookup_name(newparent, newname) {
-                if _req.uid() != 0
-                    && _req.uid() != new_parent_attrs.uid
-                    && _req.uid() != existing_attrs.uid
+                if caller_uid(_req) != 0
+                    && caller_uid(_req) != new_parent_attrs.uid
+                    && caller_uid(_req) != existing_attrs.uid
                 {
                     reply.error(Errno::EACCES);
                     return;
@@ -1832,8 +1855,8 @@ impl Filesystem for SimpleFS {
                 inode_attrs.uid,
                 inode_attrs.gid,
                 inode_attrs.mode,
-                _req.uid(),
-                _req.gid(),
+                caller_uid(_req),
+                caller_gid(_req),
                 AccessFlags::W_OK,
             )
         {
@@ -1866,6 +1889,12 @@ impl Filesystem for SimpleFS {
         // is a character device with device number 0 and no permission bits, which is not a
         // node anything can be read from or written to
         if whiteout {
+            // The kernel names the owner for exactly this case: a rename creates an inode
+            // only here, and this is the only rename it sends ids for
+            let Some(owner) = owner else {
+                reply.error(Errno::EIO);
+                return;
+            };
             let whiteout_inode = self.allocate_next_inode();
             let whiteout_attrs = InodeAttributes {
                 inode: whiteout_inode.0,
@@ -1878,8 +1907,8 @@ impl Filesystem for SimpleFS {
                 kind: FileKind::CharDevice,
                 mode: 0,
                 hardlinks: 1,
-                uid: _req.uid(),
-                gid: creation_gid(&parent_attrs, _req.gid()),
+                uid: owner.uid,
+                gid: creation_gid(&parent_attrs, owner.gid),
                 rdev: 0,
                 flags: 0,
                 xattrs: BTreeMap::default(),
@@ -1999,8 +2028,8 @@ impl Filesystem for SimpleFS {
                     attr.uid,
                     attr.gid,
                     attr.mode,
-                    _req.uid(),
-                    _req.gid(),
+                    caller_uid(_req),
+                    caller_gid(_req),
                     AccessFlags::from_bits_retain(access_mask),
                 ) {
                     attr.open_file_handles += 1;
@@ -2176,8 +2205,8 @@ impl Filesystem for SimpleFS {
                     attr.uid,
                     attr.gid,
                     attr.mode,
-                    _req.uid(),
-                    _req.gid(),
+                    caller_uid(_req),
+                    caller_gid(_req),
                     AccessFlags::from_bits_retain(access_mask),
                 ) {
                     attr.open_file_handles += 1;
@@ -2397,7 +2426,14 @@ impl Filesystem for SimpleFS {
         debug!("access() called with {ino:?} {mask:?}");
         match self.get_inode(ino) {
             Ok(attr) => {
-                if check_access(attr.uid, attr.gid, attr.mode, _req.uid(), _req.gid(), mask) {
+                if check_access(
+                    attr.uid,
+                    attr.gid,
+                    attr.mode,
+                    caller_uid(_req),
+                    caller_gid(_req),
+                    mask,
+                ) {
                     reply.ok();
                 } else {
                     reply.error(Errno::EACCES);
@@ -2416,6 +2452,7 @@ impl Filesystem for SimpleFS {
         _umask: u32,
         flags: i32,
         _kill_suid_gid: bool,
+        owner: Owner,
         reply: ReplyCreate,
     ) {
         debug!("create() called with {parent:?} {name:?}");
@@ -2452,8 +2489,8 @@ impl Filesystem for SimpleFS {
             parent_attrs.uid,
             parent_attrs.gid,
             parent_attrs.mode,
-            req.uid(),
-            req.gid(),
+            caller_uid(req),
+            caller_gid(req),
             AccessFlags::W_OK,
         ) {
             reply.error(Errno::EACCES);
@@ -2464,7 +2501,7 @@ impl Filesystem for SimpleFS {
         parent_attrs.last_metadata_changed = now;
         self.write_inode(&parent_attrs);
 
-        if req.uid() != 0 {
+        if caller_uid(req) != 0 {
             mode &= !(libc::S_ISUID | libc::S_ISGID) as u32;
         }
 
@@ -2472,7 +2509,7 @@ impl Filesystem for SimpleFS {
         {
             let kind = as_file_kind(mode);
             // FreeBSD: sticky bit only valid on directories; otherwise EFTYPE
-            if req.uid() != 0
+            if caller_uid(req) != 0
                 && (mode as u16 & libc::S_ISVTX as u16) != 0
                 && kind != FileKind::Directory
             {
@@ -2493,8 +2530,8 @@ impl Filesystem for SimpleFS {
             kind: as_file_kind(mode),
             mode: self.creation_mode(mode),
             hardlinks: 1,
-            uid: req.uid(),
-            gid: creation_gid(&parent_attrs, req.gid()),
+            uid: owner.uid,
+            gid: creation_gid(&parent_attrs, owner.gid),
             rdev: 0,
             flags: 0,
             xattrs: BTreeMap::default(),
@@ -2659,6 +2696,7 @@ impl Filesystem for SimpleFS {
         _umask: u32,
         flags: i32,
         _kill_suid_gid: bool,
+        owner: Owner,
         reply: ReplyCreate,
     ) {
         debug!("tmpfile() called with {parent:?} {mode:o}");
@@ -2700,8 +2738,8 @@ impl Filesystem for SimpleFS {
             parent_attrs.uid,
             parent_attrs.gid,
             parent_attrs.mode,
-            req.uid(),
-            req.gid(),
+            caller_uid(req),
+            caller_gid(req),
             AccessFlags::W_OK | AccessFlags::X_OK,
         ) {
             reply.error(Errno::EACCES);
@@ -2710,7 +2748,7 @@ impl Filesystem for SimpleFS {
 
         // The parent's timestamps are left alone, since no entry is added to it
 
-        if req.uid() != 0 {
+        if caller_uid(req) != 0 {
             mode &= !(libc::S_ISUID | libc::S_ISGID) as u32;
         }
 
@@ -2730,8 +2768,8 @@ impl Filesystem for SimpleFS {
             // What makes it anonymous. Closing the last handle without linking it collects it,
             // and link() takes it from here to 1
             hardlinks: 0,
-            uid: req.uid(),
-            gid: creation_gid(&parent_attrs, req.gid()),
+            uid: owner.uid,
+            gid: creation_gid(&parent_attrs, owner.gid),
             rdev: 0,
             flags: 0,
             xattrs: BTreeMap::default(),
