@@ -134,6 +134,12 @@ fn default_init_flags(capabilities: InitFlags) -> InitFlags {
     flags
 }
 
+/// The value [`Request::uid`] and [`Request::gid`] carry when the kernel withheld the caller's
+/// ids, which it does on an idmapped mount for every request that does not create an inode.
+///
+/// Only reachable once [`InitFlags::FUSE_ALLOW_IDMAP`] has been negotiated.
+pub const FUSE_INVALID_UIDGID: u32 = u32::MAX;
+
 /// Capabilities fuser has no implementation behind, whatever the kernel advertises.
 ///
 /// Negotiating one of these makes the kernel change the protocol in a way fuser gets wrong, or
@@ -143,12 +149,6 @@ fn default_init_flags(capabilities: InitFlags) -> InitFlags {
 ///
 /// Every bit named here is above 31, where macFUSE defines no capability of its own. The refused
 /// bits that do alias one live in `ALIASED_UNSUPPORTED_CAPABILITIES`, which is empty on macOS.
-/// The value [`Request::uid`] and [`Request::gid`] carry when the kernel withheld the caller's
-/// ids, which it does on an idmapped mount for every request that does not create an inode.
-///
-/// Only reachable once [`InitFlags::FUSE_ALLOW_IDMAP`] has been negotiated.
-pub const FUSE_INVALID_UIDGID: u32 = u32::MAX;
-
 const UNSUPPORTED_CAPABILITIES: InitFlags = ALIASED_UNSUPPORTED_CAPABILITIES
     // The kernel appends a fuse_secctx_header extension after the name of a create, mkdir,
     // symlink or mknod request. fuser stops parsing at the name, so the security context is
@@ -276,12 +276,11 @@ pub struct StatxAttr {
     pub btime: Option<SystemTime>,
     /// Properties of the file that are set, such as immutable or append-only.
     ///
-    /// **The kernel currently discards this.** `fuse_do_statx()` takes the mask, the creation
-    /// time and the basic stats out of the reply and ignores the attributes, so nothing set
-    /// here reaches `statx(2)` - checked against mainline as of 6.18. The field is part of
-    /// the wire format and is sent, so a filesystem that fills it is correct today and needs
-    /// no change if the kernel starts reading it, but do not expect `chattr +i` to become
-    /// visible to `statx(2)` this way.
+    /// **The kernel discards this.** `fuse_do_statx()` takes the mask, the creation time and
+    /// the basic stats out of the reply and ignores the attributes, so nothing set here
+    /// reaches `statx(2)`, and `chattr +i` cannot be made visible to it this way. The field
+    /// is part of the wire format and is sent regardless, so a filesystem that fills it needs
+    /// no change should the kernel start reading it.
     pub attributes: StatxAttributes,
     /// Properties this filesystem knows about at all, set or not, distinguishing "not set"
     /// from "cannot say".
@@ -673,8 +672,7 @@ pub trait Filesystem: Send + Sync + 'static {
     /// the reply itself.
     ///
     /// Answering `ENOSYS`, which is the default, is permanent: the kernel stops sending
-    /// `FUSE_STATX` on this connection and serves `statx(2)` out of [`Filesystem::getattr`],
-    /// which is what it did before this existed.
+    /// `FUSE_STATX` on this connection and serves `statx(2)` out of [`Filesystem::getattr`].
     fn statx(
         &self,
         _req: &Request,
