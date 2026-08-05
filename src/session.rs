@@ -833,20 +833,18 @@ mod test {
         ManuallyDrop::into_inner(tmp);
     }
 
-    /// Negotiating FUSE_ALLOW_IDMAP changes what the kernel puts in every request header, and
-    /// what it does to the connection if the mount is not set up for it. Both are the
-    /// kernel's rules rather than fuser's, so they are worth pinning against a real one:
-    /// requests that do not create an inode arrive with the caller's ids withheld, and the
-    /// ones that do still carry them, being the owner the new inode should get.
+    /// An idmapped mount has no caller ids to report. Pinned against a real kernel, since
+    /// what it sends is its rule rather than fuser's: nothing reports a caller, and the
+    /// requests that create an inode name its owner instead - the caller's ids mapped through
+    /// the mount, which are not the caller's.
     #[test]
     #[cfg(target_os = "linux")]
-    fn idmap_withholds_ids_except_when_creating() {
+    fn idmap_withholds_caller_ids_and_names_the_owner() {
         use std::sync::atomic::AtomicBool;
         use std::sync::atomic::Ordering;
         use std::time::Duration;
         use std::time::SystemTime;
 
-        use crate::FUSE_INVALID_UIDGID;
         use crate::FileAttr;
         use crate::FileType;
         use crate::INodeNo;
@@ -854,8 +852,11 @@ mod test {
 
         struct IdmapFs {
             negotiated: Arc<AtomicBool>,
-            getattr_uid: Arc<Mutex<Option<u32>>>,
-            mkdir_uid: Arc<Mutex<Option<u32>>>,
+            /// Whether `getattr` was given the caller's uid at all
+            getattr_had_uid: Arc<Mutex<Option<bool>>>,
+            mkdir_owner: Arc<Mutex<Option<crate::Owner>>>,
+            /// Whether the request that names an owner also reported a caller
+            mkdir_had_uid: Arc<Mutex<Option<bool>>>,
         }
 
         impl Filesystem for IdmapFs {
@@ -884,7 +885,7 @@ mod test {
                 _fh: Option<crate::FileHandle>,
                 reply: crate::ReplyAttr,
             ) {
-                *self.getattr_uid.lock() = Some(req.uid());
+                *self.getattr_had_uid.lock() = Some(req.uid().is_some());
                 reply.attr(
                     &Duration::from_secs(0),
                     &FileAttr {
@@ -908,15 +909,17 @@ mod test {
             }
             fn mkdir(
                 &self,
-                req: &Request,
+                _req: &Request,
                 _parent: INodeNo,
                 _name: &std::ffi::OsStr,
                 _mode: u32,
                 _umask: u32,
+                owner: crate::Owner,
                 reply: crate::ReplyEntry,
             ) {
-                *self.mkdir_uid.lock() = Some(req.uid());
-                // Nothing is actually created; the ids are the whole point here
+                *self.mkdir_had_uid.lock() = Some(_req.uid().is_some());
+                *self.mkdir_owner.lock() = Some(owner);
+                // Nothing is created; the owner is the whole point here
                 reply.error(crate::Errno::ENOSPC);
             }
         }
@@ -924,8 +927,9 @@ mod test {
         let tmp = ManuallyDrop::new(tempfile::tempdir().unwrap());
         let mountpoint = tmp.path().canonicalize().unwrap();
         let negotiated = Arc::new(AtomicBool::new(false));
-        let getattr_uid = Arc::new(Mutex::new(None));
-        let mkdir_uid = Arc::new(Mutex::new(None));
+        let getattr_had_uid = Arc::new(Mutex::new(None));
+        let mkdir_owner = Arc::new(Mutex::new(None));
+        let mkdir_had_uid = Arc::new(Mutex::new(None));
 
         // Both are what the capability requires: without default_permissions the kernel
         // refuses the connection, and without allow_other fuser refuses the capability
@@ -936,8 +940,9 @@ mod test {
         let session = match Session::new(
             IdmapFs {
                 negotiated: negotiated.clone(),
-                getattr_uid: getattr_uid.clone(),
-                mkdir_uid: mkdir_uid.clone(),
+                getattr_had_uid: getattr_had_uid.clone(),
+                mkdir_owner: mkdir_owner.clone(),
+                mkdir_had_uid: mkdir_had_uid.clone(),
             },
             &mountpoint,
             &config,
@@ -957,8 +962,9 @@ mod test {
         let _ = std::fs::metadata(&mountpoint);
         let _ = std::fs::create_dir(mountpoint.join("newdir"));
 
-        let getattr_uid = getattr_uid.lock().take();
-        let mkdir_uid = mkdir_uid.lock().take();
+        let getattr_had_uid = getattr_had_uid.lock().take();
+        let mkdir_owner = mkdir_owner.lock().take();
+        let mkdir_had_uid = mkdir_had_uid.lock().take();
         let negotiated = negotiated.load(Ordering::SeqCst);
         drop(bg);
         ManuallyDrop::into_inner(tmp);
@@ -972,14 +978,25 @@ mod test {
             "a mount with default_permissions and allow_other must be allowed the capability"
         );
         assert_eq!(
-            getattr_uid,
-            Some(FUSE_INVALID_UIDGID),
+            getattr_had_uid,
+            Some(false),
             "a request that creates nothing must arrive with the caller's ids withheld"
         );
         assert_eq!(
-            mkdir_uid,
-            Some(nix::unistd::geteuid().as_raw()),
-            "a request that creates an inode must still carry the owner it should get"
+            mkdir_owner,
+            Some(crate::Owner {
+                uid: nix::unistd::geteuid().as_raw(),
+                gid: nix::unistd::getegid().as_raw(),
+            }),
+            "a request that creates an inode must name the owner it should get"
+        );
+        // The header carries ids on this request, but they are the owner mapped through the
+        // mount rather than the caller's. Reporting them as the caller would let an idmapping
+        // that lands on uid 0 pass for root
+        assert_eq!(
+            mkdir_had_uid,
+            Some(false),
+            "the mapped owner must not be reported as the caller's id"
         );
     }
 
@@ -1262,6 +1279,7 @@ mod test {
                 _umask: u32,
                 flags: i32,
                 _kill_suid_gid: bool,
+                _owner: crate::Owner,
                 reply: ReplyCreate,
             ) {
                 *self.seen.lock() = Some((mode, flags));
@@ -1349,8 +1367,11 @@ mod test {
     /// from there would carry uid 0 and pid 0.
     #[test]
     fn requests_carry_the_calling_task() {
+        /// The caller's uid, absent on an idmapped mount, and the calling thread's id
+        type Caller = (Option<u32>, u32);
+
         struct CallerFs {
-            seen: Arc<Mutex<Option<(u32, u32)>>>,
+            seen: Arc<Mutex<Option<Caller>>>,
         }
         impl Filesystem for CallerFs {
             fn getattr(
@@ -1386,8 +1407,8 @@ mod test {
         let (uid, pid) = seen.expect("the filesystem must have been asked for the root inode");
         assert_eq!(
             uid,
-            geteuid().as_raw(),
-            "the request must carry the caller's uid"
+            Some(geteuid().as_raw()),
+            "the request must carry the caller's uid, this mount not being idmapped"
         );
         // Discriminating even when the test runs as root, where the uid above is 0 either
         // way. The kernel takes this from task_pid(current), so it is the id of the thread

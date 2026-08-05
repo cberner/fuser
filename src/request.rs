@@ -12,6 +12,7 @@ use log::debug;
 use log::error;
 
 use crate::Filesystem;
+use crate::Owner;
 use crate::PollNotifier;
 use crate::Request;
 use crate::channel::ChannelSender;
@@ -21,6 +22,7 @@ use crate::ll::Errno;
 use crate::ll::ResponseData;
 use crate::ll::ResponseErrno;
 use crate::ll::flags::init_flags::InitFlags;
+use crate::ll::fuse_abi::fuse_in_header;
 use crate::reply::Reply;
 use crate::reply::ReplyDirectory;
 use crate::reply::ReplyDirectoryPlus;
@@ -36,6 +38,15 @@ pub(crate) struct RequestWithSender<'a> {
     ch: ChannelSender,
     /// Parsed request
     pub(crate) request: ll::AnyRequest<'a>,
+    /// The header as the filesystem sees it, where that differs from the one on the wire.
+    ///
+    /// An idmapped mount has no caller ids to report. The kernel already leaves them out of
+    /// most requests; the ones it does send ids for are sending the owner for an inode they
+    /// create, which is those ids mapped through the mount and so not the caller's. Reporting
+    /// them as the caller's would invite a filesystem to decide policy against a mapped id -
+    /// letting an idmapping that lands on uid 0 pass a check for root. They reach the
+    /// filesystem as an `Owner` argument instead, and the caller reads as unknown here
+    masked_header: Option<fuse_in_header>,
 }
 
 impl<'a> RequestWithSender<'a> {
@@ -54,7 +65,20 @@ impl<'a> RequestWithSender<'a> {
         };
         request.set_negotiated(negotiated);
 
-        Some(Self { ch, request })
+        let masked_header =
+            negotiated
+                .contains(InitFlags::FUSE_ALLOW_IDMAP)
+                .then(|| fuse_in_header {
+                    uid: crate::FUSE_INVALID_UIDGID,
+                    gid: crate::FUSE_INVALID_UIDGID,
+                    ..request.header().clone()
+                });
+
+        Some(Self {
+            ch,
+            request,
+            masked_header,
+        })
     }
 
     /// Dispatch request to the given filesystem.
@@ -174,6 +198,7 @@ impl<'a> RequestWithSender<'a> {
                     x.mode(),
                     x.umask(),
                     x.rdev(),
+                    self.owner(),
                     self.reply(),
                 );
             }
@@ -184,6 +209,7 @@ impl<'a> RequestWithSender<'a> {
                     x.name().as_ref(),
                     x.mode(),
                     x.umask(),
+                    self.owner(),
                     self.reply(),
                 );
             }
@@ -209,6 +235,7 @@ impl<'a> RequestWithSender<'a> {
                     self.request.nodeid(),
                     x.link_name().as_ref(),
                     Path::new(x.target()),
+                    self.owner(),
                     self.reply(),
                 );
             }
@@ -226,6 +253,7 @@ impl<'a> RequestWithSender<'a> {
                     x.dest().dir,
                     x.dest().name.as_ref(),
                     flags,
+                    self.optional_owner(),
                     self.reply(),
                 );
             }
@@ -404,6 +432,7 @@ impl<'a> RequestWithSender<'a> {
                     x.umask(),
                     x.flags(),
                     x.kill_suid_gid(),
+                    self.owner(),
                     self.reply(),
                 );
             }
@@ -519,6 +548,7 @@ impl<'a> RequestWithSender<'a> {
                     x.to().dir,
                     x.to().name.as_ref(),
                     x.flags(),
+                    self.optional_owner(),
                     self.reply(),
                 );
             }
@@ -568,6 +598,7 @@ impl<'a> RequestWithSender<'a> {
                     x.umask(),
                     x.flags(),
                     x.kill_suid_gid(),
+                    self.owner(),
                     self.reply(),
                 );
             }
@@ -602,6 +633,29 @@ impl<'a> RequestWithSender<'a> {
 
     /// Create a reply object for this request that can be passed to the filesystem
     /// implementation and makes sure that a request is replied exactly once
+    /// The owner for an inode this request creates.
+    ///
+    /// On an idmapped mount these are the caller's ids mapped through the mount's idmapping,
+    /// which is why they are not the caller's ids; otherwise they are the caller's unchanged.
+    fn owner(&self) -> Owner {
+        Owner {
+            uid: self.request.header().uid,
+            gid: self.request.header().gid,
+        }
+    }
+
+    /// The owner for an inode this request may create, where the kernel sent one.
+    ///
+    /// A rename creates an inode only with `RENAME_WHITEOUT`, and that is the only rename an
+    /// idmapped mount sends ids for. Off such a mount every request carries them, so this is
+    /// `Some` whatever the flags say, and it names the whiteout's owner only when the flags
+    /// call for one.
+    fn optional_owner(&self) -> Option<Owner> {
+        let owner = self.owner();
+        (owner.uid != crate::FUSE_INVALID_UIDGID && owner.gid != crate::FUSE_INVALID_UIDGID)
+            .then_some(owner)
+    }
+
     pub(crate) fn reply<T: Reply>(&self) -> T {
         Reply::new(self.request.unique(), ReplySender::Channel(self.ch.clone()))
     }
@@ -609,6 +663,6 @@ impl<'a> RequestWithSender<'a> {
     /// Returns a Request reference for this request
     #[inline]
     fn request_header(&self) -> &Request {
-        Request::ref_cast(self.request.header())
+        Request::ref_cast(self.masked_header.as_ref().unwrap_or(self.request.header()))
     }
 }

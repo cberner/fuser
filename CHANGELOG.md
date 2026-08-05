@@ -1,6 +1,15 @@
 # FUSE for Rust - Changelog
 
 ## Unreleased
+* **Breaking:** `Request::uid()` and `Request::gid()` return `Option<u32>`. An idmapped mount
+  has no caller ids to report, so there is not always a uid. A filesystem that does not request
+  `InitFlags::FUSE_ALLOW_IDMAP` is always given ids and can unwrap
+* **Breaking:** `mknod()`, `mkdir()`, `symlink()`, `create()` and `tmpfile()` take an `Owner`
+  argument, which is who the inode they create belongs to, and `rename()` takes an
+  `Option<Owner>` for the inode a `RENAME_WHITEOUT` leaves behind. Those are exactly the requests the
+  kernel sends ids for, and on an idmapped mount the owner is the caller's ids mapped through
+  the mount's idmapping rather than the ids themselves, so reading it off the request would
+  have been wrong
 * `KernelConfig::add_capabilities()` now accepts `InitFlags::FUSE_ALLOW_IDMAP` (ABI 7.41),
   which lets the mount be idmapped. It is accepted only where it can be honored - the session
   must allow other users, and `default_permissions` must be in force, whether from

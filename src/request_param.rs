@@ -21,24 +21,29 @@ impl Request {
         ll::RequestId(self.header.unique)
     }
 
-    /// Returns the uid of this request, or [`crate::FUSE_INVALID_UIDGID`] when the kernel
-    /// withheld it.
+    /// Returns the uid of the process that triggered this request, or `None` when the kernel
+    /// did not send one.
     ///
-    /// It withholds it on every request that does not create an inode, and only once
-    /// [`crate::InitFlags::FUSE_ALLOW_IDMAP`] has been negotiated - which a filesystem has to
-    /// ask for, so one that does not is never handed an invalid id. The requests that do
-    /// create an inode still carry ids, and they are the owner the new inode should get,
-    /// already mapped.
+    /// An idmapped mount has none to send: which ids a caller would have depends on the mount
+    /// it came through. Nothing is left needing them. The capability that allows such a mount,
+    /// [`crate::InitFlags::FUSE_ALLOW_IDMAP`], can only be negotiated where
+    /// `default_permissions` is in force, so the kernel makes the access checks these ids
+    /// would otherwise serve, and the requests that create an inode are given an
+    /// [`crate::Owner`] naming who it belongs to. Those ids reach the filesystem only that
+    /// way: they are the owner mapped through the mount rather than the caller's, so
+    /// reporting them here would invite a check against the wrong identity.
+    ///
+    /// A filesystem that does not request that capability is always given ids.
     #[inline]
-    pub fn uid(&self) -> u32 {
-        self.header.uid
+    pub fn uid(&self) -> Option<u32> {
+        (self.header.uid != crate::FUSE_INVALID_UIDGID).then_some(self.header.uid)
     }
 
-    /// Returns the gid of this request, or [`crate::FUSE_INVALID_UIDGID`] when the kernel
-    /// withheld it. See [`Request::uid`] for when that is.
+    /// Returns the gid of the process that triggered this request, or `None` when the kernel
+    /// did not send one. See [`Request::uid`] for when that is.
     #[inline]
-    pub fn gid(&self) -> u32 {
-        self.header.gid
+    pub fn gid(&self) -> Option<u32> {
+        (self.header.gid != crate::FUSE_INVALID_UIDGID).then_some(self.header.gid)
     }
 
     /// Returns the pid of this request

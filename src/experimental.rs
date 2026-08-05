@@ -24,14 +24,14 @@ pub type Result<T> = std::result::Result<T, Errno>;
 
 /// Standard request context for all filesystem operations
 pub struct RequestContext {
-    uid: u32,
-    gid: u32,
+    uid: Option<u32>,
+    gid: Option<u32>,
     pid: u32,
     request_id: RequestId,
 }
 
 impl RequestContext {
-    fn new(uid: u32, gid: u32, pid: u32, request_id: RequestId) -> Self {
+    fn new(uid: Option<u32>, gid: Option<u32>, pid: u32, request_id: RequestId) -> Self {
         Self {
             uid,
             gid,
@@ -40,13 +40,15 @@ impl RequestContext {
         }
     }
 
-    /// The user making the request
-    pub fn user_id(&self) -> u32 {
+    /// The user making the request, or `None` where the kernel withheld it. See
+    /// [`Request::uid`] for when that is
+    pub fn user_id(&self) -> Option<u32> {
         self.uid
     }
 
-    /// The group the user belongs to
-    pub fn group_id(&self) -> u32 {
+    /// The group the user belongs to, or `None` where the kernel withheld it. See
+    /// [`Request::uid`] for when that is
+    pub fn group_id(&self) -> Option<u32> {
         self.gid
     }
 
