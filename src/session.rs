@@ -825,6 +825,190 @@ mod test {
         ManuallyDrop::into_inner(tmp);
     }
 
+    /// statx(2) must reach Filesystem::statx(), and the creation time it carries - which no
+    /// other request can express on Linux - must arrive intact. Also pins the one field the
+    /// wire format carries but the kernel drops, so that a kernel change shows up here.
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn statx_reports_btime() {
+        use std::os::unix::ffi::OsStringExt;
+        use std::time::Duration;
+        use std::time::SystemTime;
+
+        use crate::FileAttr;
+        use crate::FileType;
+        use crate::INodeNo;
+        use crate::ReplyStatx;
+        use crate::StatxAttr;
+        use crate::StatxAttributes;
+        use crate::StatxMask;
+
+        const FILE_INO: INodeNo = INodeNo(2);
+        /// Distinctive enough that reading it out of the wrong field would show
+        const BTIME_SECS: u64 = 1_000_000_000;
+
+        struct StatxFs {
+            asked: Arc<Mutex<Option<StatxMask>>>,
+        }
+
+        impl StatxFs {
+            fn attr(ino: INodeNo, kind: FileType) -> FileAttr {
+                FileAttr {
+                    ino,
+                    size: 4096,
+                    blocks: 8,
+                    atime: SystemTime::UNIX_EPOCH,
+                    mtime: SystemTime::UNIX_EPOCH,
+                    ctime: SystemTime::UNIX_EPOCH,
+                    crtime: SystemTime::UNIX_EPOCH,
+                    kind,
+                    perm: if kind == FileType::Directory {
+                        0o755
+                    } else {
+                        0o644
+                    },
+                    nlink: 1,
+                    uid: 0,
+                    gid: 0,
+                    rdev: 0,
+                    blksize: 512,
+                    flags: 0,
+                }
+            }
+        }
+
+        impl Filesystem for StatxFs {
+            fn lookup(
+                &self,
+                _req: &Request,
+                _parent: INodeNo,
+                _name: &std::ffi::OsStr,
+                reply: crate::ReplyEntry,
+            ) {
+                reply.entry(
+                    &Duration::from_secs(0),
+                    &Self::attr(FILE_INO, FileType::RegularFile),
+                    crate::Generation(0),
+                );
+            }
+            fn getattr(
+                &self,
+                _req: &Request,
+                ino: INodeNo,
+                _fh: Option<crate::FileHandle>,
+                reply: crate::ReplyAttr,
+            ) {
+                let kind = if ino == FILE_INO {
+                    FileType::RegularFile
+                } else {
+                    FileType::Directory
+                };
+                reply.attr(&Duration::from_secs(0), &Self::attr(ino, kind));
+            }
+            fn statx(
+                &self,
+                _req: &Request,
+                ino: INodeNo,
+                _fh: Option<crate::FileHandle>,
+                _flags: u32,
+                mask: StatxMask,
+                reply: ReplyStatx,
+            ) {
+                *self.asked.lock() = Some(mask);
+                let kind = if ino == FILE_INO {
+                    FileType::RegularFile
+                } else {
+                    FileType::Directory
+                };
+                reply.statx(
+                    &Duration::from_secs(0),
+                    &StatxAttr {
+                        btime: Some(SystemTime::UNIX_EPOCH + Duration::from_secs(BTIME_SECS)),
+                        attributes: StatxAttributes::IMMUTABLE | StatxAttributes::APPEND,
+                        attributes_mask: StatxAttributes::IMMUTABLE
+                            | StatxAttributes::APPEND
+                            | StatxAttributes::NODUMP,
+                        ..Self::attr(ino, kind).into()
+                    },
+                );
+            }
+        }
+
+        let tmp = ManuallyDrop::new(tempfile::tempdir().unwrap());
+        let mountpoint = tmp.path().canonicalize().unwrap();
+        let asked = Arc::new(Mutex::new(None));
+        let session = Session::new(
+            StatxFs {
+                asked: asked.clone(),
+            },
+            &mountpoint,
+            &Config::default(),
+        )
+        .unwrap();
+        // FUSE_STATX arrived in ABI 7.38. An older kernel answers statx(2) out of
+        // FUSE_GETATTR without ever asking, so there is nothing to assert against
+        let supported = session
+            .proto_version
+            .is_some_and(|v| v >= crate::ll::fuse_abi::FUSE_STATX_VERSION);
+        let bg = session.spawn().unwrap();
+        if !supported {
+            eprintln!("skipping statx: the kernel's FUSE protocol predates 7.38");
+            bg.umount_and_join().unwrap();
+            ManuallyDrop::into_inner(tmp);
+            return;
+        }
+
+        let mut buf: libc::statx = unsafe { std::mem::zeroed() };
+        let path =
+            std::ffi::CString::new(mountpoint.join("file").into_os_string().into_vec()).unwrap();
+        let rc = unsafe {
+            libc::statx(
+                libc::AT_FDCWD,
+                path.as_ptr(),
+                libc::AT_SYMLINK_NOFOLLOW,
+                libc::STATX_BASIC_STATS | libc::STATX_BTIME,
+                &mut buf,
+            )
+        };
+        let err = std::io::Error::last_os_error();
+
+        let asked = asked.lock().take();
+        drop(bg);
+        ManuallyDrop::into_inner(tmp);
+
+        assert_eq!(rc, 0, "statx(2) must be answered: {err}");
+        assert!(
+            asked.is_some(),
+            "statx(2) must reach Filesystem::statx rather than falling back to getattr"
+        );
+        assert_eq!(
+            buf.stx_btime.tv_sec as u64, BTIME_SECS,
+            "the creation time must survive the round trip"
+        );
+        assert_ne!(
+            buf.stx_mask & libc::STATX_BTIME,
+            0,
+            "the reply must mark the creation time as filled in"
+        );
+        assert_eq!(
+            buf.stx_size, 4096,
+            "the fields stat(2) also carries must still be right"
+        );
+        eprintln!(
+            "DIAG stx_attributes={:#x} stx_attributes_mask={:#x} stx_mask={:#x} btime={}",
+            buf.stx_attributes, buf.stx_attributes_mask, buf.stx_mask, buf.stx_btime.tv_sec
+        ); // The kernel does not pass `attributes` on to the caller: fuse_do_statx() copies the
+        // mask, btime and basic stats out of the reply and ignores this field, so the
+        // immutable and append-only bits set above go nowhere. Asserted so that this stops
+        // being true loudly rather than silently, since the wire format has carried the field
+        // since 7.38 and only the kernel's use of it is missing
+        assert_eq!(
+            buf.stx_attributes, 0,
+            "STATX_ATTR_* from a FUSE filesystem is dropped by the kernel; if this now \
+             arrives, StatxAttr::attributes and the CHANGELOG need their caveats removed"
+        );
+    }
+
     /// An O_TMPFILE open must reach Filesystem::tmpfile() with the mode and flags it was
     /// made with, and hand back a working descriptor. The kernel takes ENOSYS from this as
     /// permanent, so a filesystem that does implement it has one chance to say so.

@@ -41,6 +41,8 @@ pub use crate::ll::flags::fopen_flags::FopenFlags;
 pub use crate::ll::flags::init_flags::InitFlags;
 pub use crate::ll::flags::ioctl_flags::IoctlFlags;
 pub use crate::ll::flags::poll_flags::PollFlags;
+pub use crate::ll::flags::statx_flags::StatxAttributes;
+pub use crate::ll::flags::statx_flags::StatxMask;
 pub use crate::ll::flags::write_flags::WriteFlags;
 pub use crate::ll::fuse_abi::consts;
 pub use crate::ll::request::FileHandle;
@@ -71,6 +73,7 @@ pub use crate::reply::ReplyLseek;
 pub use crate::reply::ReplyOpen;
 pub use crate::reply::ReplyPoll;
 pub use crate::reply::ReplyStatfs;
+pub use crate::reply::ReplyStatx;
 pub use crate::reply::ReplyWrite;
 pub use crate::reply::ReplyXattr;
 pub use crate::request_param::Request;
@@ -256,6 +259,45 @@ pub struct FileAttr {
     pub blksize: u32,
     /// Flags (macOS only, see chflags(2))
     pub flags: u32,
+}
+
+/// What `statx(2)` reports, which is [`FileAttr`] plus the fields `stat(2)` has no room for.
+///
+/// In practice that means [`btime`](Self::btime): a creation time, which `FUSE_GETATTR` has
+/// no field for on Linux and which no other request can carry.
+#[derive(Debug, Clone, Copy)]
+pub struct StatxAttr {
+    /// Everything `stat(2)` also reports
+    pub attr: FileAttr,
+    /// Time of creation, reported to the caller only when this is `Some`. Unlike
+    /// [`FileAttr::crtime`] this is not macOS-only, since `statx(2)` has a field for it
+    pub btime: Option<SystemTime>,
+    /// Properties of the file that are set, such as immutable or append-only.
+    ///
+    /// **The kernel currently discards this.** `fuse_do_statx()` takes the mask, the creation
+    /// time and the basic stats out of the reply and ignores the attributes, so nothing set
+    /// here reaches `statx(2)` - checked against mainline as of 6.18. The field is part of
+    /// the wire format and is sent, so a filesystem that fills it is correct today and needs
+    /// no change if the kernel starts reading it, but do not expect `chattr +i` to become
+    /// visible to `statx(2)` this way.
+    pub attributes: StatxAttributes,
+    /// Properties this filesystem knows about at all, set or not, distinguishing "not set"
+    /// from "cannot say".
+    ///
+    /// Discarded by the kernel for the same reason as [`attributes`](Self::attributes).
+    pub attributes_mask: StatxAttributes,
+}
+
+impl From<FileAttr> for StatxAttr {
+    /// Reports what `stat(2)` would, and nothing beyond it
+    fn from(attr: FileAttr) -> Self {
+        Self {
+            attr,
+            btime: None,
+            attributes: StatxAttributes::empty(),
+            attributes_mask: StatxAttributes::empty(),
+        }
+    }
 }
 
 impl TryFrom<&std::fs::Metadata> for FileAttr {
@@ -564,6 +606,38 @@ pub trait Filesystem: Send + Sync + 'static {
     /// Get file attributes.
     fn getattr(&self, _req: &Request, ino: INodeNo, fh: Option<FileHandle>, reply: ReplyAttr) {
         warn!("[Not Implemented] getattr(ino: {ino:#x?}, fh: {fh:#x?})");
+        reply.error(Errno::ENOSYS);
+    }
+
+    /// Get extended file attributes, for `statx(2)`.
+    ///
+    /// Answering this rather than leaving it to [`Filesystem::getattr`] lets a filesystem
+    /// report a creation time, which no other request can carry: `fuse_attr` has a field for
+    /// it on macOS alone, and `statx(2)` otherwise reports whatever the kernel last cached.
+    ///
+    /// It does not, despite the wire format having room for them, make the `STATX_ATTR_*`
+    /// properties reportable - see [`StatxAttr::attributes`].
+    ///
+    /// `mask` is what the caller asked for. It is a request rather than an obligation:
+    /// answering with more costs nothing, and what the reply actually carries is described by
+    /// the reply itself.
+    ///
+    /// Answering `ENOSYS`, which is the default, is permanent: the kernel stops sending
+    /// `FUSE_STATX` on this connection and serves `statx(2)` out of [`Filesystem::getattr`],
+    /// which is what it did before this existed.
+    fn statx(
+        &self,
+        _req: &Request,
+        ino: INodeNo,
+        fh: Option<FileHandle>,
+        flags: u32,
+        mask: StatxMask,
+        reply: ReplyStatx,
+    ) {
+        warn!(
+            "[Not Implemented] statx(ino: {ino:#x?}, fh: {fh:#x?}, flags: {flags:#x?}, \
+            mask: {mask:?})"
+        );
         reply.error(Errno::ENOSYS);
     }
 
