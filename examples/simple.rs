@@ -2546,10 +2546,9 @@ impl Filesystem for SimpleFS {
         };
 
         // The inode flags this filesystem honors, in the encoding statx uses. The kernel
-        // discards these today - fuse_do_statx() takes the creation time and the basic stats
-        // out of the reply and nothing else - so `chattr +i` stays invisible to statx(2)
-        // whatever is reported here. Filled in anyway, since it costs nothing and is what the
-        // field is for if the kernel starts reading it
+        // discards them, so `chattr +i` stays invisible to statx(2) whatever is reported here
+        // - see StatxAttr::attributes. Filled in because that is what the field is for, and
+        // so nothing has to change should the kernel start reading it
         let mut attributes = fuser::StatxAttributes::empty();
         attributes.set(fuser::StatxAttributes::IMMUTABLE, attrs.is_immutable());
         attributes.set(fuser::StatxAttributes::APPEND, attrs.is_append_only());
@@ -2689,9 +2688,9 @@ impl Filesystem for SimpleFS {
 
         // The directory has to be writable even though nothing is written to it, and
         // searchable even though nothing is looked up in it: `vfs_tmpfile` asks its own
-        // filesystems for `MAY_WRITE | MAY_EXEC` here. Unlike create(), neither is implied by
-        // anything the kernel has already checked - the directory is the operand rather than
-        // a path component, so no lookup has passed through it
+        // filesystems for `MAY_WRITE | MAY_EXEC`. The directory is this request's operand
+        // rather than a component of a path, so no lookup has passed through it and nothing
+        // the kernel has already checked implies either
         if let Err(error_code) = parent_attrs.check_writable() {
             reply.error(error_code);
             return;
@@ -2709,7 +2708,7 @@ impl Filesystem for SimpleFS {
             return;
         }
 
-        // Unlike create(), the parent's timestamps are left alone: no entry is added to it
+        // The parent's timestamps are left alone, since no entry is added to it
 
         if req.uid() != 0 {
             mode &= !(libc::S_ISUID | libc::S_ISGID) as u32;
@@ -2856,8 +2855,8 @@ impl Filesystem for SimpleFS {
             reply.error(Errno::EACCES);
             return;
         }
-        // Unlike a plain write, this is checked against the destination's flags every time
-        // rather than only at open, matching what Linux does for the copy_file_range syscall
+        // Checked on every call rather than at open, which is where the flags are otherwise
+        // enforced: `generic_copy_file_checks` rejects an immutable destination each time
         match self.get_inode(dest_inode) {
             Ok(attrs) => {
                 if let Err(error_code) = attrs.check_writable() {

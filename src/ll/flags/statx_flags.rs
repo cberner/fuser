@@ -40,12 +40,10 @@ bitflags! {
 bitflags! {
     /// Properties of a file that `statx(2)` reports beyond `stat(2)`, as `stx_attributes`.
     ///
-    /// The kernel has no way to learn these from a FUSE filesystem other than being told: it
-    /// fills `stx_attributes` from its own inode flags, which a FUSE filesystem's flags are
-    /// not. Answering `FUSE_STATX` is what makes `chattr +i` and friends visible to
-    /// `statx(2)`.
+    /// The kernel discards these from a FUSE reply - see [`crate::StatxAttr::attributes`],
+    /// which is where they are set and where that is documented.
     ///
-    /// Whatever is reported here counts only where the matching bit is also set in
+    /// Whatever is reported counts only where the matching bit is also set in
     /// [`crate::StatxAttr::attributes_mask`], which is how a caller tells "not set" from
     /// "not supported".
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
