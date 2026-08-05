@@ -441,7 +441,15 @@ impl<FS: Filesystem> Session<FS> {
                 ));
             }
 
-            let mut config = KernelConfig::new(init.capabilities(), init.max_readahead(), v);
+            let mut config = KernelConfig::new(
+                init.capabilities(),
+                init.max_readahead(),
+                v,
+                self.config
+                    .mount_options
+                    .contains(&MountOption::DefaultPermissions),
+                self.allowed,
+            );
 
             // Call filesystem init method and give it a chance to return an error
             let Some(filesystem) = &mut self.filesystem.fs else {
@@ -823,6 +831,156 @@ mod test {
             "the filesystem must not be left mounted with nothing serving it:\n{mounts}"
         );
         ManuallyDrop::into_inner(tmp);
+    }
+
+    /// Negotiating FUSE_ALLOW_IDMAP changes what the kernel puts in every request header, and
+    /// what it does to the connection if the mount is not set up for it. Both are the
+    /// kernel's rules rather than fuser's, so they are worth pinning against a real one:
+    /// requests that do not create an inode arrive with the caller's ids withheld, and the
+    /// ones that do still carry them, being the owner the new inode should get.
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn idmap_withholds_ids_except_when_creating() {
+        use std::sync::atomic::AtomicBool;
+        use std::sync::atomic::Ordering;
+        use std::time::Duration;
+        use std::time::SystemTime;
+
+        use crate::FUSE_INVALID_UIDGID;
+        use crate::FileAttr;
+        use crate::FileType;
+        use crate::INodeNo;
+        use crate::MountOption;
+
+        struct IdmapFs {
+            negotiated: Arc<AtomicBool>,
+            getattr_uid: Arc<Mutex<Option<u32>>>,
+            mkdir_uid: Arc<Mutex<Option<u32>>>,
+        }
+
+        impl Filesystem for IdmapFs {
+            fn init(&mut self, _req: &Request, config: &mut KernelConfig) -> io::Result<()> {
+                let accepted = config
+                    .add_capabilities(crate::InitFlags::FUSE_ALLOW_IDMAP)
+                    .is_ok();
+                self.negotiated.store(accepted, Ordering::SeqCst);
+                Ok(())
+            }
+            /// Answered so that creating a name gets as far as mkdir: the kernel looks it up
+            /// first, and a default ENOSYS there would end the operation before it
+            fn lookup(
+                &self,
+                _req: &Request,
+                _parent: INodeNo,
+                _name: &std::ffi::OsStr,
+                reply: crate::ReplyEntry,
+            ) {
+                reply.error(crate::Errno::ENOENT);
+            }
+            fn getattr(
+                &self,
+                req: &Request,
+                ino: INodeNo,
+                _fh: Option<crate::FileHandle>,
+                reply: crate::ReplyAttr,
+            ) {
+                *self.getattr_uid.lock() = Some(req.uid());
+                reply.attr(
+                    &Duration::from_secs(0),
+                    &FileAttr {
+                        ino,
+                        size: 0,
+                        blocks: 0,
+                        atime: SystemTime::UNIX_EPOCH,
+                        mtime: SystemTime::UNIX_EPOCH,
+                        ctime: SystemTime::UNIX_EPOCH,
+                        crtime: SystemTime::UNIX_EPOCH,
+                        kind: FileType::Directory,
+                        perm: 0o777,
+                        nlink: 2,
+                        uid: 0,
+                        gid: 0,
+                        rdev: 0,
+                        blksize: 512,
+                        flags: 0,
+                    },
+                );
+            }
+            fn mkdir(
+                &self,
+                req: &Request,
+                _parent: INodeNo,
+                _name: &std::ffi::OsStr,
+                _mode: u32,
+                _umask: u32,
+                reply: crate::ReplyEntry,
+            ) {
+                *self.mkdir_uid.lock() = Some(req.uid());
+                // Nothing is actually created; the ids are the whole point here
+                reply.error(crate::Errno::ENOSPC);
+            }
+        }
+
+        let tmp = ManuallyDrop::new(tempfile::tempdir().unwrap());
+        let mountpoint = tmp.path().canonicalize().unwrap();
+        let negotiated = Arc::new(AtomicBool::new(false));
+        let getattr_uid = Arc::new(Mutex::new(None));
+        let mkdir_uid = Arc::new(Mutex::new(None));
+
+        // Both are what the capability requires: without default_permissions the kernel
+        // refuses the connection, and without allow_other fuser refuses the capability
+        let mut config = Config::default();
+        config.mount_options.push(MountOption::DefaultPermissions);
+        config.acl = crate::SessionACL::All;
+
+        let session = match Session::new(
+            IdmapFs {
+                negotiated: negotiated.clone(),
+                getattr_uid: getattr_uid.clone(),
+                mkdir_uid: mkdir_uid.clone(),
+            },
+            &mountpoint,
+            &config,
+        ) {
+            Ok(session) => session,
+            Err(error) => {
+                // allow_other needs either root or user_allow_other in /etc/fuse.conf
+                eprintln!("skipping idmap: cannot mount with allow_other: {error}");
+                ManuallyDrop::into_inner(tmp);
+                return;
+            }
+        };
+        // FUSE_ALLOW_IDMAP arrived in ABI 7.41; an older kernel never offers it
+        let supported = session.proto_version.is_some_and(|v| v >= Version(7, 41));
+        let bg = session.spawn().unwrap();
+
+        let _ = std::fs::metadata(&mountpoint);
+        let _ = std::fs::create_dir(mountpoint.join("newdir"));
+
+        let getattr_uid = getattr_uid.lock().take();
+        let mkdir_uid = mkdir_uid.lock().take();
+        let negotiated = negotiated.load(Ordering::SeqCst);
+        drop(bg);
+        ManuallyDrop::into_inner(tmp);
+
+        if !supported {
+            eprintln!("skipping idmap: the kernel's FUSE protocol predates 7.41");
+            return;
+        }
+        assert!(
+            negotiated,
+            "a mount with default_permissions and allow_other must be allowed the capability"
+        );
+        assert_eq!(
+            getattr_uid,
+            Some(FUSE_INVALID_UIDGID),
+            "a request that creates nothing must arrive with the caller's ids withheld"
+        );
+        assert_eq!(
+            mkdir_uid,
+            Some(nix::unistd::geteuid().as_raw()),
+            "a request that creates an inode must still carry the owner it should get"
+        );
     }
 
     /// statx(2) must reach Filesystem::statx(), and the creation time it carries - which no
