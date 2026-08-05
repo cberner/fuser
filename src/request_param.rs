@@ -21,13 +21,23 @@ impl Request {
         ll::RequestId(self.header.unique)
     }
 
-    /// Returns the uid of this request
+    /// Returns the uid of this request, or [`crate::FUSE_INVALID_UIDGID`] when the kernel
+    /// withheld it.
+    ///
+    /// It withholds it on every request that does not create an inode, and only once
+    /// [`crate::InitFlags::FUSE_ALLOW_IDMAP`] has been negotiated - which a filesystem has to
+    /// ask for, so a filesystem that does not is never given one. On an idmapped mount the
+    /// caller's ids mean nothing to the filesystem anyway, which is why that capability
+    /// requires `default_permissions` and leaves the access checks to the kernel. The
+    /// requests that do create an inode still carry ids, and they are the owner the new inode
+    /// should get, already mapped.
     #[inline]
     pub fn uid(&self) -> u32 {
         self.header.uid
     }
 
-    /// Returns the gid of this request
+    /// Returns the gid of this request, or [`crate::FUSE_INVALID_UIDGID`] when the kernel
+    /// withheld it. See [`Request::uid`] for when that is.
     #[inline]
     pub fn gid(&self) -> u32 {
         self.header.gid

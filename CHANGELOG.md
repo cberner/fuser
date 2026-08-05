@@ -1,6 +1,15 @@
 # FUSE for Rust - Changelog
 
 ## Unreleased
+* `KernelConfig::add_capabilities()` now accepts `InitFlags::FUSE_ALLOW_IDMAP` (ABI 7.41),
+  which lets the mount be idmapped. It is accepted only where it can be honored - the session
+  must allow other users, and `default_permissions` must be in force, whether from
+  `MountOption::DefaultPermissions` or from negotiating `InitFlags::FUSE_POSIX_ACL` - and
+  refused otherwise: the kernel refuses the connection outright without `default_permissions`,
+  and without allow_other fuser would be offering an owner-only ACL it can no longer enforce. Once negotiated the kernel withholds the
+  caller's ids from every request that does not create an inode, so `Request::uid()` and
+  `Request::gid()` report the new `FUSE_INVALID_UIDGID` there; the requests that do create an
+  inode still carry ids, and they are the owner the new inode should get, already mapped
 * Add `Filesystem::statx()`, which the kernel calls for `statx(2)` (ABI 7.38), along with
   `StatxAttr` and `ReplyStatx`. This exists to report a creation time, which no other request
   can carry: `fuse_attr` has a field for it on macOS alone, so on Linux `statx(2)` otherwise

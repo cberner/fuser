@@ -143,6 +143,12 @@ fn default_init_flags(capabilities: InitFlags) -> InitFlags {
 ///
 /// Every bit named here is above 31, where macFUSE defines no capability of its own. The refused
 /// bits that do alias one live in `ALIASED_UNSUPPORTED_CAPABILITIES`, which is empty on macOS.
+/// The value [`Request::uid`] and [`Request::gid`] carry when the kernel withheld the caller's
+/// ids, which it does on an idmapped mount for every request that does not create an inode.
+///
+/// Only reachable once [`InitFlags::FUSE_ALLOW_IDMAP`] has been negotiated.
+pub const FUSE_INVALID_UIDGID: u32 = u32::MAX;
+
 const UNSUPPORTED_CAPABILITIES: InitFlags = ALIASED_UNSUPPORTED_CAPABILITIES
     // The kernel appends a fuse_secctx_header extension after the name of a create, mkdir,
     // symlink or mknod request. fuser stops parsing at the name, so the security context is
@@ -151,10 +157,6 @@ const UNSUPPORTED_CAPABILITIES: InitFlags = ALIASED_UNSUPPORTED_CAPABILITIES
     // Likewise for the fuse_supp_groups extension. Dropping it leaves the filesystem with the
     // caller's fsgid in exactly the case the extension exists to correct
     .union(InitFlags::FUSE_CREATE_SUPP_GROUP)
-    // Without MountOption::DefaultPermissions the kernel refuses the connection. With it, uid
-    // and gid arrive as FUSE_INVALID_UIDGID on every request that does not create an inode,
-    // breaking Request::uid()/gid() and the SessionACL check built on them
-    .union(InitFlags::FUSE_ALLOW_IDMAP)
     // Selecting DAX per inode requires FUSE_ATTR_DAX in the flags field of fuse_attr, which
     // fuser sends as padding. Only a DAX-capable transport (virtiofs) advertises this
     .union(InitFlags::FUSE_HAS_INODE_DAX)
@@ -383,10 +385,21 @@ pub struct KernelConfig {
     time_gran: Duration,
     max_stack_depth: u32,
     kernel_abi: Version,
+    /// Whether the mount carries `MountOption::DefaultPermissions`, which
+    /// `InitFlags::FUSE_ALLOW_IDMAP` cannot be negotiated without
+    default_permissions: bool,
+    /// The session's ACL, for the same reason
+    acl: SessionACL,
 }
 
 impl KernelConfig {
-    fn new(capabilities: InitFlags, max_readahead: u32, kernel_abi: Version) -> Self {
+    fn new(
+        capabilities: InitFlags,
+        max_readahead: u32,
+        kernel_abi: Version,
+        default_permissions: bool,
+        acl: SessionACL,
+    ) -> Self {
         Self {
             capabilities,
             requested: default_init_flags(capabilities),
@@ -400,7 +413,32 @@ impl KernelConfig {
             time_gran: Duration::new(0, 1),
             max_stack_depth: 0,
             kernel_abi,
+            default_permissions,
+            acl,
         }
+    }
+
+    /// Whether `InitFlags::FUSE_ALLOW_IDMAP` can be negotiated on this mount, given the
+    /// capabilities being added alongside it.
+    ///
+    /// Two things have to hold, and neither is fuser's choice. The kernel needs something to
+    /// check access against, since it withholds the caller's ids from the filesystem: it
+    /// refuses the connection outright - every request answered `ECONNREFUSED` - unless
+    /// `default_permissions` is in force. The mount option is one way to put it in force and
+    /// `InitFlags::FUSE_POSIX_ACL` is the other, the kernel setting it from that flag before
+    /// it looks at this one.
+    ///
+    /// And once the ids are withheld fuser cannot tell the mounting user's requests from
+    /// anyone else's, so `SessionACL::Owner` and `SessionACL::RootAndOwner` could not be
+    /// enforced; refusing is better than continuing to offer a restriction that has quietly
+    /// stopped applying.
+    fn idmap_available(&self, also_adding: InitFlags) -> bool {
+        // Requesting POSIX ACLs only counts if the kernel offers them, since a capability it
+        // does not offer is dropped from the negotiated set and sets nothing
+        let acl_forces_default_permissions = (self.requested | also_adding)
+            .intersection(self.capabilities)
+            .contains(InitFlags::FUSE_POSIX_ACL);
+        (self.default_permissions || acl_forces_default_permissions) && self.acl == SessionACL::All
     }
 
     /// Set the maximum stacking depth of the filesystem
@@ -506,12 +544,24 @@ impl KernelConfig {
 
     /// Add a set of capabilities.
     ///
+    /// [`InitFlags::FUSE_ALLOW_IDMAP`] is accepted only where it can be honored: the session
+    /// must allow other users, and `default_permissions` must be in force, whether from
+    /// [`MountOption::DefaultPermissions`] or from negotiating [`InitFlags::FUSE_POSIX_ACL`].
+    /// Relying on the latter means adding it in this call or an earlier one, since what has
+    /// not been asked for yet cannot be counted on.
+    ///
     /// # Errors
     /// When the argument includes capabilities the kernel does not support, or ones fuser cannot
     /// honor, returns the bits of the capabilities that were refused. Nothing is added in that
     /// case, not even the capabilities that would have been accepted on their own.
     pub fn add_capabilities(&mut self, capabilities_to_add: InitFlags) -> Result<(), InitFlags> {
-        let refused = capabilities_to_add & (!self.capabilities | UNSUPPORTED_CAPABILITIES);
+        let conditional = if self.idmap_available(capabilities_to_add) {
+            InitFlags::empty()
+        } else {
+            InitFlags::FUSE_ALLOW_IDMAP
+        };
+        let refused =
+            capabilities_to_add & (!self.capabilities | UNSUPPORTED_CAPABILITIES | conditional);
         if !refused.is_empty() {
             return Err(refused);
         }
@@ -1448,7 +1498,13 @@ mod tests {
 
     #[test]
     fn kernel_config_set_max_write_bounds() {
-        let mut config = KernelConfig::new(InitFlags::empty(), 65536, Version(7, 31));
+        let mut config = KernelConfig::new(
+            InitFlags::empty(),
+            65536,
+            Version(7, 31),
+            true,
+            SessionACL::All,
+        );
         // Values the kernel would not honor (it clamps max_write below 4096 up
         // to 4096) are rejected with the nearest value that will take effect
         assert_eq!(config.set_max_write(0), Err(MIN_WRITE_SIZE as u32));
@@ -1474,10 +1530,126 @@ mod tests {
         );
     }
 
+    /// FUSE_ALLOW_IDMAP is refused unless the mount can carry it, since the kernel refuses
+    /// the connection without default_permissions and fuser cannot enforce an owner-only ACL
+    /// once the caller's ids are withheld
+    #[test]
+    fn add_capabilities_idmap_needs_default_permissions_and_allow_other() {
+        let cases = [
+            (true, SessionACL::All, true),
+            (false, SessionACL::All, false),
+            (true, SessionACL::Owner, false),
+            (true, SessionACL::RootAndOwner, false),
+            (false, SessionACL::Owner, false),
+        ];
+        for (default_permissions, acl, accepted) in cases {
+            let mut config = KernelConfig::new(
+                InitFlags::all(),
+                65536,
+                Version(7, 43),
+                default_permissions,
+                acl,
+            );
+            let result = config.add_capabilities(InitFlags::FUSE_ALLOW_IDMAP);
+            assert_eq!(
+                result.is_ok(),
+                accepted,
+                "default_permissions={default_permissions} acl={acl:?} should                  {} the capability",
+                if accepted { "accept" } else { "refuse" }
+            );
+            if !accepted {
+                assert_eq!(result, Err(InitFlags::FUSE_ALLOW_IDMAP));
+                assert!(!config.requested.contains(InitFlags::FUSE_ALLOW_IDMAP));
+            } else {
+                assert!(config.requested.contains(InitFlags::FUSE_ALLOW_IDMAP));
+            }
+        }
+    }
+
+    /// Negotiating POSIX ACLs puts default_permissions in force just as the mount option does,
+    /// the kernel setting it from that flag before it validates this one, so it satisfies the
+    /// requirement on its own - but only where the kernel offers it, since a capability it
+    /// does not offer is dropped from the negotiated set and sets nothing
+    #[test]
+    fn add_capabilities_idmap_accepts_posix_acl_for_default_permissions() {
+        // Both in one call
+        let mut config = KernelConfig::new(
+            InitFlags::all(),
+            65536,
+            Version(7, 43),
+            false,
+            SessionACL::All,
+        );
+        assert_eq!(
+            config.add_capabilities(InitFlags::FUSE_POSIX_ACL | InitFlags::FUSE_ALLOW_IDMAP),
+            Ok(())
+        );
+
+        // ACLs asked for first, in an earlier call
+        let mut config = KernelConfig::new(
+            InitFlags::all(),
+            65536,
+            Version(7, 43),
+            false,
+            SessionACL::All,
+        );
+        assert_eq!(config.add_capabilities(InitFlags::FUSE_POSIX_ACL), Ok(()));
+        assert_eq!(config.add_capabilities(InitFlags::FUSE_ALLOW_IDMAP), Ok(()));
+
+        // A kernel without POSIX ACLs would drop them, leaving nothing to force
+        // default_permissions and a connection the kernel would refuse
+        let mut config = KernelConfig::new(
+            InitFlags::all() & !InitFlags::FUSE_POSIX_ACL,
+            65536,
+            Version(7, 43),
+            false,
+            SessionACL::All,
+        );
+        assert_eq!(
+            config.add_capabilities(InitFlags::FUSE_POSIX_ACL | InitFlags::FUSE_ALLOW_IDMAP),
+            Err(InitFlags::FUSE_POSIX_ACL | InitFlags::FUSE_ALLOW_IDMAP)
+        );
+
+        // Neither one on its own is enough without allow_other
+        let mut config = KernelConfig::new(
+            InitFlags::all(),
+            65536,
+            Version(7, 43),
+            false,
+            SessionACL::Owner,
+        );
+        assert_eq!(
+            config.add_capabilities(InitFlags::FUSE_POSIX_ACL | InitFlags::FUSE_ALLOW_IDMAP),
+            Err(InitFlags::FUSE_ALLOW_IDMAP)
+        );
+    }
+
+    /// A kernel that does not offer it cannot have it forced on, whatever the mount looks like
+    #[test]
+    fn add_capabilities_idmap_needs_the_kernel_to_offer_it() {
+        let mut config = KernelConfig::new(
+            InitFlags::all() & !InitFlags::FUSE_ALLOW_IDMAP,
+            65536,
+            Version(7, 43),
+            true,
+            SessionACL::All,
+        );
+        assert_eq!(
+            config.add_capabilities(InitFlags::FUSE_ALLOW_IDMAP),
+            Err(InitFlags::FUSE_ALLOW_IDMAP)
+        );
+    }
+
     #[test]
     fn add_capabilities_refuses_unimplemented() {
         // A kernel advertising everything, so only fuser's own limits can refuse anything
-        let mut config = KernelConfig::new(InitFlags::all(), 65536, Version(7, 43));
+        let mut config = KernelConfig::new(
+            InitFlags::all(),
+            65536,
+            Version(7, 43),
+            true,
+            SessionACL::All,
+        );
         let before = config.requested;
         for capability in UNSUPPORTED_CAPABILITIES {
             assert_eq!(config.add_capabilities(capability), Err(capability));
@@ -1508,7 +1680,8 @@ mod tests {
     fn add_capabilities_refuses_all_or_nothing() {
         // Advertise everything except one capability fuser does implement
         let capabilities = InitFlags::all() - InitFlags::FUSE_POSIX_ACL;
-        let mut config = KernelConfig::new(capabilities, 65536, Version(7, 43));
+        let mut config =
+            KernelConfig::new(capabilities, 65536, Version(7, 43), true, SessionACL::All);
         let before = config.requested;
         // Both reasons for refusing are reported together, and a capability that would have
         // been accepted on its own is not added
