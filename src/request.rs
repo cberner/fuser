@@ -253,7 +253,7 @@ impl<'a> RequestWithSender<'a> {
                     x.dest().dir,
                     x.dest().name.as_ref(),
                     flags,
-                    self.optional_owner(),
+                    self.whiteout_owner(flags),
                     self.reply(),
                 );
             }
@@ -548,7 +548,7 @@ impl<'a> RequestWithSender<'a> {
                     x.to().dir,
                     x.to().name.as_ref(),
                     x.flags(),
-                    self.optional_owner(),
+                    self.whiteout_owner(x.flags()),
                     self.reply(),
                 );
             }
@@ -644,16 +644,27 @@ impl<'a> RequestWithSender<'a> {
         }
     }
 
-    /// The owner for an inode this request may create, where the kernel sent one.
+    /// The owner for the inode a `RENAME_WHITEOUT` leaves behind, and `None` for any other
+    /// rename, which creates no inode for anyone to own.
     ///
-    /// A rename creates an inode only with `RENAME_WHITEOUT`, and that is the only rename an
-    /// idmapped mount sends ids for. Off such a mount every request carries them, so this is
-    /// `Some` whatever the flags say, and it names the whiteout's owner only when the flags
-    /// call for one.
-    fn optional_owner(&self) -> Option<Owner> {
-        let owner = self.owner();
-        (owner.uid != crate::FUSE_INVALID_UIDGID && owner.gid != crate::FUSE_INVALID_UIDGID)
-            .then_some(owner)
+    /// The flags decide this rather than whether ids were sent: off an idmapped mount every
+    /// request carries them, so reading them alone would name an owner for renames that
+    /// create nothing.
+    #[cfg_attr(not(target_os = "linux"), expect(unused_variables))]
+    fn whiteout_owner(&self, flags: crate::RenameFlags) -> Option<Owner> {
+        // Whiteouts are Linux's; no other platform has a rename that creates an inode
+        #[cfg(not(target_os = "linux"))]
+        return None;
+
+        #[cfg(target_os = "linux")]
+        {
+            if !flags.contains(crate::RenameFlags::RENAME_WHITEOUT) {
+                return None;
+            }
+            let owner = self.owner();
+            (owner.uid != crate::FUSE_INVALID_UIDGID && owner.gid != crate::FUSE_INVALID_UIDGID)
+                .then_some(owner)
+        }
     }
 
     pub(crate) fn reply<T: Reply>(&self) -> T {

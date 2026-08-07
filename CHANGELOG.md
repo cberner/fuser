@@ -6,7 +6,8 @@
   `InitFlags::FUSE_ALLOW_IDMAP` is always given ids and can unwrap
 * **Breaking:** `mknod()`, `mkdir()`, `symlink()`, `create()` and `tmpfile()` take an `Owner`
   argument, which is who the inode they create belongs to, and `rename()` takes an
-  `Option<Owner>` for the inode a `RENAME_WHITEOUT` leaves behind. Those are exactly the requests the
+  `Option<Owner>`, which is `Some` for the inode a `RENAME_WHITEOUT` leaves behind and `None`
+  for any other rename, those creating nothing to own. Those are exactly the requests the
   kernel sends ids for, and on an idmapped mount the owner is the caller's ids mapped through
   the mount's idmapping rather than the ids themselves, so reading it off the request would
   have been wrong

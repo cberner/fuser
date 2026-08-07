@@ -186,7 +186,7 @@ const ALIASED_UNSUPPORTED_CAPABILITIES: InitFlags = InitFlags::empty();
 /// same as the caller's ids: it is those ids mapped through the mount's idmapping. It is given
 /// to the requests that create an inode, and to no others, which is why it is an argument to
 /// those rather than something [`Request`] carries. A rename is one of them only with
-/// `RENAME_WHITEOUT`, so it takes an `Option<Owner>`.
+/// `RENAME_WHITEOUT`, so it takes an `Option<Owner>` which is `Some` for exactly that flag.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct Owner {
     /// Owning user
