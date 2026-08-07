@@ -833,6 +833,143 @@ mod test {
         ManuallyDrop::into_inner(tmp);
     }
 
+    /// A rename is given an owner only when it creates an inode to own, which is a rename with
+    /// `RENAME_WHITEOUT` and no other. Off an idmapped mount every request carries ids, so the
+    /// flags have to decide this rather than the ids do.
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn rename_names_an_owner_only_for_a_whiteout() {
+        use std::sync::Mutex as StdMutex;
+        use std::time::Duration;
+        use std::time::SystemTime;
+
+        use crate::FileAttr;
+        use crate::FileType;
+        use crate::INodeNo;
+        use crate::RenameFlags;
+
+        /// Each rename's flags, and whether it was given an owner
+        static SEEN: StdMutex<Vec<(RenameFlags, bool)>> = StdMutex::new(Vec::new());
+
+        struct RenameFs;
+        impl Filesystem for RenameFs {
+            fn lookup(
+                &self,
+                _req: &Request,
+                _parent: INodeNo,
+                name: &std::ffi::OsStr,
+                reply: crate::ReplyEntry,
+            ) {
+                if name == "src" {
+                    reply.entry(
+                        &Duration::from_secs(0),
+                        &FileAttr {
+                            ino: INodeNo(2),
+                            size: 0,
+                            blocks: 0,
+                            atime: SystemTime::UNIX_EPOCH,
+                            mtime: SystemTime::UNIX_EPOCH,
+                            ctime: SystemTime::UNIX_EPOCH,
+                            crtime: SystemTime::UNIX_EPOCH,
+                            kind: FileType::RegularFile,
+                            perm: 0o644,
+                            nlink: 1,
+                            uid: 0,
+                            gid: 0,
+                            rdev: 0,
+                            blksize: 512,
+                            flags: 0,
+                        },
+                        crate::Generation(0),
+                    );
+                } else {
+                    reply.error(Errno::ENOENT);
+                }
+            }
+            fn getattr(
+                &self,
+                _req: &Request,
+                ino: INodeNo,
+                _fh: Option<crate::FileHandle>,
+                reply: crate::ReplyAttr,
+            ) {
+                reply.attr(
+                    &Duration::from_secs(0),
+                    &FileAttr {
+                        ino,
+                        size: 0,
+                        blocks: 0,
+                        atime: SystemTime::UNIX_EPOCH,
+                        mtime: SystemTime::UNIX_EPOCH,
+                        ctime: SystemTime::UNIX_EPOCH,
+                        crtime: SystemTime::UNIX_EPOCH,
+                        kind: FileType::Directory,
+                        perm: 0o777,
+                        nlink: 2,
+                        uid: 0,
+                        gid: 0,
+                        rdev: 0,
+                        blksize: 512,
+                        flags: 0,
+                    },
+                );
+            }
+            fn rename(
+                &self,
+                _req: &Request,
+                _parent: INodeNo,
+                _name: &std::ffi::OsStr,
+                _newparent: INodeNo,
+                _newname: &std::ffi::OsStr,
+                flags: RenameFlags,
+                owner: Option<crate::Owner>,
+                reply: crate::ReplyEmpty,
+            ) {
+                SEEN.lock().unwrap().push((flags, owner.is_some()));
+                reply.ok();
+            }
+        }
+
+        let tmp = ManuallyDrop::new(tempfile::tempdir().unwrap());
+        let mountpoint = tmp.path().canonicalize().unwrap();
+        let bg = Session::new(RenameFs, &mountpoint, &Config::default())
+            .unwrap()
+            .spawn()
+            .unwrap();
+
+        use std::os::unix::ffi::OsStringExt;
+        let src =
+            std::ffi::CString::new(mountpoint.join("src").into_os_string().into_vec()).unwrap();
+        let dst =
+            std::ffi::CString::new(mountpoint.join("dst").into_os_string().into_vec()).unwrap();
+        for flags in [0, libc::RENAME_WHITEOUT] {
+            unsafe {
+                libc::syscall(
+                    libc::SYS_renameat2,
+                    libc::AT_FDCWD,
+                    src.as_ptr(),
+                    libc::AT_FDCWD,
+                    dst.as_ptr(),
+                    flags,
+                )
+            };
+        }
+
+        let seen = std::mem::take(&mut *SEEN.lock().unwrap());
+        drop(bg);
+        ManuallyDrop::into_inner(tmp);
+
+        // This mount is not idmapped, so the header carries ids for both of these
+        assert_eq!(
+            seen,
+            vec![
+                (RenameFlags::empty(), false),
+                (RenameFlags::RENAME_WHITEOUT, true),
+            ],
+            "an owner belongs to the rename that creates an inode, and to no other"
+        );
+    }
+
     /// An idmapped mount has no caller ids to report. Pinned against a real kernel, since
     /// what it sends is its rule rather than fuser's: nothing reports a caller, and the
     /// requests that create an inode name its owner instead - the caller's ids mapped through
