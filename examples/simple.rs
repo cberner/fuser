@@ -102,6 +102,11 @@ struct Args {
     #[clap(long)]
     dev: bool,
 
+    /// Allow this mount to be idmapped, which needs the kernel to make the access checks
+    /// this filesystem otherwise makes: an idmapped mount has no caller for it to check
+    #[clap(long)]
+    idmap: bool,
+
     #[clap(long, default_value_t = 1)]
     n_threads: usize,
 
@@ -304,9 +309,7 @@ fn clear_suid_sgid(attr: &mut InodeAttributes, req: &Request, privilege: Privile
 
     let sgid_exec = attr.mode & (libc::S_ISGID | libc::S_IXGRP) as u16
         == (libc::S_ISGID | libc::S_IXGRP) as u16;
-    let outside_group = privilege.lacks_fsetid(req)
-        && caller_gid(req) != attr.gid
-        && !get_groups(req.pid()).contains(&attr.gid);
+    let outside_group = privilege.lacks_fsetid(req) && caller_outside_group(req, attr.gid);
     if sgid_exec || outside_group {
         attr.mode &= !libc::S_ISGID as u16;
     }
@@ -328,7 +331,7 @@ impl Privilege {
     fn lacks_fsetid(&self, req: &Request) -> bool {
         match self {
             Privilege::KnownLacking => true,
-            Privilege::Unknown => !has_fsetid(req.pid(), caller_uid(req)),
+            Privilege::Unknown => !has_fsetid(req.pid(), req.uid()),
         }
     }
 }
@@ -353,11 +356,52 @@ fn clear_file_capabilities(attr: &mut InodeAttributes) {
 /// Call this only when a killpriv capability was negotiated: without one the kernel still
 /// removes privileges itself, and clearing here as well would strip bits it had decided to keep
 fn clear_privileges_unprompted(attr: &mut InodeAttributes, req: &Request) {
-    if !has_fsetid(req.pid(), caller_uid(req)) {
+    if !has_fsetid(req.pid(), req.uid()) {
         // The capability set has just answered the question, so do not read it a second time
         clear_suid_sgid(attr, req, Privilege::KnownLacking);
     }
     clear_file_capabilities(attr);
+}
+
+/// Whether the caller may act on an inode with these attributes.
+///
+/// True without looking when there is no caller to look at. That happens only on an idmapped
+/// mount, which this filesystem allows only with `default_permissions`, so the kernel has
+/// already made this decision against ids it can map and this one cannot.
+fn may_access(req: &Request, attrs: &InodeAttributes, mask: AccessFlags) -> bool {
+    let (Some(uid), Some(gid)) = (req.uid(), req.gid()) else {
+        return true;
+    };
+    check_access(attrs.uid, attrs.gid, attrs.mode, uid, gid, mask)
+}
+
+/// Whether the caller may override an ownership rule, which an unknown caller may: the kernel
+/// has already decided, for the reason in [`may_access`]
+fn caller_is_root(req: &Request) -> bool {
+    req.uid().is_none_or(|uid| uid == 0)
+}
+
+/// Whether the caller owns an inode, which an unknown caller does, for the same reason
+fn caller_owns(req: &Request, uid: u32) -> bool {
+    req.uid().is_none_or(|caller| caller == uid)
+}
+
+/// Whether the caller is privileged enough to keep a file's setuid and setgid bits through a
+/// change to it.
+///
+/// An unknown caller is not, which is the opposite of what the checks above answer, and for a
+/// reason they do not share: `default_permissions` decides who may act, not whose privileges
+/// survive acting, so nothing has decided this on the filesystem's behalf. A privilege bit
+/// that cannot be shown to have been earned is one to drop.
+fn caller_keeps_privileges(req: &Request) -> bool {
+    req.uid().is_some_and(|uid| uid == 0)
+}
+
+/// Whether the caller is outside an inode's group, which an unknown caller is: its own groups
+/// are named in a mapping this filesystem cannot read, so being in the group cannot be shown
+fn caller_outside_group(req: &Request, gid: u32) -> bool {
+    req.gid()
+        .is_none_or(|caller| caller != gid && !get_groups(req.pid()).contains(&gid))
 }
 
 fn creation_gid(parent: &InodeAttributes, gid: u32) -> u32 {
@@ -382,38 +426,32 @@ fn xattr_access_check(
 
     match parse_xattr_namespace(key)? {
         XattrNamespace::Security => {
-            if access_mask != libc::R_OK && caller_uid(request) != 0 {
+            if access_mask != libc::R_OK && !caller_is_root(request) {
                 return Err(Errno::EPERM);
             }
         }
         XattrNamespace::Trusted => {
-            if caller_uid(request) != 0 {
+            if !caller_is_root(request) {
                 return Err(Errno::EPERM);
             }
         }
         XattrNamespace::System => {
             if key.eq(b"system.posix_acl_access") {
-                if !check_access(
-                    inode_attrs.uid,
-                    inode_attrs.gid,
-                    inode_attrs.mode,
-                    caller_uid(request),
-                    caller_gid(request),
+                if !may_access(
+                    request,
+                    inode_attrs,
                     AccessFlags::from_bits_retain(access_mask),
                 ) {
                     return Err(Errno::EPERM);
                 }
-            } else if caller_uid(request) != 0 {
+            } else if !caller_is_root(request) {
                 return Err(Errno::EPERM);
             }
         }
         XattrNamespace::User => {
-            if !check_access(
-                inode_attrs.uid,
-                inode_attrs.gid,
-                inode_attrs.mode,
-                caller_uid(request),
-                caller_gid(request),
+            if !may_access(
+                request,
+                inode_attrs,
                 AccessFlags::from_bits_retain(access_mask),
             ) {
                 return Err(Errno::EPERM);
@@ -422,19 +460,6 @@ fn xattr_access_check(
     }
 
     Ok(())
-}
-
-/// The caller's uid, which this filesystem is always given. The kernel withholds ids only on
-/// an idmapped mount, which needs `FUSE_ALLOW_IDMAP`, and this example does not request it
-fn caller_uid(req: &Request) -> u32 {
-    req.uid()
-        .expect("ids are withheld only on an idmapped mount")
-}
-
-/// The caller's gid, always present for the same reason as [`caller_uid`]
-fn caller_gid(req: &Request) -> u32 {
-    req.gid()
-        .expect("ids are withheld only on an idmapped mount")
 }
 
 fn time_now() -> (i64, u32) {
@@ -559,16 +584,20 @@ struct SimpleFS {
     /// this filesystem's job rather than the kernel's. Distinct from `suid_support`, which
     /// only says whether the caller asked for setuid support
     killpriv_negotiated: bool,
+    /// Whether the mount may be idmapped, and so whether it has a caller to check at all
+    idmapped: bool,
 }
 
 impl SimpleFS {
-    fn new(data_dir: String, direct_io: bool, suid_support: bool) -> SimpleFS {
+    fn new(data_dir: String, direct_io: bool, suid_support: bool, idmap: bool) -> SimpleFS {
         SimpleFS {
             data_dir,
             next_file_handle: AtomicU64::new(1),
             direct_io,
             suid_support,
             killpriv_negotiated: false,
+            // Not settled until init(), where the kernel says whether it offers the capability
+            idmapped: idmap,
         }
     }
 
@@ -778,14 +807,16 @@ impl SimpleFS {
 
     /// `uid` and `gid` are the identity the access check runs against, which a caller holding a
     /// write file handle deliberately bypasses; `req` is always the real caller
+    /// `enforce_access` says whether the caller's permission still has to be checked. A file
+    /// handle that was granted write access carries that permission with it, so a truncate
+    /// through one is not checked again even if the mode has changed since
     fn truncate(
         &self,
         req: &Request,
         inode: INodeNo,
         new_length: u64,
-        uid: u32,
-        gid: u32,
         kill_suid_gid: bool,
+        enforce_access: bool,
     ) -> Result<InodeAttributes, Errno> {
         if new_length > MAX_FILE_SIZE {
             return Err(Errno::EFBIG);
@@ -799,14 +830,7 @@ impl SimpleFS {
             return Err(Errno::EPERM);
         }
 
-        if !check_access(
-            attrs.uid,
-            attrs.gid,
-            attrs.mode,
-            uid,
-            gid,
-            AccessFlags::W_OK,
-        ) {
+        if enforce_access && !may_access(req, &attrs, AccessFlags::W_OK) {
             return Err(Errno::EACCES);
         }
 
@@ -854,14 +878,7 @@ impl SimpleFS {
         let mut parent_attrs = self.get_inode(parent)?;
         parent_attrs.check_writable()?;
 
-        if !check_access(
-            parent_attrs.uid,
-            parent_attrs.gid,
-            parent_attrs.mode,
-            caller_uid(req),
-            caller_gid(req),
-            AccessFlags::W_OK,
-        ) {
+        if !may_access(req, &parent_attrs, AccessFlags::W_OK) {
             return Err(Errno::EACCES);
         }
         let now = time_now();
@@ -883,9 +900,34 @@ impl Filesystem for SimpleFS {
         _req: &Request,
         #[allow(unused_variables)] config: &mut KernelConfig,
     ) -> io::Result<()> {
-        // v2 reports per request whether suid and sgid must go, rather than asking for them to
-        // be cleared on every write, chown and truncate as FUSE_HANDLE_KILLPRIV does
-        if config
+        // Refused unless the mount can honor it, so what was asked for is not what is in force.
+        // A kernel that does not offer the capability at all refuses it the same way
+        if self.idmapped {
+            self.idmapped = config.add_capabilities(InitFlags::FUSE_ALLOW_IDMAP).is_ok();
+            if self.idmapped {
+                info!("idmapped mounts enabled; the kernel makes the access checks");
+            } else {
+                // The mount is already up, and already carries the allow_other that asking for
+                // the capability required. Serving on would leave it reachable by every local
+                // user without the thing that was traded for, so end it instead
+                return Err(io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    "the kernel does not offer FUSE_ALLOW_IDMAP",
+                ));
+            }
+        }
+
+        // Taking privilege stripping on needs a caller to judge, and an idmapped mount has
+        // none: not every operation that drops suid and sgid carries a flag saying so, and the
+        // rest is decided from the caller's capabilities and groups. The kernel can still do
+        // it, knowing the mapping this filesystem does not, so leave it there.
+        //
+        // v2 otherwise reports per request whether suid and sgid must go, rather than asking
+        // for them to be cleared on every write, chown and truncate as FUSE_HANDLE_KILLPRIV does
+        if self.idmapped {
+            info!("privilege stripping left to the kernel, there being no caller to judge");
+            self.suid_support = false;
+        } else if config
             .add_capabilities(InitFlags::FUSE_HANDLE_KILLPRIV_V2)
             .is_err()
         {
@@ -937,14 +979,7 @@ impl Filesystem for SimpleFS {
                 return;
             }
         };
-        if !check_access(
-            parent_attrs.uid,
-            parent_attrs.gid,
-            parent_attrs.mode,
-            caller_uid(_req),
-            caller_gid(_req),
-            AccessFlags::X_OK,
-        ) {
+        if !may_access(_req, &parent_attrs, AccessFlags::X_OK) {
             reply.error(Errno::EACCES);
             return;
         }
@@ -1015,7 +1050,7 @@ impl Filesystem for SimpleFS {
             #[cfg(target_os = "freebsd")]
             {
                 // FreeBSD: sticky bit only valid on directories; otherwise EFTYPE
-                if caller_uid(_req) != 0
+                if !caller_is_root(_req)
                     && (mode as u16 & libc::S_ISVTX as u16) != 0
                     && attrs.kind != FileKind::Directory
                 {
@@ -1023,14 +1058,11 @@ impl Filesystem for SimpleFS {
                     return;
                 }
             }
-            if caller_uid(_req) != 0 && caller_uid(_req) != attrs.uid {
+            if !caller_is_root(_req) && !caller_owns(_req, attrs.uid) {
                 reply.error(Errno::EPERM);
                 return;
             }
-            if caller_uid(_req) != 0
-                && caller_gid(_req) != attrs.gid
-                && !get_groups(_req.pid()).contains(&attrs.gid)
-            {
+            if !caller_keeps_privileges(_req) && caller_outside_group(_req, attrs.gid) {
                 // If SGID is set and the file belongs to a group that the caller is not part of
                 // then the SGID bit is suppose to be cleared during chmod
                 attrs.mode = (mode & !libc::S_ISGID as u32) as u16;
@@ -1047,22 +1079,21 @@ impl Filesystem for SimpleFS {
             debug!("chown() called with {ino:?} {uid:?} {gid:?}");
             if let Some(gid) = gid {
                 // Non-root users can only change gid to a group they're in
-                if caller_uid(_req) != 0 && !get_groups(_req.pid()).contains(&gid) {
+                if !caller_is_root(_req) && !get_groups(_req.pid()).contains(&gid) {
                     reply.error(Errno::EPERM);
                     return;
                 }
             }
             if let Some(uid) = uid {
-                if caller_uid(_req) != 0
-                    // but no-op changes by the owner are not an error
-                    && !(uid == attrs.uid && caller_uid(_req) == attrs.uid)
-                {
+                // A no-op change by the owner is not an error, unlike any other change of owner
+                let no_op_by_owner = uid == attrs.uid && caller_owns(_req, attrs.uid);
+                if !caller_is_root(_req) && !no_op_by_owner {
                     reply.error(Errno::EPERM);
                     return;
                 }
             }
             // Only owner may change the group
-            if gid.is_some() && caller_uid(_req) != 0 && caller_uid(_req) != attrs.uid {
+            if gid.is_some() && !caller_is_root(_req) && !caller_owns(_req, attrs.uid) {
                 reply.error(Errno::EPERM);
                 return;
             }
@@ -1094,7 +1125,7 @@ impl Filesystem for SimpleFS {
                 // with W_OK will never fail to truncate, even if the file has been subsequently
                 // chmod'ed
                 if Self::check_file_handle_write(handle.into()) {
-                    if let Err(error_code) = self.truncate(_req, ino, size, 0, 0, kill_suid_gid) {
+                    if let Err(error_code) = self.truncate(_req, ino, size, kill_suid_gid, false) {
                         reply.error(error_code);
                         return;
                     }
@@ -1102,14 +1133,7 @@ impl Filesystem for SimpleFS {
                     reply.error(Errno::EACCES);
                     return;
                 }
-            } else if let Err(error_code) = self.truncate(
-                _req,
-                ino,
-                size,
-                caller_uid(_req),
-                caller_gid(_req),
-                kill_suid_gid,
-            ) {
+            } else if let Err(error_code) = self.truncate(_req, ino, size, kill_suid_gid, true) {
                 reply.error(error_code);
                 return;
             }
@@ -1119,21 +1143,12 @@ impl Filesystem for SimpleFS {
         if let Some(atime) = _atime {
             debug!("utimens() called with {ino:?}, atime={atime:?}");
 
-            if attrs.uid != caller_uid(_req) && caller_uid(_req) != 0 && atime != Now {
+            if !caller_owns(_req, attrs.uid) && !caller_is_root(_req) && atime != Now {
                 reply.error(Errno::EPERM);
                 return;
             }
 
-            if attrs.uid != caller_uid(_req)
-                && !check_access(
-                    attrs.uid,
-                    attrs.gid,
-                    attrs.mode,
-                    caller_uid(_req),
-                    caller_gid(_req),
-                    AccessFlags::W_OK,
-                )
-            {
+            if !caller_owns(_req, attrs.uid) && !may_access(_req, &attrs, AccessFlags::W_OK) {
                 reply.error(Errno::EACCES);
                 return;
             }
@@ -1148,21 +1163,12 @@ impl Filesystem for SimpleFS {
         if let Some(mtime) = _mtime {
             debug!("utimens() called with {ino:?}, mtime={mtime:?}");
 
-            if attrs.uid != caller_uid(_req) && caller_uid(_req) != 0 && mtime != Now {
+            if !caller_owns(_req, attrs.uid) && !caller_is_root(_req) && mtime != Now {
                 reply.error(Errno::EPERM);
                 return;
             }
 
-            if attrs.uid != caller_uid(_req)
-                && !check_access(
-                    attrs.uid,
-                    attrs.gid,
-                    attrs.mode,
-                    caller_uid(_req),
-                    caller_gid(_req),
-                    AccessFlags::W_OK,
-                )
-            {
+            if !caller_owns(_req, attrs.uid) && !may_access(_req, &attrs, AccessFlags::W_OK) {
                 reply.error(Errno::EACCES);
                 return;
             }
@@ -1243,14 +1249,7 @@ impl Filesystem for SimpleFS {
             return;
         }
 
-        if !check_access(
-            parent_attrs.uid,
-            parent_attrs.gid,
-            parent_attrs.mode,
-            caller_uid(_req),
-            caller_gid(_req),
-            AccessFlags::W_OK,
-        ) {
+        if !may_access(_req, &parent_attrs, AccessFlags::W_OK) {
             reply.error(Errno::EACCES);
             return;
         }
@@ -1259,7 +1258,7 @@ impl Filesystem for SimpleFS {
         parent_attrs.last_metadata_changed = now;
         self.write_inode(&parent_attrs);
 
-        if caller_uid(_req) != 0 {
+        if !caller_is_root(_req) {
             mode &= !(libc::S_ISUID | libc::S_ISGID) as u32;
         }
 
@@ -1267,7 +1266,7 @@ impl Filesystem for SimpleFS {
         {
             let kind = as_file_kind(mode);
             // FreeBSD: sticky bit only valid on directories; otherwise EFTYPE
-            if caller_uid(_req) != 0
+            if !caller_is_root(_req)
                 && (mode as u16 & libc::S_ISVTX as u16) != 0
                 && kind != FileKind::Directory
             {
@@ -1352,14 +1351,7 @@ impl Filesystem for SimpleFS {
             return;
         }
 
-        if !check_access(
-            parent_attrs.uid,
-            parent_attrs.gid,
-            parent_attrs.mode,
-            caller_uid(_req),
-            caller_gid(_req),
-            AccessFlags::W_OK,
-        ) {
+        if !may_access(_req, &parent_attrs, AccessFlags::W_OK) {
             reply.error(Errno::EACCES);
             return;
         }
@@ -1368,7 +1360,7 @@ impl Filesystem for SimpleFS {
         parent_attrs.last_metadata_changed = now;
         self.write_inode(&parent_attrs);
 
-        if caller_uid(_req) != 0 {
+        if !caller_is_root(_req) {
             mode &= !(libc::S_ISUID | libc::S_ISGID) as u32;
         }
         if parent_attrs.mode & libc::S_ISGID as u16 != 0 {
@@ -1437,24 +1429,17 @@ impl Filesystem for SimpleFS {
             return;
         }
 
-        if !check_access(
-            parent_attrs.uid,
-            parent_attrs.gid,
-            parent_attrs.mode,
-            caller_uid(_req),
-            caller_gid(_req),
-            AccessFlags::W_OK,
-        ) {
+        if !may_access(_req, &parent_attrs, AccessFlags::W_OK) {
             reply.error(Errno::EACCES);
             return;
         }
 
-        let uid = caller_uid(_req);
-        // "Sticky bit" handling
+        // "Sticky bit" handling. An unknown caller passes it for the reason in may_access:
+        // with default_permissions in force the kernel has already applied it
         if parent_attrs.mode & libc::S_ISVTX as u16 != 0
-            && uid != 0
-            && uid != parent_attrs.uid
-            && uid != attrs.uid
+            && !caller_is_root(_req)
+            && !caller_owns(_req, parent_attrs.uid)
+            && !caller_owns(_req, attrs.uid)
         {
             reply.error(Errno::EACCES);
             return;
@@ -1516,23 +1501,16 @@ impl Filesystem for SimpleFS {
             return;
         }
 
-        if !check_access(
-            parent_attrs.uid,
-            parent_attrs.gid,
-            parent_attrs.mode,
-            caller_uid(_req),
-            caller_gid(_req),
-            AccessFlags::W_OK,
-        ) {
+        if !may_access(_req, &parent_attrs, AccessFlags::W_OK) {
             reply.error(Errno::EACCES);
             return;
         }
 
         // "Sticky bit" handling
         if parent_attrs.mode & libc::S_ISVTX as u16 != 0
-            && caller_uid(_req) != 0
-            && caller_uid(_req) != parent_attrs.uid
-            && caller_uid(_req) != attrs.uid
+            && !caller_is_root(_req)
+            && !caller_owns(_req, parent_attrs.uid)
+            && !caller_owns(_req, attrs.uid)
         {
             reply.error(Errno::EACCES);
             return;
@@ -1578,14 +1556,7 @@ impl Filesystem for SimpleFS {
             return;
         }
 
-        if !check_access(
-            parent_attrs.uid,
-            parent_attrs.gid,
-            parent_attrs.mode,
-            caller_uid(_req),
-            caller_gid(_req),
-            AccessFlags::W_OK,
-        ) {
+        if !may_access(_req, &parent_attrs, AccessFlags::W_OK) {
             reply.error(Errno::EACCES);
             return;
         }
@@ -1667,23 +1638,16 @@ impl Filesystem for SimpleFS {
             }
         };
 
-        if !check_access(
-            parent_attrs.uid,
-            parent_attrs.gid,
-            parent_attrs.mode,
-            caller_uid(_req),
-            caller_gid(_req),
-            AccessFlags::W_OK,
-        ) {
+        if !may_access(_req, &parent_attrs, AccessFlags::W_OK) {
             reply.error(Errno::EACCES);
             return;
         }
 
         // "Sticky bit" handling
         if parent_attrs.mode & libc::S_ISVTX as u16 != 0
-            && caller_uid(_req) != 0
-            && caller_uid(_req) != parent_attrs.uid
-            && caller_uid(_req) != inode_attrs.uid
+            && !caller_is_root(_req)
+            && !caller_owns(_req, parent_attrs.uid)
+            && !caller_owns(_req, inode_attrs.uid)
         {
             reply.error(Errno::EACCES);
             return;
@@ -1697,14 +1661,7 @@ impl Filesystem for SimpleFS {
             }
         };
 
-        if !check_access(
-            new_parent_attrs.uid,
-            new_parent_attrs.gid,
-            new_parent_attrs.mode,
-            caller_uid(_req),
-            caller_gid(_req),
-            AccessFlags::W_OK,
-        ) {
+        if !may_access(_req, &new_parent_attrs, AccessFlags::W_OK) {
             reply.error(Errno::EACCES);
             return;
         }
@@ -1712,9 +1669,9 @@ impl Filesystem for SimpleFS {
         // "Sticky bit" handling in new_parent
         if new_parent_attrs.mode & libc::S_ISVTX as u16 != 0 {
             if let Ok(existing_attrs) = self.lookup_name(newparent, newname) {
-                if caller_uid(_req) != 0
-                    && caller_uid(_req) != new_parent_attrs.uid
-                    && caller_uid(_req) != existing_attrs.uid
+                if !caller_is_root(_req)
+                    && !caller_owns(_req, new_parent_attrs.uid)
+                    && !caller_owns(_req, existing_attrs.uid)
                 {
                     reply.error(Errno::EACCES);
                     return;
@@ -1851,14 +1808,7 @@ impl Filesystem for SimpleFS {
         // because that will change the ".." link in it
         if inode_attrs.kind == FileKind::Directory
             && parent != newparent
-            && !check_access(
-                inode_attrs.uid,
-                inode_attrs.gid,
-                inode_attrs.mode,
-                caller_uid(_req),
-                caller_gid(_req),
-                AccessFlags::W_OK,
-            )
+            && !may_access(_req, &inode_attrs, AccessFlags::W_OK)
         {
             reply.error(Errno::EACCES);
             return;
@@ -2024,14 +1974,7 @@ impl Filesystem for SimpleFS {
                     reply.error(Errno::EPERM);
                     return;
                 }
-                if check_access(
-                    attr.uid,
-                    attr.gid,
-                    attr.mode,
-                    caller_uid(_req),
-                    caller_gid(_req),
-                    AccessFlags::from_bits_retain(access_mask),
-                ) {
+                if may_access(_req, &attr, AccessFlags::from_bits_retain(access_mask)) {
                     attr.open_file_handles += 1;
                     self.write_inode(&attr);
                     let open_flags = if self.direct_io {
@@ -2201,14 +2144,7 @@ impl Filesystem for SimpleFS {
 
         match self.get_inode(_ino) {
             Ok(mut attr) => {
-                if check_access(
-                    attr.uid,
-                    attr.gid,
-                    attr.mode,
-                    caller_uid(_req),
-                    caller_gid(_req),
-                    AccessFlags::from_bits_retain(access_mask),
-                ) {
+                if may_access(_req, &attr, AccessFlags::from_bits_retain(access_mask)) {
                     attr.open_file_handles += 1;
                     self.write_inode(&attr);
                     let open_flags = if self.direct_io {
@@ -2426,14 +2362,7 @@ impl Filesystem for SimpleFS {
         debug!("access() called with {ino:?} {mask:?}");
         match self.get_inode(ino) {
             Ok(attr) => {
-                if check_access(
-                    attr.uid,
-                    attr.gid,
-                    attr.mode,
-                    caller_uid(_req),
-                    caller_gid(_req),
-                    mask,
-                ) {
+                if may_access(_req, &attr, mask) {
                     reply.ok();
                 } else {
                     reply.error(Errno::EACCES);
@@ -2485,14 +2414,7 @@ impl Filesystem for SimpleFS {
             return;
         }
 
-        if !check_access(
-            parent_attrs.uid,
-            parent_attrs.gid,
-            parent_attrs.mode,
-            caller_uid(req),
-            caller_gid(req),
-            AccessFlags::W_OK,
-        ) {
+        if !may_access(req, &parent_attrs, AccessFlags::W_OK) {
             reply.error(Errno::EACCES);
             return;
         }
@@ -2501,7 +2423,7 @@ impl Filesystem for SimpleFS {
         parent_attrs.last_metadata_changed = now;
         self.write_inode(&parent_attrs);
 
-        if caller_uid(req) != 0 {
+        if !caller_is_root(req) {
             mode &= !(libc::S_ISUID | libc::S_ISGID) as u32;
         }
 
@@ -2509,7 +2431,7 @@ impl Filesystem for SimpleFS {
         {
             let kind = as_file_kind(mode);
             // FreeBSD: sticky bit only valid on directories; otherwise EFTYPE
-            if caller_uid(req) != 0
+            if !caller_is_root(req)
                 && (mode as u16 & libc::S_ISVTX as u16) != 0
                 && kind != FileKind::Directory
             {
@@ -2734,21 +2656,14 @@ impl Filesystem for SimpleFS {
             return;
         }
 
-        if !check_access(
-            parent_attrs.uid,
-            parent_attrs.gid,
-            parent_attrs.mode,
-            caller_uid(req),
-            caller_gid(req),
-            AccessFlags::W_OK | AccessFlags::X_OK,
-        ) {
+        if !may_access(req, &parent_attrs, AccessFlags::W_OK | AccessFlags::X_OK) {
             reply.error(Errno::EACCES);
             return;
         }
 
         // The parent's timestamps are left alone, since no entry is added to it
 
-        if caller_uid(req) != 0 {
+        if !caller_is_root(req) {
             mode &= !(libc::S_ISUID | libc::S_ISGID) as u32;
         }
 
@@ -3025,7 +2940,7 @@ fn as_file_kind(mut mode: u32) -> FileKind {
 /// a root process which dropped the capability is treated as the unprivileged caller it is.
 /// Falls back to the uid where the capability set cannot be read, which is all a request alone
 /// would have supported
-fn has_fsetid(pid: u32, uid: u32) -> bool {
+fn has_fsetid(pid: u32, uid: Option<u32>) -> bool {
     // From linux/capability.h; the libc crate does not export the capability numbers
     const CAP_FSETID: u32 = 4;
 
@@ -3042,7 +2957,9 @@ fn has_fsetid(pid: u32, uid: u32) -> bool {
         }
     }
 
-    uid == 0
+    // Reached only where the capability set could not be read. An unknown caller cannot be
+    // shown to hold the capability, and privileges that cannot be shown to be earned go
+    uid.is_some_and(|uid| uid == 0)
 }
 
 fn get_groups(pid: u32) -> Vec<u32> {
@@ -3173,6 +3090,12 @@ fn main() {
         info!("device file support enabled");
         cfg.mount_options.push(MountOption::Dev);
     }
+    if args.idmap {
+        // Both are what the capability requires: the kernel refuses the connection without
+        // default_permissions, and fuser refuses the capability without allow_other
+        cfg.mount_options.push(MountOption::DefaultPermissions);
+        cfg.acl = SessionACL::All;
+    }
     if args.auto_unmount {
         cfg.mount_options.push(MountOption::AutoUnmount);
     }
@@ -3190,7 +3113,7 @@ fn main() {
 
     cfg.n_threads = Some(args.n_threads);
     let result = fuser::mount(
-        SimpleFS::new(args.data_dir, args.direct_io, args.suid),
+        SimpleFS::new(args.data_dir, args.direct_io, args.suid, args.idmap),
         &args.mount_point,
         &cfg,
     );
