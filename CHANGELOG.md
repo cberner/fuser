@@ -97,9 +97,10 @@
   layout. A `setxattr` whose value length disagrees with its header is now rejected rather
   than panicking, and one carrying `FUSE_SETXATTR_ACL_KILL_SGID` is refused with `ENOTSUP`,
   since `Filesystem::setxattr` cannot yet be told to clear SGID
-* Name the file that could not be reached when a mount fails, instead of reporting a bare
-  "No such file or directory" that could equally mean the mountpoint, `/dev/fuse` or the
-  `fusermount` helper (#250)
+* Log which file could not be reached when a mount fails, since a bare "No such file or
+  directory" could equally mean the mountpoint, `/dev/fuse` or the `fusermount` helper
+  (#250). The returned error is the OS error as it came, so callers can still match on
+  `raw_os_error()`; errors without an OS error number carry the file in their message
 * Fix `EBUSY` when unmounting a filesystem that is still in use, as root on Linux (#686).
   The unmount is now lazy, as it already was for unprivileged users and as libfuse does,
   instead of failing and leaving the filesystem mounted with no way to retry

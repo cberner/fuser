@@ -19,6 +19,7 @@ use std::io;
 
 #[cfg(any(test, fuser_mount_impl = "libfuse2", fuser_mount_impl = "libfuse3"))]
 use fuse2_sys::fuse_args;
+use log::error;
 use log::info;
 use log::warn;
 use mount_options::MountOption;
@@ -60,11 +61,24 @@ fn with_fuse_args<T, F: FnOnce(&fuse_args) -> T>(
 
 /// Name what could not be reached, so that a bare "No such file or directory" does not
 /// leave the caller guessing between the mountpoint, the FUSE device and the mount
-/// helper. The error kind is preserved for callers that match on it; the OS error
-/// number survives only in the message
+/// helper (issue #250).
 #[allow(dead_code)] // Not used with every feature.
 pub(crate) fn context(what: impl std::fmt::Display, err: io::Error) -> io::Error {
-    io::Error::new(err.kind(), format!("{what}: {err}"))
+    let message = format!("{what}: {err}");
+    with_message(err, message)
+}
+
+/// Attach `message` to `err`. An `io::Error` cannot carry both an OS error number and a
+/// message of its own, and callers match on the number, so an OS error is returned as it
+/// came and the message goes to the log instead.
+#[allow(dead_code)] // Not used with every feature.
+pub(crate) fn with_message(err: io::Error, message: String) -> io::Error {
+    if err.raw_os_error().is_some() {
+        error!("{message}");
+        err
+    } else {
+        io::Error::new(err.kind(), message)
+    }
 }
 
 /// Make a libfuse call that signals failure through its return value, and turn a failure
@@ -406,10 +420,9 @@ mod test {
         let mountpoint = CString::new("/nonexistent").unwrap();
         // Helper exits nonzero (/bin/false ignores its arguments)
         assert!(fusermount_unmount("/bin/false", &mountpoint).is_err());
-        // Helper cannot be executed at all, which must say which helper that was
+        // Helper cannot be executed at all, which is reported with its OS error intact
         let err = fusermount_unmount("/nonexistent/fusermount", &mountpoint).unwrap_err();
-        assert_eq!(err.kind(), io::ErrorKind::NotFound);
-        assert!(err.to_string().contains("/nonexistent/fusermount"), "{err}");
+        assert_eq!(err.raw_os_error(), Some(libc::ENOENT));
         // Helper reports success
         assert!(fusermount_unmount("/bin/true", &mountpoint).is_ok());
     }
@@ -425,6 +438,16 @@ mod test {
         assert!(err.to_string().contains("permission denied"), "{err}");
     }
 
+    /// Callers tell apart errors sharing a kind, such as EPERM and EACCES, by their OS
+    /// error number, so naming what failed must not cost them that
+    #[test]
+    fn context_keeps_the_os_error() {
+        for errno in [libc::EPERM, libc::EACCES, libc::ENOENT, libc::ENOTCONN] {
+            let err = context("/mnt", io::Error::from_raw_os_error(errno));
+            assert_eq!(err.raw_os_error(), Some(errno));
+        }
+    }
+
     /// The mountpoint is the first thing a mount resolves, and a missing one is what the
     /// reporter of issue #250 mistook a missing /dev/fuse for
     #[test]
@@ -433,7 +456,7 @@ mod test {
         let err =
             Mount::new(Path::new("/nonexistent/mountpoint"), &[], SessionACL::Owner).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::NotFound);
-        assert!(err.to_string().contains("/nonexistent/mountpoint"), "{err}");
+        assert_eq!(err.raw_os_error(), Some(libc::ENOENT));
     }
 
     /// A libfuse call that fails without setting errno must not be reported with whatever
