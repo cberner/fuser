@@ -669,7 +669,14 @@ const UNMOUNT_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 
 impl BackgroundSession {
     /// Unmount the filesystem and join the background thread, returning the
-    /// session result. `Filesystem::destroy` has run when this returns.
+    /// session result. `Filesystem::destroy` has run when this returns `Ok`.
+    ///
+    /// # Errors
+    /// Besides the session's own result: the unmount's error if it failed, and
+    /// `EBUSY` if the filesystem is still in use a few seconds after a lazy unmount
+    /// detached it. Either way the session thread is left detached, as waiting for
+    /// it could block indefinitely; a detached filesystem's session ends once it is
+    /// no longer in use.
     pub fn umount_and_join(mut self) -> io::Result<()> {
         if let Some(mount) = self.mount.take() {
             if let Err(err) = mount.umount() {
@@ -678,6 +685,18 @@ impl BackgroundSession {
                 // as before
                 self.guard.take();
                 return Err(err);
+            }
+            // On one of the session's own threads the connection cannot end before this
+            // returns, which is reported below rather than waited out
+            if !self.on_session_thread()
+                && !crate::mnt::connection_ended(&self.fuse_device, UNMOUNT_WAIT)
+            {
+                // Lazily detached but still in use, which can last indefinitely (a
+                // shell's working directory, say). An eager unmount would have failed
+                // with EBUSY here, so report the same
+                warn!("FUSE connection still alive after unmount; detaching session thread");
+                self.guard.take();
+                return Err(io::Error::from_raw_os_error(libc::EBUSY));
             }
         }
         if self.on_session_thread() {
@@ -1894,6 +1913,90 @@ mod test {
         session
             .next("the session must end after the callback dropped it")
             .unwrap();
+        ManuallyDrop::into_inner(tmp);
+    }
+
+    /// A lazy unmount succeeds while the filesystem is in use, but the session goes
+    /// on until it no longer is, which may be never. umount_and_join must report
+    /// that rather than wait for it
+    #[test]
+    fn umount_and_join_reports_a_filesystem_still_in_use() {
+        use std::time::SystemTime;
+
+        use crate::FileAttr;
+        use crate::FileHandle;
+        use crate::FileType;
+        use crate::INodeNo;
+        use crate::ReplyAttr;
+
+        /// Serves getattr, which is all that opening the mount root needs
+        struct RootDirFs {
+            destroyed: std::sync::mpsc::Sender<()>,
+        }
+        impl Filesystem for RootDirFs {
+            fn getattr(
+                &self,
+                _req: &Request,
+                ino: INodeNo,
+                _fh: Option<FileHandle>,
+                reply: ReplyAttr,
+            ) {
+                let now = SystemTime::now();
+                reply.attr(
+                    &std::time::Duration::from_secs(1),
+                    &FileAttr {
+                        ino,
+                        size: 0,
+                        blocks: 0,
+                        atime: now,
+                        mtime: now,
+                        ctime: now,
+                        crtime: now,
+                        kind: FileType::Directory,
+                        perm: 0o755,
+                        nlink: 2,
+                        uid: 0,
+                        gid: 0,
+                        rdev: 0,
+                        blksize: 4096,
+                        flags: 0,
+                    },
+                );
+            }
+
+            fn destroy(&mut self) {
+                let _ = self.destroyed.send(());
+            }
+        }
+
+        let tmp = ManuallyDrop::new(tempfile::tempdir().unwrap());
+        let mountpoint = tmp.path().canonicalize().unwrap();
+        let (destroyed, destroy_seen) = std::sync::mpsc::channel();
+        let bg = Session::new(RootDirFs { destroyed }, &mountpoint, &Config::default())
+            .unwrap()
+            .spawn()
+            .unwrap();
+        // The kernel forwards requests only after the init reply was processed, so a
+        // completed operation proves the session loop is past the handshake
+        let _ = std::fs::metadata(&mountpoint);
+
+        let busy = std::fs::File::open(&mountpoint).unwrap();
+        // On another thread, so that waiting for the session fails the test rather
+        // than hanging it
+        let (result, returned) = std::sync::mpsc::channel();
+        std::thread::spawn(move || result.send(bg.umount_and_join()));
+        let Ok(result) = returned.recv_timeout(UNMOUNT_WAIT * 2) else {
+            drop(busy);
+            panic!("umount_and_join waited for a filesystem still in use");
+        };
+        let err = result.expect_err("a filesystem still in use must be reported");
+        assert_eq!(err.raw_os_error(), Some(libc::EBUSY));
+
+        // It was detached all the same, so releasing it ends the session
+        drop(busy);
+        destroy_seen
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the session must end once the filesystem is no longer in use");
         ManuallyDrop::into_inner(tmp);
     }
 

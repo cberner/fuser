@@ -103,7 +103,10 @@
   `raw_os_error()`; errors without an OS error number carry the file in their message
 * Fix `EBUSY` when unmounting a filesystem that is still in use, as root on Linux (#686).
   The unmount is now lazy, as it already was for unprivileged users and as libfuse does,
-  instead of failing and leaving the filesystem mounted with no way to retry
+  instead of failing and leaving the filesystem mounted with no way to retry. A detached
+  filesystem's session goes on until it is no longer in use, so
+  `BackgroundSession::umount_and_join()` returns `EBUSY` if it is still in use a few seconds
+  later, leaving the session to end on its own, instead of waiting indefinitely
 * Fix meaningless errors when a mount fails inside libfuse (#406). A failure that libfuse
   reported without setting errno was surfaced with an unrelated errno, most visibly
   `Success (os error 0)`; such a failure now names the libfuse call it came from, alongside
