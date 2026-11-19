@@ -133,7 +133,16 @@ pub(crate) struct Mount {
     mount_impl: Option<MountImpl>,
     mount_point: PathBuf,
     /// The FUSE device fd of this mount's kernel connection.
-    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    #[cfg_attr(
+        any(
+            target_os = "macos",
+            target_os = "freebsd",
+            target_os = "dragonfly",
+            target_os = "openbsd",
+            target_os = "netbsd"
+        ),
+        allow(dead_code)
+    )]
     fuse_device: Arc<DevFuse>,
 }
 
@@ -186,18 +195,32 @@ impl Mount {
     /// is still alive. If it is dead (POLLERR on the FUSE device fd), the filesystem
     /// was either unmounted externally (issue #658) or the connection was aborted,
     /// and unmounting by path could hit an unrelated filesystem mounted there in the
-    /// meantime. This is the same check libfuse's fuse_kern_unmount() performs, with
-    /// the same limits: an aborted connection whose dead mount is still in the mount
-    /// table is left behind (auto_unmount or "fusermount -u -z" cleans it up), and a
-    /// lazily detached mount keeps the connection alive, so it is still unmounted by
-    /// path. The decision never accesses the mountpoint through the filesystem,
-    /// which could block on an unresponsive or unserved mount.
-    #[cfg(not(target_os = "macos"))]
+    /// meantime. This is the same check libfuse's fuse_kern_unmount() performs on
+    /// Linux, with the same limits: an aborted connection whose dead mount is still in
+    /// the mount table is left behind (auto_unmount or "fusermount -u -z" cleans it
+    /// up), and a lazily detached mount keeps the connection alive, so it is still
+    /// unmounted by path. The decision never accesses the mountpoint through the
+    /// filesystem, which could block on an unresponsive or unserved mount.
+    #[cfg(not(any(
+        target_os = "macos",
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "openbsd",
+        target_os = "netbsd"
+    )))]
     fn should_unmount(&self) -> bool {
         is_mounted(&self.fuse_device)
     }
 
-    #[cfg(target_os = "macos")]
+    /// The FUSE device does not report a dead connection on these platforms (see
+    /// `is_mounted`), so always unmount.
+    #[cfg(any(
+        target_os = "macos",
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "openbsd",
+        target_os = "netbsd"
+    ))]
     fn should_unmount(&self) -> bool {
         true
     }
@@ -264,7 +287,13 @@ fn libc_umount(mnt: &CStr) -> nix::Result<()> {
 /// requested. Returns false if the connection is still alive when the timeout
 /// expires, e.g. because a lazily unmounted filesystem is still in use, or an
 /// unmount helper failed in a way that cannot be observed directly.
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "dragonfly",
+    target_os = "openbsd",
+    target_os = "netbsd"
+)))]
 pub(crate) fn connection_ended(fuse_device: &DevFuse, timeout: std::time::Duration) -> bool {
     let deadline = std::time::Instant::now() + timeout;
     while is_mounted(fuse_device) {
@@ -276,9 +305,19 @@ pub(crate) fn connection_ended(fuse_device: &DevFuse, timeout: std::time::Durati
     true
 }
 
-/// The FUSE device poll semantics are untested on macOS, so assume the unmount
-/// took effect there.
-#[cfg(target_os = "macos")]
+/// The end of the connection cannot be observed on these platforms (see `is_mounted`),
+/// but it need not be: their unmount is eager, failing with EBUSY while the filesystem
+/// is in use, and a successful one has torn the connection down. FreeBSD's sends
+/// FUSE_DESTROY and marks the connection dead before returning, which ends the session
+/// loop (single-threaded on these platforms). The same is assumed of macFUSE, where it
+/// is untested.
+#[cfg(any(
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "dragonfly",
+    target_os = "openbsd",
+    target_os = "netbsd"
+))]
 pub(crate) fn connection_ended(_fuse_device: &DevFuse, _timeout: std::time::Duration) -> bool {
     true
 }
@@ -333,7 +372,16 @@ pub(crate) fn fusermount_unmount(fusermount_bin: &str, mountpoint: &CStr) -> io:
 
 /// Warning: This will return true if the filesystem has been detached (lazy unmounted), but not
 /// yet destroyed by the kernel.
-#[cfg(not(target_os = "macos"))]
+///
+/// Linux only: its FUSE device reports POLLERR once the connection is dead. FreeBSD's
+/// reports nothing but the readiness asked for, so there this would always say mounted.
+#[cfg(not(any(
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "dragonfly",
+    target_os = "openbsd",
+    target_os = "netbsd"
+)))]
 fn is_mounted(fuse_device: &DevFuse) -> bool {
     use std::os::unix::io::AsFd;
     use std::slice;
@@ -557,7 +605,7 @@ mod test {
     /// `--skip=mnt::test::mount_unmount` filter used on platforms where
     /// unprivileged mounting is unavailable.
     #[test]
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
     fn mount_unmount_external() {
         use std::mem::ManuallyDrop;
 
@@ -611,7 +659,7 @@ mod test {
     /// probe the mountpoint through the (unserved) replacement filesystem, which would
     /// block indefinitely.
     #[test]
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
     fn mount_unmount_replacement() {
         use std::mem::ManuallyDrop;
 
@@ -641,7 +689,7 @@ mod test {
     }
 
     /// Unmount externally, without going through `Mount`
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
     fn external_unmount(mountpoint: &std::path::Path) {
         use std::ffi::CString;
         use std::os::unix::ffi::OsStrExt;
@@ -662,7 +710,7 @@ mod test {
     }
 
     /// The kernel may tear the connection down asynchronously, so allow some time
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
     fn wait_until_not_mounted(file: &Arc<DevFuse>) {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while is_mounted(file) && std::time::Instant::now() < deadline {
@@ -687,7 +735,11 @@ mod test {
         let mnt = cmd_mount();
         eprintln!("Our mountpoint: {:?}\nfuse mounts:\n{}", tmp.path(), mnt,);
         assert!(mnt.contains(&*tmp.path().to_string_lossy()));
+        // Only Linux can tell from the device whether the connection is alive
+        #[cfg(target_os = "linux")]
         assert!(is_mounted(&file));
+        #[cfg(not(target_os = "linux"))]
+        let _ = file;
         drop(mount);
         let mnt = cmd_mount();
         eprintln!("Our mountpoint: {:?}\nfuse mounts:\n{}", tmp.path(), mnt,);
