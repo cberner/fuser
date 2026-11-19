@@ -117,6 +117,11 @@
   Only Linux can observe the connection ending, so on macOS and the BSDs, where unmount
   fails rather than detaching a filesystem in use, a successful unmount is waited on as is.
   The `guard` field of `BackgroundSession` is now private - use `join()`/`umount_and_join()`
+* On one of the session's own threads - in a filesystem callback or in `destroy` - dropping
+  a `BackgroundSession` unmounts without waiting for the session, which cannot end before
+  that thread returns, and `join()` and `umount_and_join()` return an `ErrorKind::Deadlock`
+  error, rather than deadlocking or panicking. Waiting elsewhere can still deadlock if the
+  waiting thread holds a lock that `destroy` or a callback in progress needs
 * The pure-rust and `libfuse2` mount backends now report `fusermount` unmount failures
   instead of silently ignoring them
 * Treat `ECONNABORTED` from the FUSE device as a clean session end (#212): with
