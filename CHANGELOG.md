@@ -113,6 +113,8 @@
   end: sessions created via `Session::from_fd` are left detached (use `join()` after ending
   them), and so are sessions whose unmount failed or whose connection is still alive a few
   seconds after the unmount (e.g. a lazily unmounted filesystem still in use).
+  Only Linux can observe the connection ending, so on macOS and the BSDs, where unmount
+  fails rather than detaching a filesystem in use, a successful unmount is waited on as is.
   The `guard` field of `BackgroundSession` is now private - use `join()`/`umount_and_join()`
 * The pure-rust and `libfuse2` mount backends now report `fusermount` unmount failures
   instead of silently ignoring them
@@ -123,9 +125,9 @@
 * `KernelConfig::set_max_write()` now rejects values below 4096 with the nearest valid value,
   per its documented contract (#327). The kernel clamps `max_write` to at least 4096, so a
   smaller value was accepted but ineffective: write requests of up to 4096 bytes still arrived
-* Fix inverted mounted-check during session teardown: after the filesystem had already been
-  unmounted externally, fuser would attempt to unmount the mountpoint again, which could
-  unmount an unrelated filesystem mounted at the same path in the meantime
+* Fix inverted mounted-check during session teardown on Linux: after the filesystem had
+  already been unmounted externally, fuser would attempt to unmount the mountpoint again,
+  which could unmount an unrelated filesystem mounted at the same path in the meantime
 * Apply the same already-unmounted check to the `libfuse2` and `libfuse3` mount backends,
   fixing the spurious "Failed to umount filesystem" warning when a session is dropped after
   an external unmount (#658). As in libfuse, a connection that was aborted (e.g. via
