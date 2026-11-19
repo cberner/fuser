@@ -45,18 +45,15 @@ const MISSING_HINT: &str = "; is macFUSE installed?";
 #[cfg(not(any(target_os = "linux", target_os = "freebsd", target_os = "macos")))]
 const MISSING_HINT: &str = "";
 
-/// Name the device, so that "No such file or directory" says which file. The error kind is
-/// preserved for callers that match on it
+/// Name the device, so that "No such file or directory" says which file
 #[allow(dead_code)] // Not used with every feature.
 fn open_error(err: io::Error) -> io::Error {
-    if err.kind() == io::ErrorKind::NotFound {
-        io::Error::new(
-            err.kind(),
-            format!("{} not found{MISSING_HINT}", DevFuse::PATH),
-        )
+    let message = if err.kind() == io::ErrorKind::NotFound {
+        format!("{} not found{MISSING_HINT}", DevFuse::PATH)
     } else {
-        io::Error::new(err.kind(), format!("opening {}: {err}", DevFuse::PATH))
-    }
+        format!("opening {}: {err}", DevFuse::PATH)
+    };
+    crate::mnt::with_message(err, message)
 }
 
 #[cfg(test)]
@@ -83,5 +80,11 @@ mod test {
         assert!(err.to_string().contains(DevFuse::PATH), "{err}");
         // Advice for getting the device belongs only on the branch where it is absent
         assert!(!err.to_string().contains("not found"), "{err}");
+
+        // The OS error number is what callers match on, so it is kept
+        for errno in [libc::ENOENT, libc::EACCES, libc::EPERM] {
+            let err = open_error(io::Error::from_raw_os_error(errno));
+            assert_eq!(err.raw_os_error(), Some(errno));
+        }
     }
 }
