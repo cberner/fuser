@@ -6,6 +6,7 @@
 //! for filesystem operations under its mount point.
 
 use std::borrow::Cow;
+use std::cell::Cell;
 use std::fs::File;
 use std::io;
 use std::os::fd::AsFd;
@@ -13,6 +14,8 @@ use std::os::fd::BorrowedFd;
 use std::os::fd::OwnedFd;
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use std::thread::JoinHandle;
 use std::thread::{self};
 
@@ -53,6 +56,16 @@ use crate::request::RequestWithSender;
 /// FUSE recommends at least 128k, max 16M. The FUSE default is 16M on macOS
 /// and 128k on other systems.
 pub(crate) const MAX_WRITE_SIZE: usize = 16 * 1024 * 1024;
+
+/// Identifies a spawned session, so that a `BackgroundSession` can tell whether it is
+/// being dropped or joined from one of that session's own threads. 0 is no session
+static NEXT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
+
+thread_local! {
+    /// The spawned session this thread runs, or 0. Set on the session's background
+    /// thread and inherited by its worker threads, which run the filesystem callbacks
+    static CURRENT_SESSION: Cell<u64> = const { Cell::new(0) };
+}
 
 /// The minimum write size the kernel will honor: process_init_reply() in the
 /// kernel's fs/fuse/inode.c clamps a smaller negotiated max_write up to 4096,
@@ -248,10 +261,15 @@ impl<FS: Filesystem> Session<FS> {
         let kernel_abi = self.proto_version;
         // Take the fuse_session, so that we can unmount it
         let mount = std::mem::take(&mut *self.mount.mount.lock());
+        let id = NEXT_SESSION_ID.fetch_add(1, Ordering::Relaxed);
         let guard = thread::Builder::new()
             .name("fuser-bg".to_string())
-            .spawn(move || self.run())?;
+            .spawn(move || {
+                CURRENT_SESSION.set(id);
+                self.run()
+            })?;
         Ok(BackgroundSession {
+            id,
             guard: Some(guard),
             sender,
             fuse_device,
@@ -315,6 +333,7 @@ impl<FS: Filesystem> Session<FS> {
         channels.push(ch);
 
         let mut threads = Vec::with_capacity(n_threads);
+        let session_id = CURRENT_SESSION.get();
 
         for (i, ch) in channels.into_iter().enumerate() {
             let thread_name = format!("fuser-{i}");
@@ -328,11 +347,10 @@ impl<FS: Filesystem> Session<FS> {
                 kernel_capabilities,
                 kernel_abi: proto_version,
             };
-            threads.push(
-                thread::Builder::new()
-                    .name(thread_name)
-                    .spawn(move || event_loop.event_loop())?,
-            );
+            threads.push(thread::Builder::new().name(thread_name).spawn(move || {
+                CURRENT_SESSION.set(session_id);
+                event_loop.event_loop()
+            })?);
         }
 
         let mut reply: io::Result<()> = Ok(());
@@ -610,9 +628,12 @@ impl<FS: Filesystem> SessionEventLoop<FS> {
 /// The background session data structure
 ///
 /// Dropping this unmounts the filesystem and blocks until the session has ended,
-/// which guarantees that `Filesystem::destroy` has run when drop returns. Because
-/// of that, it must not be dropped from within a filesystem callback, which runs
-/// on the session thread being waited for. For a session created via
+/// which guarantees that `Filesystem::destroy` has run when drop returns. The
+/// session's own threads, which run the filesystem callbacks and `destroy`, cannot
+/// wait for it to end: dropped there, it unmounts and leaves the session to end on
+/// its own, and `join` and `umount_and_join` return an error. Waiting can still
+/// deadlock if the dropping thread holds something `destroy` or a callback in
+/// progress needs, such as a lock. For a session created via
 /// `Session::from_fd` there is no mount to remove, so dropping cannot end the
 /// session and leaves its thread detached; end the session externally and use
 /// `join` to wait for it instead. The thread is likewise left detached, with a
@@ -622,6 +643,8 @@ impl<FS: Filesystem> SessionEventLoop<FS> {
 /// is still in use, or an unmount helper that failed without reporting it).
 #[derive(Debug)]
 pub struct BackgroundSession {
+    /// Which spawned session this is, as recorded in `CURRENT_SESSION`
+    id: u64,
     /// Thread guard of the background session. None once joined.
     guard: Option<JoinHandle<io::Result<()>>>,
     /// Object for creating Notifiers for client use
@@ -657,6 +680,11 @@ impl BackgroundSession {
                 return Err(err);
             }
         }
+        if self.on_session_thread() {
+            // Unmounted, so the session ends once this callback returns
+            self.guard.take();
+            return Err(Self::own_thread_error());
+        }
         self.join_impl()
     }
 
@@ -672,7 +700,24 @@ impl BackgroundSession {
     /// Join the filesystem thread without unmounting first: blocks until
     /// something else ends the session, e.g. an external unmount.
     pub fn join(mut self) -> io::Result<()> {
+        if self.on_session_thread() {
+            self.guard.take();
+            return Err(Self::own_thread_error());
+        }
         self.join_impl()
+    }
+
+    /// Whether the current thread is one of this session's own, which the session
+    /// cannot end without: joining it from here would wait on itself
+    fn on_session_thread(&self) -> bool {
+        CURRENT_SESSION.get() == self.id
+    }
+
+    fn own_thread_error() -> io::Error {
+        io::Error::new(
+            io::ErrorKind::Deadlock,
+            "cannot wait for a FUSE session from one of its own threads",
+        )
     }
 
     fn join_impl(&mut self) -> io::Result<()> {
@@ -705,6 +750,12 @@ impl Drop for BackgroundSession {
             // Still mounted, so the session is still running and joining would
             // block indefinitely
             warn!("Failed to unmount filesystem during drop: {err}");
+            return;
+        }
+        if self.on_session_thread() {
+            // Waiting here would wait on this very thread, so the session is left to
+            // end once the callback returns
+            warn!("BackgroundSession dropped on one of its own threads; not waiting for it");
             return;
         }
         // The connection can end asynchronously (e.g. auto_unmount), and some
@@ -1657,6 +1708,192 @@ mod test {
         // the session
         drop(busy);
         runner.join().unwrap().unwrap();
+        ManuallyDrop::into_inner(tmp);
+    }
+
+    /// A filesystem holding its own BackgroundSession, which `getattr` ends as
+    /// `in_getattr` says, and `destroy` drops if still held - both on the session's own
+    /// threads
+    struct SelfEndingFs {
+        session: Arc<Mutex<Option<BackgroundSession>>>,
+        in_getattr: Option<fn(BackgroundSession) -> io::Result<()>>,
+        results: std::sync::mpsc::Sender<io::Result<()>>,
+    }
+
+    impl Filesystem for SelfEndingFs {
+        fn getattr(
+            &self,
+            _req: &Request,
+            ino: crate::INodeNo,
+            _fh: Option<crate::FileHandle>,
+            reply: crate::ReplyAttr,
+        ) {
+            if let Some(end) = self.in_getattr {
+                if let Some(session) = self.session.lock().take() {
+                    self.results.send(end(session)).unwrap();
+                }
+            }
+            let now = std::time::SystemTime::now();
+            reply.attr(
+                &std::time::Duration::ZERO,
+                &crate::FileAttr {
+                    ino,
+                    size: 0,
+                    blocks: 0,
+                    atime: now,
+                    mtime: now,
+                    ctime: now,
+                    crtime: now,
+                    kind: crate::FileType::Directory,
+                    perm: 0o755,
+                    nlink: 2,
+                    uid: 0,
+                    gid: 0,
+                    rdev: 0,
+                    blksize: 4096,
+                    flags: 0,
+                },
+            );
+        }
+
+        fn destroy(&mut self) {
+            // Whatever is still held is dropped here, on the session's own thread
+            drop(self.session.lock().take());
+            self.results.send(Ok(())).unwrap();
+        }
+    }
+
+    /// What a SelfEndingFs reports: the result of ending itself in `getattr`, if it
+    /// does, then that `destroy` ran
+    struct SelfEnding {
+        received: std::sync::mpsc::Receiver<io::Result<()>>,
+        abort_path: Option<std::path::PathBuf>,
+    }
+
+    impl SelfEnding {
+        /// The next report. A session that waits on itself never sends one, and leaves
+        /// any request it is serving - possibly from this very process, which could then
+        /// never exit - waiting with it, so the connection is aborted before failing
+        fn next(&self, what: &str) -> io::Result<()> {
+            match self.received.recv_timeout(SELF_ENDING_WAIT) {
+                Ok(result) => result,
+                Err(_) => {
+                    if let Some(abort_path) = &self.abort_path {
+                        let _ = std::fs::write(abort_path, "1");
+                    }
+                    panic!("{what}");
+                }
+            }
+        }
+    }
+
+    /// Spawn a SelfEndingFs, handing it its own BackgroundSession
+    fn spawn_self_ending(
+        mountpoint: &Path,
+        in_getattr: Option<fn(BackgroundSession) -> io::Result<()>>,
+    ) -> SelfEnding {
+        let (results, received) = std::sync::mpsc::channel();
+        let session = Arc::new(Mutex::new(None));
+        let fs = SelfEndingFs {
+            session: session.clone(),
+            in_getattr,
+            results,
+        };
+        let bg = Session::new(fs, mountpoint, &Config::default())
+            .unwrap()
+            .spawn()
+            .unwrap();
+        *session.lock() = Some(bg);
+        SelfEnding {
+            received,
+            // Found while mounted: a lazily detached mount leaves the mount table
+            abort_path: fusectl_abort_path(mountpoint),
+        }
+    }
+
+    const SELF_ENDING_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+
+    fn stat_in_background(path: &Path) {
+        let path = path.to_path_buf();
+        std::thread::spawn(move || std::fs::metadata(path));
+    }
+
+    /// Dropping a BackgroundSession in `destroy`, which runs on the thread the drop
+    /// would join, must neither panic on joining itself nor block
+    #[test]
+    fn drop_on_the_session_thread_does_not_join_itself() {
+        let tmp = ManuallyDrop::new(tempfile::tempdir().unwrap());
+        let mountpoint = tmp.path().canonicalize().unwrap();
+        let session = spawn_self_ending(&mountpoint, None);
+        let _ = std::fs::metadata(&mountpoint);
+
+        // Ending the session from outside runs destroy, which drops the session
+        let unmounted = ["fusermount3", "fusermount"].iter().any(|bin| {
+            std::process::Command::new(bin)
+                .arg("-u")
+                .arg(&mountpoint)
+                .status()
+                .is_ok_and(|status| status.success())
+        });
+        if !unmounted {
+            // No fusermount binary available; umount(2) requires root
+            let path = std::ffi::CString::new(mountpoint.as_os_str().as_encoded_bytes()).unwrap();
+            nix::mount::umount(path.as_c_str()).unwrap();
+        }
+        session
+            .next("destroy must return after dropping its own session")
+            .unwrap();
+        ManuallyDrop::into_inner(tmp);
+    }
+
+    /// Unmounting and joining from a filesystem callback cannot wait for the session,
+    /// which ends only once the callback returns, so it must report that rather than
+    /// block or panic - and the unmount must still take effect
+    #[test]
+    fn umount_and_join_on_the_session_thread_reports_deadlock() {
+        let tmp = ManuallyDrop::new(tempfile::tempdir().unwrap());
+        let mountpoint = tmp.path().canonicalize().unwrap();
+        let session = spawn_self_ending(&mountpoint, Some(BackgroundSession::umount_and_join));
+        // Off this thread, so that a callback that never returns fails the test rather
+        // than hanging it
+        stat_in_background(&mountpoint);
+
+        let err = session
+            .next("umount_and_join must return promptly on the session's own thread")
+            .unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::Deadlock);
+        // The unmount went ahead, so the session ends and destroy runs
+        session
+            .next("the session must end after unmounting itself")
+            .unwrap();
+        ManuallyDrop::into_inner(tmp);
+    }
+
+    /// Dropping a BackgroundSession in a callback must not wait for the session either
+    #[test]
+    fn drop_in_a_callback_does_not_wait() {
+        let tmp = ManuallyDrop::new(tempfile::tempdir().unwrap());
+        let mountpoint = tmp.path().canonicalize().unwrap();
+        let session = spawn_self_ending(
+            &mountpoint,
+            Some(|session| {
+                drop(session);
+                Ok(())
+            }),
+        );
+        let started = std::time::Instant::now();
+        stat_in_background(&mountpoint);
+        session.next("the callback must return").unwrap();
+        // Waiting for the connection to end would take the full UNMOUNT_WAIT, since the
+        // request the callback is serving keeps the filesystem in use
+        assert!(
+            started.elapsed() < UNMOUNT_WAIT,
+            "drop in a callback waited {:?}",
+            started.elapsed()
+        );
+        session
+            .next("the session must end after the callback dropped it")
+            .unwrap();
         ManuallyDrop::into_inner(tmp);
     }
 
