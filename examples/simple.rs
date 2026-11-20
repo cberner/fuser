@@ -1151,8 +1151,12 @@ impl Filesystem for SimpleFS {
         if uid.is_some() || gid.is_some() {
             debug!("chown() called with {ino:?} {uid:?} {gid:?}");
             if let Some(gid) = gid {
-                // Non-root users can only change gid to a group they're in
-                if !caller_is_root(_req) && !get_groups(_req.pid()).contains(&gid) {
+                // Non-root users can only change gid to a group they're in, which as in Linux's
+                // in_group_p() includes the one they act as
+                if !caller_is_root(_req)
+                    && _req.gid() != Some(gid)
+                    && !get_groups(_req.pid()).contains(&gid)
+                {
                     reply.error(Errno::EPERM);
                     return;
                 }
@@ -2103,8 +2107,8 @@ impl Filesystem for SimpleFS {
         match File::open(path) {
             Ok(file) => {
                 let file_size = file.metadata().unwrap().len();
-                // Could underflow if file length is less than local_start
-                let read_size = min(size, file_size.saturating_sub(offset as u64) as u32);
+                // Compared as u64: what remains of a large file need not fit the request's u32
+                let read_size = min(u64::from(size), file_size.saturating_sub(offset)) as u32;
 
                 let mut buffer = vec![0; read_size as usize];
                 // The file can shrink between the size check and the read, under a truncate on
@@ -3126,17 +3130,22 @@ fn owner_mapped_for(pid: u32, uid: u32, gid: u32) -> bool {
     maps("uid", uid) && maps("gid", gid)
 }
 
+/// The caller's supplementary groups.
+///
+/// None are known for a caller this process cannot see in `/proc`: one outside its pid
+/// namespace, which the kernel reports as pid 0, or one that has already exited. Every caller
+/// treats an unknown group as one the caller is not in, which refuses rather than grants
 fn get_groups(pid: u32) -> Vec<u32> {
     if cfg!(target_os = "linux") {
         let path = format!("/proc/{pid}/task/{pid}/status");
-        let file = File::open(path).unwrap();
-        for line in BufReader::new(file).lines() {
-            let line = line.unwrap();
-            if line.starts_with("Groups:") {
-                return line["Groups: ".len()..]
-                    .split(' ')
-                    .filter(|x| !x.trim().is_empty())
-                    .map(|x| x.parse::<u32>().unwrap())
+        let Ok(file) = File::open(path) else {
+            return Vec::new();
+        };
+        for line in BufReader::new(file).lines().map_while(Result::ok) {
+            if let Some(groups) = line.strip_prefix("Groups:") {
+                return groups
+                    .split_whitespace()
+                    .filter_map(|group| group.parse::<u32>().ok())
                     .collect();
             }
         }
