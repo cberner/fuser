@@ -1,170 +1,55 @@
 # FUSE for Rust - Changelog
 
 ## Unreleased
-* **Breaking:** `Request::uid()` and `Request::gid()` return `Option<u32>`. An idmapped mount
-  has no caller ids to report, so there is not always a uid. A filesystem that does not request
-  `InitFlags::FUSE_ALLOW_IDMAP` is always given ids and can unwrap
-* **Breaking:** `mknod()`, `mkdir()`, `symlink()`, `create()` and `tmpfile()` take an `Owner`
-  argument, which is who the inode they create belongs to, and `rename()` takes an
-  `Option<Owner>`, which is `Some` for the inode a `RENAME_WHITEOUT` leaves behind and `None`
-  for any other rename, those creating nothing to own. Those are exactly the requests the
-  kernel sends ids for, and on an idmapped mount the owner is the caller's ids mapped through
-  the mount's idmapping rather than the ids themselves, so reading it off the request would
-  have been wrong
-* `KernelConfig::add_capabilities()` now accepts `InitFlags::FUSE_ALLOW_IDMAP` (ABI 7.41),
-  which lets the mount be idmapped. It is accepted only where it can be honored - the session
-  must allow other users, and `default_permissions` must be in force, whether from
-  `MountOption::DefaultPermissions` or from negotiating `InitFlags::FUSE_POSIX_ACL` - and
-  refused otherwise: the kernel refuses the connection outright without `default_permissions`,
-  and without allow_other fuser would be offering an owner-only ACL it can no longer enforce. Once negotiated the kernel withholds the
-  caller's ids from every request that does not create an inode, so `Request::uid()` and
-  `Request::gid()` report the new `FUSE_INVALID_UIDGID` there; the requests that do create an
-  inode still carry ids, and they are the owner the new inode should get, already mapped
-* Add `Filesystem::statx()`, which the kernel calls for `statx(2)` (ABI 7.38), along with
-  `StatxAttr` and `ReplyStatx`. This exists to report a creation time, which no other request
-  can carry: `fuse_attr` has a field for it on macOS alone, so on Linux `statx(2)` otherwise
-  reports whatever the kernel cached. Leaving it unimplemented reports `ENOSYS`, which the
-  kernel takes as permanent: it stops sending `FUSE_STATX` on that connection and answers
-  `statx(2)` out of `getattr()`, which is what happened before. Note that `StatxAttr` also
-  carries the `STATX_ATTR_*` properties, such as immutable and append-only, because the wire
-  format does - but the kernel discards them from a FUSE reply, so setting them does not make
-  `chattr +i` visible to `statx(2)`
-* Add `Filesystem::tmpfile()`, which the kernel calls for `open()` with `O_TMPFILE` (#366,
-  ABI 7.37). The file has no name and belongs to no directory until `linkat()` gives it one,
-  so unlike `create()` this is told only which directory it was made in. Leaving it
-  unimplemented reports `ENOSYS`, which the kernel takes as permanent: it stops offering
-  `O_TMPFILE` on that connection and answers `EOPNOTSUPP`, which is what happened before
-* Add `Filesystem::syncfs()`, which the kernel calls for `syncfs(2)` (#359, ABI 7.34). Leaving
-  it unimplemented reports `ENOSYS`, which makes the kernel stop asking for the lifetime of the
-  connection, so this changes nothing for a filesystem that does not want it. Note that the
-  kernel only propagates `syncfs(2)` on `fuseblk` and virtiofs connections, neither of which
-  fuser mounts, so this is reachable only for a session built with `Session::from_fd` on such
-  a connection
-* Unmounting from within the mounting process now works with `MountOption::AutoUnmount` (#407).
-  Dropping the `BackgroundSession`, calling `umount_and_join()` or `SessionUnmounter::unmount()`
-  used to leave the unmount to the `fusermount` helper, which only acts once the process exits.
-  Until then the mountpoint was left behind as a dangling "transport endpoint is not connected",
-  and the session kept running. `auto_unmount` remains a safety net for a process that dies
-  without unmounting
-* Add `Notifier::inc_epoch()`, which invalidates every cached directory entry at once by
-  incrementing the connection's epoch (#382). This costs one notification where
-  `inval_entry()` costs one per entry and needs the names up front, so it suits a backing
-  store that changed wholesale. Requires ABI 7.44, returning `ENOTSUP` below it, since the
-  kernel advertises no capability bit for this and an older one answers only with `EINVAL`
-* The ABI version reported to the kernel on non-macOS platforms is now 7.44, up from 7.40, so
-  that `inc_epoch()` is in protocol rather than relying on the kernel not version-gating its
-  notification dispatch. The features 7.41 through 7.43 add are capabilities the kernel acts
-  on only once negotiated, and all three are already refused
-* Add `TryFrom<&std::fs::Metadata>` for `FileAttr` (#413), so a filesystem backed by files on
-  disk can answer `getattr` and `lookup` from the underlying file's metadata. The conversion is
-  fallible because `nlink`, `rdev` and `blksize` narrow to the widths the FUSE protocol gives
-  them, and because a file whose type `FileType` cannot represent has no valid conversion. Note
-  that `ino` is the underlying file's inode number, which a filesystem assigning its own will
-  want to overwrite
-* Support `InitFlags::FUSE_HANDLE_KILLPRIV_V2`, which the previous release refused. With it
-  negotiated the kernel stops clearing suid and sgid itself and instead tells the filesystem
-  which requests must clear them, so `Filesystem::setattr()`, `open()` and `create()` gain a
-  `kill_suid_gid` argument carrying that signal (`write()` already had it via
-  `WriteFlags::FUSE_WRITE_KILL_SUIDGID`). A filesystem that does not request the capability
-  never sees it set. Note that `kill_suid_gid` covers suid and sgid only: as with plain
-  `FUSE_HANDLE_KILLPRIV`, clearing the `security.capability` xattr on every write, chown and
-  truncate is also the filesystem's job under either capability, and carries no per-request
-  signal. What v2 adds is that suid and sgid are cleared only when the caller lacks
-  `CAP_FSETID`, matching what the kernel would have done itself
-* `KernelConfig::add_capabilities()` now refuses capabilities fuser cannot honor, rather than
-  requesting them and leaving the filesystem silently broken: `FUSE_SECURITY_CTX`,
-  `FUSE_CREATE_SUPP_GROUP`, `FUSE_HANDLE_KILLPRIV_V2`, `FUSE_ALLOW_IDMAP`, `FUSE_HAS_INODE_DAX`,
-  `FUSE_SUBMOUNTS`, `FUSE_MAP_ALIGNMENT`, `FUSE_OVER_IO_URING`, `FUSE_HAS_RESEND` and
-  `FUSE_REQUEST_TIMEOUT`. Negotiating most of them merely had no effect, but `FUSE_ALLOW_IDMAP`
-  left the filesystem answering `EACCES` to everything but inode creation, and
-  `FUSE_HANDLE_KILLPRIV_V2` left suid and sgid bits surviving a chown, a truncate or an
-  `O_TRUNC` open. Plain `FUSE_HANDLE_KILLPRIV` still works, as do the macFUSE capabilities that
-  share a bit with three of these
-* Add `Notifier::expire_entry()`, which marks a cached directory entry for revalidation
-  instead of invalidating it (#367). Unlike `inval_entry()`, expiring leaves anything
-  mounted beneath the entry mounted, so it suits an entry merely believed to be stale.
-  Returns `ENOTSUP` on a kernel that does not advertise `InitFlags::FUSE_HAS_EXPIRE_ONLY`,
-  rather than sending a request such a kernel would answer by invalidating the entry and
-  reporting success
-* Add `ReplyDirectory::remaining_capacity()` and `ReplyDirectoryPlus::remaining_capacity()`,
-  which report how much room is left for entries (#214). Before the first entry is added this
-  is the buffer size the kernel asked for, so a filesystem can size a batch of work to the
-  reply instead of preparing entries only to have `add()` report the buffer full. The
-  `experimental` async API exposes the same thing on `DirEntListBuilder`
-* Parse the extended `fuse_setxattr_in` layout, making `InitFlags::FUSE_SETXATTR_EXT` usable
-  (#357). Enabling that capability previously panicked the session thread on the first
-  `setxattr` and left the filesystem hung, because fuser kept reading the shorter pre-7.33
-  layout. A `setxattr` whose value length disagrees with its header is now rejected rather
-  than panicking, and one carrying `FUSE_SETXATTR_ACL_KILL_SGID` is refused with `ENOTSUP`,
-  since `Filesystem::setxattr` cannot yet be told to clear SGID
-* Log which file could not be reached when a mount fails, since a bare "No such file or
-  directory" could equally mean the mountpoint, `/dev/fuse` or the `fusermount` helper
-  (#250). The returned error is the OS error as it came, so callers can still match on
-  `raw_os_error()`; errors without an OS error number carry the file in their message
-* Fix `EBUSY` when unmounting a filesystem that is still in use, as root on Linux (#686).
-  The unmount is now lazy, as it already was for unprivileged users and as libfuse does,
-  instead of failing and leaving the filesystem mounted with no way to retry. A detached
-  filesystem's session goes on until it is no longer in use, so
-  `BackgroundSession::umount_and_join()` returns `EBUSY` if it is still in use a few seconds
-  later, leaving the session to end on its own, instead of waiting indefinitely
-* Fix meaningless errors when a mount fails inside libfuse (#406). A failure that libfuse
-  reported without setting errno was surfaced with an unrelated errno, most visibly
-  `Success (os error 0)`; such a failure now names the libfuse call it came from, alongside
-  libfuse's own diagnostic on stderr
-* Dropping a `BackgroundSession` now unmounts the filesystem and waits for the session to
-  end, guaranteeing that `Filesystem::destroy` has run when drop returns (#239, #411). This
-  restores the pre-0.16 blocking drop behavior. Drop does not wait when the session cannot
-  end: sessions created via `Session::from_fd` are left detached (use `join()` after ending
-  them), and so are sessions whose unmount failed or whose connection is still alive a few
-  seconds after the unmount (e.g. a lazily unmounted filesystem still in use).
-  Only Linux can observe the connection ending, so on macOS and the BSDs, where unmount
-  fails rather than detaching a filesystem in use, a successful unmount is waited on as is.
-  The `guard` field of `BackgroundSession` is now private - use `join()`/`umount_and_join()`
-* On one of the session's own threads - in a filesystem callback or in `destroy` - dropping
-  a `BackgroundSession` unmounts without waiting for the session, which cannot end before
-  that thread returns, and `join()` and `umount_and_join()` return an `ErrorKind::Deadlock`
-  error, rather than deadlocking or panicking. Waiting elsewhere can still deadlock if the
-  waiting thread holds a lock that `destroy` or a callback in progress needs
-* The pure-rust and `libfuse2` mount backends now report `fusermount` unmount failures
-  instead of silently ignoring them
-* Treat `ECONNABORTED` from the FUSE device as a clean session end (#212): with
-  `FUSE_ABORT_ERROR` negotiated, aborting the connection made `Session::run()` and
-  `BackgroundSession::umount_and_join()` return an error instead of ending normally
-  the way an unmount (`ENODEV`) does
-* `KernelConfig::set_max_write()` now rejects values below 4096 with the nearest valid value,
-  per its documented contract (#327). The kernel clamps `max_write` to at least 4096, so a
-  smaller value was accepted but ineffective: write requests of up to 4096 bytes still arrived
-* Fix inverted mounted-check during session teardown on Linux: after the filesystem had
-  already been unmounted externally, fuser would attempt to unmount the mountpoint again,
-  which could unmount an unrelated filesystem mounted at the same path in the meantime
-* Apply the same already-unmounted check to the `libfuse2` and `libfuse3` mount backends,
-  fixing the spurious "Failed to umount filesystem" warning when a session is dropped after
-  an external unmount (#658). As in libfuse, a connection that was aborted (e.g. via
-  fusectl) also counts as already unmounted; its dead mount is left to `auto_unmount` or
-  `fusermount -u -z`
-* Fix special characters in `MountOption` values being interpreted as further mount options
-  (#424). `MountOption::FSName("foo,ro")` used to mount a filesystem named `foo` that was
-  read-only, instead of one named `foo,ro`. Commas and backslashes in `FSName` are now escaped
-  for libfuse and the fusermount helpers. `Subtype` and `CUSTOM` values containing a comma or
-  backslash, which cannot be escaped consistently, are now rejected by `Session::new()`, as are
-  NUL bytes in any value, which used to panic. On platforms other than Linux the mount helpers
-  support no escaping, so `FSName` is restricted there as well
-* Fix a per-mount memory leak in the `libfuse3` backend: the `fuse_session` is now destroyed
-  on every teardown path, including when mounting fails partway through setup
-* Fix corruption of pre-1970 timestamps with fractional seconds in `setattr`: the nanoseconds
-  were subtracted from instead of added to the (negative) whole second, shifting times by up
-  to two seconds
-* macOS: forward the `renamex_np(2)` flags to `Filesystem::rename()` as
-  `RenameFlags::RENAME_SWAP` and `RenameFlags::RENAME_EXCL`, instead of always passing an empty
-  set. Filesystems that do not implement these operations must now reply with EINVAL for flags
-  they don't handle
-* macOS: fix garbled `rename()` names (#341). fuser assumed macFUSE always sends the extended
-  16-byte `fuse_rename_in`, but macFUSE sends it only once the extended rename operations have
-  been negotiated, which fuser never requested. The 8-byte layout it actually received was then
-  parsed at the wrong offset, so the filesystem saw truncated or empty names. fuser now always
-  requests those operations
-* Remove the `macfuse-4-compat` feature flag, which was set by the build script and selected the
-  extended `fuse_rename_in` layout. That layout is now used for all macOS builds
+
+Breaking changes:
+* `Request::uid()` and `Request::gid()` return `Option<u32>`, since an idmapped mount has no caller
+  ids. `experimental::RequestContext::user_id()` and `group_id()` likewise return `Option<u32>`
+* Add an `Owner` argument to `mknod()`, `mkdir()`, `symlink()`, `create()` and `tmpfile()`, and an
+  `Option<Owner>` argument to `rename()`
+* Add a `kill_suid_gid` argument to `setattr()`, `open()` and `create()`, for
+  `FUSE_HANDLE_KILLPRIV_V2`
+* `KernelConfig::add_capabilities()` refuses capabilities fuser cannot honor, such as
+  `FUSE_SECURITY_CTX` and `FUSE_OVER_IO_URING`
+* `KernelConfig::set_max_write()` rejects values below 4096
+* `Session::new()` rejects `MountOption::Subtype` and `MountOption::CUSTOM` values containing a
+  comma or backslash, and any mount option value containing a NUL
+* Dropping a `BackgroundSession` now waits for the session to end, so that `Filesystem::destroy()`
+  has run. The `guard` field is now private
+* Unmount lazily as root on Linux, instead of failing with `EBUSY`.
+  `BackgroundSession::umount_and_join()` returns `EBUSY` if the filesystem is still in use
+* macOS: forward the `renamex_np(2)` flags to `rename()`. Filesystems must reply `EINVAL` to flags
+  they do not support
+* Remove the `macfuse-4-compat` feature flag
+
+New features:
+* Support idmapped mounts via `InitFlags::FUSE_ALLOW_IDMAP`, which requires `allow_other` and
+  `default_permissions`
+* Support `InitFlags::FUSE_HANDLE_KILLPRIV_V2`
+* Support `InitFlags::FUSE_SETXATTR_EXT`
+* Add `Filesystem::statx()` (ABI 7.39)
+* Add `Filesystem::tmpfile()` for `O_TMPFILE`
+* Add `Filesystem::syncfs()`
+* Add `Notifier::inc_epoch()` to invalidate every cached directory entry at once
+* Add `Notifier::expire_entry()`
+* Add `remaining_capacity()` to `ReplyDirectory`, `ReplyDirectoryPlus` and the experimental
+  `DirEntListBuilder`
+* Add `TryFrom<&std::fs::Metadata>` for `FileAttr`
+* Report ABI 7.44 to the kernel on non-macOS platforms, up from 7.40
+
+Bug fixes:
+* Fix unmounting with `MountOption::AutoUnmount` from within the mounting process
+* Fix `Session::run()` returning an error after the connection was aborted with
+  `FUSE_ABORT_ERROR`
+* Fix meaningless errors, such as `Success (os error 0)`, when mounting fails inside libfuse
+* Log which path could not be reached when a mount fails
+* Fix teardown unmounting again after an external unmount, which could unmount an unrelated
+  filesystem mounted at the same path
+* Fix `MountOption::FSName` values containing a comma being parsed as further mount options
+* Report `fusermount` unmount failures from the pure-rust and `libfuse2` backends
+* Fix a per-mount memory leak in the `libfuse3` backend
+* Fix corruption of pre-1970 timestamps with fractional seconds in `setattr()`
+* macOS: fix garbled names in `rename()`
 
 ## 0.18.0 - 2026-07-22
 * Remove deprecated feature flags `abi-*`
