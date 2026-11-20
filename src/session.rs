@@ -1327,14 +1327,14 @@ mod test {
             &Config::default(),
         )
         .unwrap();
-        // FUSE_STATX arrived in ABI 7.38. An older kernel answers statx(2) out of
+        // FUSE_STATX arrived in ABI 7.39. An older kernel answers statx(2) out of
         // FUSE_GETATTR without ever asking, so there is nothing to assert against
         let supported = session
             .proto_version
             .is_some_and(|v| v >= crate::ll::fuse_abi::FUSE_STATX_VERSION);
         let bg = session.spawn().unwrap();
         if !supported {
-            eprintln!("skipping statx: the kernel's FUSE protocol predates 7.38");
+            eprintln!("skipping statx: the kernel's FUSE protocol predates 7.39");
             bg.umount_and_join().unwrap();
             ManuallyDrop::into_inner(tmp);
             return;
@@ -1383,7 +1383,7 @@ mod test {
         // mask, btime and basic stats out of the reply and ignores this field, so the
         // immutable and append-only bits set above go nowhere. Asserted so that this stops
         // being true loudly rather than silently, since the wire format has carried the field
-        // since 7.38 and only the kernel's use of it is missing
+        // since 7.39 and only the kernel's use of it is missing
         assert_eq!(
             buf.stx_attributes, 0,
             "STATX_ATTR_* from a FUSE filesystem is dropped by the kernel; if this now \

@@ -42,9 +42,9 @@ pub(crate) const FUSE_KERNEL_MINOR_VERSION: u32 = if cfg!(target_os = "macos") {
     19
 } else {
     // 7.44 is what `FUSE_NOTIFY_INC_EPOCH` needs. Everything 7.41 through 7.43 added is a
-    // capability the kernel only acts on once negotiated, and all three are refused in
-    // `UNSUPPORTED_CAPABILITIES`, so declaring this adds no obligation beyond the
-    // notification itself
+    // capability the kernel only acts on once negotiated: `FUSE_ALLOW_IDMAP` is accepted only
+    // where it can be honored, and the other two are refused in `UNSUPPORTED_CAPABILITIES`,
+    // so declaring this adds no obligation beyond the notification itself
     44
 };
 
@@ -202,7 +202,7 @@ pub(crate) const FUSE_NOTIFY_INC_EPOCH_VERSION: Version = Version(7, 44);
 /// `statx(2)` out of what `FUSE_GETATTR` gives it, so nothing outside the tests has to ask -
 /// and only the Linux ones, since `statx(2)` is Linux's
 #[cfg(all(test, target_os = "linux"))]
-pub(crate) const FUSE_STATX_VERSION: Version = Version(7, 38);
+pub(crate) const FUSE_STATX_VERSION: Version = Version(7, 39);
 
 /// A timestamp as `struct statx` carries one, which unlike `fuse_attr`'s pair of fields is a
 /// signed second count with its own padding
