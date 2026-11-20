@@ -2151,6 +2151,18 @@ impl Filesystem for SimpleFS {
             return;
         }
 
+        // open() refuses to open an append-only file for writing without O_APPEND, but nothing
+        // stops the caller clearing O_APPEND with fcntl() afterwards: the kernel would refuse
+        // that for a file it knew to be append-only, and does not know this one is. So what
+        // the flag protects - the data already written - is checked here instead
+        if self
+            .get_inode(ino)
+            .is_ok_and(|attrs| attrs.is_append_only() && offset < attrs.size)
+        {
+            reply.error(Errno::EPERM);
+            return;
+        }
+
         let path = self.content_path(ino);
         match OpenOptions::new().write(true).open(path) {
             Ok(mut file) => {
@@ -2438,12 +2450,18 @@ impl Filesystem for SimpleFS {
             // an unprivileged user returns EPERM without ever reaching this filesystem. So
             // this one key is removable by anyone: doing so only ever takes privilege away.
             // Setting it still needs root, as it does for any other `security.*` key
-            if key.as_bytes() != b"security.capability" {
-                if let Err(error) = xattr_access_check(key.as_bytes(), libc::W_OK, &attrs, request)
-                {
-                    reply.error(error);
-                    return;
-                }
+            //
+            // An immutable inode still refuses it: nothing can write, chown or truncate one, so
+            // no removal on such an operation's behalf can be pending. An append-only one cannot
+            // refuse, since appending to it is exactly such an operation
+            let check = if key.as_bytes() == b"security.capability" {
+                attrs.check_writable()
+            } else {
+                xattr_access_check(key.as_bytes(), libc::W_OK, &attrs, request)
+            };
+            if let Err(error) = check {
+                reply.error(error);
+                return;
             }
 
             if attrs.xattrs.remove(key.as_bytes()).is_none() {
