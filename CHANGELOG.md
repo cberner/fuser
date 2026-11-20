@@ -1,6 +1,6 @@
 # FUSE for Rust - Changelog
 
-## Unreleased
+## 0.19.0 - 2026-11-20
 
 Breaking changes:
 * `Request::uid()` and `Request::gid()` return `Option<u32>`, since an idmapped mount has no caller
