@@ -309,7 +309,7 @@ fn clear_suid_sgid(attr: &mut InodeAttributes, req: &Request, privilege: Privile
 
     let sgid_exec = attr.mode & (libc::S_ISGID | libc::S_IXGRP) as u16
         == (libc::S_ISGID | libc::S_IXGRP) as u16;
-    let outside_group = privilege.lacks_fsetid(req) && caller_outside_group(req, attr.gid);
+    let outside_group = privilege.lacks_fsetid(req, attr) && caller_outside_group(req, attr.gid);
     if sgid_exec || outside_group {
         attr.mode &= !libc::S_ISGID as u16;
     }
@@ -328,10 +328,10 @@ enum Privilege {
 }
 
 impl Privilege {
-    fn lacks_fsetid(&self, req: &Request) -> bool {
+    fn lacks_fsetid(&self, req: &Request, attr: &InodeAttributes) -> bool {
         match self {
             Privilege::KnownLacking => true,
-            Privilege::Unknown => !has_fsetid(req.pid(), req.uid()),
+            Privilege::Unknown => !has_fsetid(req, attr),
         }
     }
 }
@@ -356,7 +356,7 @@ fn clear_file_capabilities(attr: &mut InodeAttributes) {
 /// Call this only when a killpriv capability was negotiated: without one the kernel still
 /// removes privileges itself, and clearing here as well would strip bits it had decided to keep
 fn clear_privileges_unprompted(attr: &mut InodeAttributes, req: &Request) {
-    if !has_fsetid(req.pid(), req.uid()) {
+    if !has_fsetid(req, attr) {
         // The capability set has just answered the question, so do not read it a second time
         clear_suid_sgid(attr, req, Privilege::KnownLacking);
     }
@@ -1045,6 +1045,16 @@ impl Filesystem for SimpleFS {
             return;
         }
 
+        // Without a killpriv capability the kernel clears suid and sgid itself, by folding the
+        // cleared mode into the chown or truncate that calls for it. That mode is the kernel's
+        // own calculation rather than a chmod the caller asked for, so it is checked only as
+        // part of the change it came with, and applied alongside it
+        let (mode, cleared_mode) = if uid.is_some() || gid.is_some() || size.is_some() {
+            (None, mode)
+        } else {
+            (mode, None)
+        };
+
         if let Some(mode) = mode {
             debug!("chmod() called with {ino:?}, {mode:o}");
             #[cfg(target_os = "freebsd")]
@@ -1062,7 +1072,15 @@ impl Filesystem for SimpleFS {
                 reply.error(Errno::EPERM);
                 return;
             }
-            if !caller_keeps_privileges(_req) && caller_outside_group(_req, attrs.gid) {
+            // Without caller ids the mount is idmapped and so has default_permissions, under
+            // which the kernel's setattr_prepare() has already dropped sgid from the mode if the
+            // caller may not set it. Judging again here, with no caller to judge, would drop it
+            // from everyone's chmod, root's included
+            let kernel_decided = _req.uid().is_none();
+            if !kernel_decided
+                && !caller_keeps_privileges(_req)
+                && caller_outside_group(_req, attrs.gid)
+            {
                 // If SGID is set and the file belongs to a group that the caller is not part of
                 // then the SGID bit is suppose to be cleared during chmod
                 attrs.mode = (mode & !libc::S_ISGID as u32) as u16;
@@ -1111,6 +1129,9 @@ impl Filesystem for SimpleFS {
             if let Some(gid) = gid {
                 attrs.gid = gid;
             }
+            if let Some(mode) = cleared_mode {
+                attrs.mode = mode as u16;
+            }
             attrs.last_metadata_changed = time_now();
             self.write_inode(&attrs);
             reply.attr(&Duration::new(0, 0), &self.file_attr(attrs));
@@ -1119,23 +1140,29 @@ impl Filesystem for SimpleFS {
 
         if let Some(size) = size {
             debug!("truncate() called with {ino:?} {size:?}");
-            if let Some(handle) = fh {
-                // If the file handle is available, check access locally.
-                // This is important as it preserves the semantic that a file handle opened
-                // with W_OK will never fail to truncate, even if the file has been subsequently
-                // chmod'ed
-                if Self::check_file_handle_write(handle.into()) {
-                    if let Err(error_code) = self.truncate(_req, ino, size, kill_suid_gid, false) {
-                        reply.error(error_code);
-                        return;
-                    }
-                } else {
+            // If the file handle is available, check access locally.
+            // This is important as it preserves the semantic that a file handle opened
+            // with W_OK will never fail to truncate, even if the file has been subsequently
+            // chmod'ed
+            let enforce_access = match fh {
+                Some(handle) if Self::check_file_handle_write(handle.into()) => false,
+                Some(_) => {
                     reply.error(Errno::EACCES);
                     return;
                 }
-            } else if let Err(error_code) = self.truncate(_req, ino, size, kill_suid_gid, true) {
-                reply.error(error_code);
-                return;
+                None => true,
+            };
+            // The truncate writes the inode back itself, so carry on from what it wrote
+            attrs = match self.truncate(_req, ino, size, kill_suid_gid, enforce_access) {
+                Ok(attrs) => attrs,
+                Err(error_code) => {
+                    reply.error(error_code);
+                    return;
+                }
+            };
+            if let Some(mode) = cleared_mode {
+                attrs.mode = mode as u16;
+                self.write_inode(&attrs);
             }
         }
 
@@ -1363,9 +1390,14 @@ impl Filesystem for SimpleFS {
         if !caller_is_root(_req) {
             mode &= !(libc::S_ISUID | libc::S_ISGID) as u32;
         }
-        if parent_attrs.mode & libc::S_ISGID as u16 != 0 {
-            mode |= libc::S_ISGID as u32;
-        }
+        // A directory inherits sgid from its parent so that what is created inside keeps the
+        // parent's group. That is not a privilege the caller asked for, so it is added after
+        // creation_mode() has decided which of the caller's bits to keep
+        let inherited = if parent_attrs.mode & libc::S_ISGID as u16 != 0 {
+            libc::S_ISGID as u16
+        } else {
+            0
+        };
 
         let inode = self.allocate_next_inode();
         let attrs = InodeAttributes {
@@ -1377,7 +1409,7 @@ impl Filesystem for SimpleFS {
             last_metadata_changed: now,
             created: now,
             kind: FileKind::Directory,
-            mode: self.creation_mode(mode),
+            mode: self.creation_mode(mode) | inherited,
             hardlinks: 2, // Directories start with link count of 2, since they have a self link
             uid: owner.uid,
             gid: creation_gid(&parent_attrs, owner.gid),
@@ -2934,23 +2966,29 @@ fn as_file_kind(mut mode: u32) -> FileKind {
     unimplemented!("{mode}");
 }
 
-/// Whether the caller holds `CAP_FSETID`, and so keeps suid and sgid on a file it modifies.
+/// Whether the caller holds `CAP_FSETID` over a file, and so keeps its suid and sgid when
+/// modifying it.
 ///
 /// Read from the caller's effective capability set rather than guessed at from its uid, so that
 /// a root process which dropped the capability is treated as the unprivileged caller it is.
+/// As in the kernel's `capable_wrt_inode_uidgid()`, the capability counts only if the file's
+/// owner and group are mapped in the caller's user namespace: root in a namespace of its own,
+/// which holds every capability there, has none over files owned by ids outside it.
 /// Falls back to the uid where the capability set cannot be read, which is all a request alone
 /// would have supported
-fn has_fsetid(pid: u32, uid: Option<u32>) -> bool {
+fn has_fsetid(req: &Request, attr: &InodeAttributes) -> bool {
     // From linux/capability.h; the libc crate does not export the capability numbers
     const CAP_FSETID: u32 = 4;
 
     if cfg!(target_os = "linux") {
+        let pid = req.pid();
         let path = format!("/proc/{pid}/task/{pid}/status");
         if let Ok(file) = File::open(path) {
             for line in BufReader::new(file).lines().map_while(Result::ok) {
                 if let Some(caps) = line.strip_prefix("CapEff:") {
                     if let Ok(caps) = u64::from_str_radix(caps.trim(), 16) {
-                        return caps & (1 << CAP_FSETID) != 0;
+                        return caps & (1 << CAP_FSETID) != 0
+                            && owner_mapped_for(pid, attr.uid, attr.gid);
                     }
                 }
             }
@@ -2959,7 +2997,33 @@ fn has_fsetid(pid: u32, uid: Option<u32>) -> bool {
 
     // Reached only where the capability set could not be read. An unknown caller cannot be
     // shown to hold the capability, and privileges that cannot be shown to be earned go
-    uid.is_some_and(|uid| uid == 0)
+    req.uid().is_some_and(|uid| uid == 0)
+}
+
+/// Whether `uid` and `gid`, as this filesystem sees them, are mapped in the user namespace of
+/// the task `pid`. A task in this process's own namespace sees every id this process does.
+/// Otherwise its maps are read from here, where each line is "inside outside count" with the
+/// outside ids in this process's terms. A map that cannot be read maps nothing
+fn owner_mapped_for(pid: u32, uid: u32, gid: u32) -> bool {
+    let namespace = |path: &str| fs::read_link(path).ok();
+    let theirs = namespace(&format!("/proc/{pid}/task/{pid}/ns/user"));
+    if theirs.is_some() && theirs == namespace("/proc/self/ns/user") {
+        return true;
+    }
+    let maps = |which: &str, id: u32| {
+        fs::read_to_string(format!("/proc/{pid}/task/{pid}/{which}_map")).is_ok_and(|map| {
+            map.lines().any(|line| {
+                let mut fields = line.split_whitespace().map(str::parse::<u64>);
+                match (fields.next(), fields.next(), fields.next()) {
+                    (Some(Ok(_)), Some(Ok(outside)), Some(Ok(count))) => {
+                        (outside..outside.saturating_add(count)).contains(&u64::from(id))
+                    }
+                    _ => false,
+                }
+            })
+        })
+    };
+    maps("uid", uid) && maps("gid", gid)
 }
 
 fn get_groups(pid: u32) -> Vec<u32> {
