@@ -227,7 +227,6 @@ enum FileKind {
     File,
     Directory,
     Symlink,
-    // Appended, so the ordinals of the three above survive in already-written inodes
     CharDevice,
     BlockDevice,
     NamedPipe,
@@ -573,6 +572,16 @@ impl From<InodeAttributes> for fuser::FileAttr {
     }
 }
 
+/// Parse a record read for `inode`. One that does not parse - written by a version of this
+/// example with a different layout, such as one from before it stored records with MessagePack
+/// - is reported as EIO rather than taken down the filesystem with it
+fn read_record<T: for<'de> Deserialize<'de>>(file: File, inode: INodeNo) -> Result<T, Errno> {
+    rmp_serde::from_read(file).map_err(|error| {
+        error!("Unreadable record for inode {inode}: {error}");
+        Errno::EIO
+    })
+}
+
 /// Tells apart the temporary files of concurrent [`write_record`] calls
 static NEXT_RECORD_WRITE: AtomicU64 = AtomicU64::new(0);
 
@@ -728,7 +737,7 @@ impl SimpleFS {
             .join("contents")
             .join(inode.to_string());
         match File::open(path) {
-            Ok(file) => Ok(rmp_serde::from_read(file).unwrap()),
+            Ok(file) => read_record(file, inode),
             _ => Err(Errno::ENOENT),
         }
     }
@@ -745,7 +754,7 @@ impl SimpleFS {
             .join("inodes")
             .join(inode.to_string());
         match File::open(path) {
-            Ok(file) => Ok(rmp_serde::from_read(file).unwrap()),
+            Ok(file) => read_record(file, inode),
             _ => Err(Errno::ENOENT),
         }
     }
@@ -970,7 +979,22 @@ impl Filesystem for SimpleFS {
 
         fs::create_dir_all(Path::new(&self.data_dir).join("inodes")).unwrap();
         fs::create_dir_all(Path::new(&self.data_dir).join("contents")).unwrap();
-        if self.get_inode(INodeNo::ROOT).is_err() {
+        // Only a missing root means an empty filesystem. One that is there but unreadable holds
+        // a tree this version cannot read, and starting afresh would write over it
+        let root = self.get_inode(INodeNo::ROOT);
+        if let Err(error) = root {
+            if error != Errno::ENOENT {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "{} holds a filesystem in a format this version cannot read; \
+                         use another --data-dir",
+                        self.data_dir
+                    ),
+                ));
+            }
+        }
+        if root.is_err() {
             // Initialize with empty filesystem
             let now = time_now();
             let root = InodeAttributes {
@@ -3247,6 +3271,7 @@ fn main() {
             std::process::exit(2);
         } else {
             error!("{e}");
+            std::process::exit(1);
         }
     }
 }
