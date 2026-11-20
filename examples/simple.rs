@@ -573,6 +573,40 @@ impl From<InodeAttributes> for fuser::FileAttr {
     }
 }
 
+/// Tells apart the temporary files of concurrent [`write_record`] calls
+static NEXT_RECORD_WRITE: AtomicU64 = AtomicU64::new(0);
+
+/// Store `value` at `path` by writing it to a temporary file and renaming that into place.
+///
+/// A reader then finds either the old record or the new one. Rewriting the file in place would
+/// let a concurrent reader find it truncated and fail to parse it, and a write that fails part
+/// way would leave it truncated for good.
+///
+/// The exception is a backing store with no room for the second copy that replacing takes,
+/// where the record is rewritten in place instead. It usually fits where the old one was, and
+/// refusing would leave a full filesystem with no way to free space, since even deleting a file
+/// first updates its parent's record
+fn write_record(path: &Path, value: &impl Serialize) -> io::Result<()> {
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(format!(
+        ".{}.tmp",
+        NEXT_RECORD_WRITE.fetch_add(1, Ordering::Relaxed)
+    ));
+    let temporary = path.with_file_name(name);
+    // Encoded up front, so that a failure to store it surfaces as the OS error it is
+    let encoded = rmp_serde::to_vec(value).map_err(io::Error::other)?;
+    let Err(error) = fs::write(&temporary, &encoded).and_then(|()| fs::rename(&temporary, path))
+    else {
+        return Ok(());
+    };
+    let _ = fs::remove_file(&temporary);
+    if matches!(error.raw_os_error(), Some(libc::ENOSPC | libc::EDQUOT)) {
+        fs::write(path, &encoded)
+    } else {
+        Err(error)
+    }
+}
+
 // Stores inode metadata data in "$data_dir/inodes" and file contents in "$data_dir/contents"
 // Directory data is stored in the file's contents, as a serialized DirectoryDescriptor
 struct SimpleFS {
@@ -616,13 +650,7 @@ impl SimpleFS {
             _ => INodeNo::ROOT,
         };
 
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&path)
-            .unwrap();
-        rmp_serde::encode::write(&mut file, &(current_inode.0 + 1)).unwrap();
+        write_record(&path, &(current_inode.0 + 1)).unwrap();
 
         INodeNo(current_inode.0 + 1)
     }
@@ -709,13 +737,7 @@ impl SimpleFS {
         let path = Path::new(&self.data_dir)
             .join("contents")
             .join(inode.to_string());
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(path)
-            .unwrap();
-        rmp_serde::encode::write(&mut file, &entries).unwrap();
+        write_record(&path, entries).unwrap();
     }
 
     fn get_inode(&self, inode: INodeNo) -> Result<InodeAttributes, Errno> {
@@ -758,21 +780,23 @@ impl SimpleFS {
             || attrs.last_accessed.0 < a_day_ago
         {
             attrs.last_accessed = now;
-            self.write_inode(attrs);
+            // A read that succeeded is not failed for want of recording it, as on a backing
+            // store that has filled up or gone read-only
+            if let Err(error) = self.try_write_inode(attrs) {
+                warn!("Not recording the access to inode {}: {error}", attrs.inode);
+            }
         }
     }
 
     fn write_inode(&self, inode: &InodeAttributes) {
+        self.try_write_inode(inode).unwrap();
+    }
+
+    fn try_write_inode(&self, inode: &InodeAttributes) -> io::Result<()> {
         let path = Path::new(&self.data_dir)
             .join("inodes")
             .join(inode.inode.to_string());
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(path)
-            .unwrap();
-        rmp_serde::encode::write(&mut file, inode).unwrap();
+        write_record(&path, inode)
     }
 
     /// Drops one open handle and reclaims the inode if that was the last thing keeping it.
@@ -782,7 +806,14 @@ impl SimpleFS {
     /// its last one, and either way closing the final handle is what makes it collectable
     fn close_handle(&self, attrs: &mut InodeAttributes) {
         attrs.open_file_handles = attrs.open_file_handles.saturating_sub(1);
-        self.write_inode(attrs);
+        // A close cannot usefully fail. If the count cannot be recorded, on a full backing
+        // store, the inode is at worst kept past its last handle rather than lost
+        if let Err(error) = self.try_write_inode(attrs) {
+            warn!(
+                "Not recording a closed handle of inode {}: {error}",
+                attrs.inode
+            );
+        }
         self.gc_inode(attrs);
     }
 
@@ -2052,7 +2083,12 @@ impl Filesystem for SimpleFS {
                 let read_size = min(size, file_size.saturating_sub(offset as u64) as u32);
 
                 let mut buffer = vec![0; read_size as usize];
-                file.read_exact_at(&mut buffer, offset as u64).unwrap();
+                // The file can shrink between the size check and the read, under a truncate on
+                // another thread
+                if let Err(error) = file.read_exact_at(&mut buffer, offset) {
+                    reply.error(error.into());
+                    return;
+                }
                 // A reader that asked for O_NOATIME wants to leave no trace, and a read
                 // request carries the flag, so it can be honored here. The flag is Linux's;
                 // neither macOS nor FreeBSD defines it
@@ -2103,8 +2139,15 @@ impl Filesystem for SimpleFS {
                     return;
                 };
 
-                file.seek(SeekFrom::Start(offset)).unwrap();
-                file.write_all(data).unwrap();
+                // A full or failing backing store is the caller's error to see, not a reason to
+                // bring the filesystem down
+                if let Err(error) = file
+                    .seek(SeekFrom::Start(offset))
+                    .and_then(|_| file.write_all(data))
+                {
+                    reply.error(error.into());
+                    return;
+                }
                 // Release the descriptor before opening the inode. Near RLIMIT_NOFILE this write
                 // may hold the last one, and get_inode() reports the resulting EMFILE as ENOENT,
                 // which would fail a write whose data already landed.
@@ -2133,7 +2176,11 @@ impl Filesystem for SimpleFS {
                     clear_suid_sgid(&mut attrs, req, Privilege::KnownLacking);
                 }
                 clear_file_capabilities(&mut attrs);
-                self.write_inode(&attrs);
+                // The data can fill the backing store, leaving no room to record its new size
+                if let Err(error) = self.try_write_inode(&attrs) {
+                    reply.error(error.into());
+                    return;
+                }
 
                 reply.written(data.len() as u32);
             }
@@ -2863,7 +2910,10 @@ impl Filesystem for SimpleFS {
                 let read_size = min(size, file_size.saturating_sub(src_offset));
 
                 let mut data = vec![0; read_size as usize];
-                file.read_exact_at(&mut data, src_offset).unwrap();
+                if let Err(error) = file.read_exact_at(&mut data, src_offset) {
+                    reply.error(error.into());
+                    return;
+                }
                 // Copying reads the source, and Linux moves its atime accordingly
                 if let Ok(mut src_attrs) = self.get_inode(src_inode) {
                     self.touch_atime(&mut src_attrs);
@@ -2872,8 +2922,13 @@ impl Filesystem for SimpleFS {
                 let dest_path = self.content_path(dest_inode);
                 match OpenOptions::new().write(true).open(dest_path) {
                     Ok(mut file) => {
-                        file.seek(SeekFrom::Start(dest_offset)).unwrap();
-                        file.write_all(&data).unwrap();
+                        if let Err(error) = file
+                            .seek(SeekFrom::Start(dest_offset))
+                            .and_then(|_| file.write_all(&data))
+                        {
+                            reply.error(error.into());
+                            return;
+                        }
 
                         let mut attrs = self.get_inode(dest_inode).unwrap();
                         let now = time_now();
@@ -2893,7 +2948,10 @@ impl Filesystem for SimpleFS {
                         if self.killpriv_negotiated {
                             clear_privileges_unprompted(&mut attrs, _req);
                         }
-                        self.write_inode(&attrs);
+                        if let Err(error) = self.try_write_inode(&attrs) {
+                            reply.error(error.into());
+                            return;
+                        }
 
                         reply.written(data.len() as u32);
                     }
