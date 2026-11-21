@@ -1,5 +1,11 @@
 # FUSE for Rust - Changelog
 
+## Unreleased
+
+Bug fixes:
+* Fix a read of uninitialized memory when mounting through `fusermount`, reported by
+  MemorySanitizer
+
 ## 0.19.0 - 2026-11-20
 
 Breaking changes:
