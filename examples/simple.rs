@@ -801,6 +801,48 @@ impl SimpleFS {
         self.try_write_inode(inode).unwrap();
     }
 
+    /// Set each directory's link count from what it holds: 2, for its "." and its entry in
+    /// its parent, plus one for the ".." of each subdirectory.
+    ///
+    /// Earlier versions of this example stored 2 for every directory. Decrementing such a
+    /// count could reach 0 while the directory is still linked, which frees it and its
+    /// contents. A directory already at 0 has been removed and is kept only until its last
+    /// handle closes, so it is left alone
+    fn reconcile_directory_link_counts(&self) -> io::Result<()> {
+        for entry in fs::read_dir(Path::new(&self.data_dir).join("inodes"))? {
+            let name = entry?.file_name();
+            let Some(inode) = name.to_str().and_then(|name| name.parse().ok()) else {
+                continue;
+            };
+            let inode = INodeNo(inode);
+            let Ok(mut attrs) = self.get_inode(inode) else {
+                continue;
+            };
+            if attrs.kind != FileKind::Directory || attrs.hardlinks == 0 {
+                continue;
+            }
+            let Ok(entries) = self.get_directory_content(inode) else {
+                continue;
+            };
+            let subdirectories = entries
+                .iter()
+                .filter(|(name, (_, kind))| {
+                    *kind == FileKind::Directory
+                        && name.as_slice() != b"."
+                        && name.as_slice() != b".."
+                })
+                .count();
+            let hardlinks = u32::try_from(subdirectories)
+                .unwrap_or(u32::MAX)
+                .saturating_add(2);
+            if attrs.hardlinks != hardlinks {
+                attrs.hardlinks = hardlinks;
+                self.try_write_inode(&attrs)?;
+            }
+        }
+        Ok(())
+    }
+
     fn try_write_inode(&self, inode: &InodeAttributes) -> io::Result<()> {
         let path = Path::new(&self.data_dir)
             .join("inodes")
@@ -1018,6 +1060,8 @@ impl Filesystem for SimpleFS {
             let mut entries = BTreeMap::new();
             entries.insert(b".".to_vec(), (INodeNo::ROOT.0, FileKind::Directory));
             self.write_directory_content(INodeNo::ROOT, &entries);
+        } else {
+            self.reconcile_directory_link_counts()?;
         }
         Ok(())
     }
@@ -1444,6 +1488,8 @@ impl Filesystem for SimpleFS {
         let now = time_now();
         parent_attrs.last_modified = now;
         parent_attrs.last_metadata_changed = now;
+        // The new directory's ".." is a link to the parent
+        parent_attrs.hardlinks += 1;
         self.write_inode(&parent_attrs);
 
         if !caller_is_root(_req) {
@@ -1610,6 +1656,8 @@ impl Filesystem for SimpleFS {
         let now = time_now();
         parent_attrs.last_metadata_changed = now;
         parent_attrs.last_modified = now;
+        // Removing the directory removes its ".." link to the parent
+        parent_attrs.hardlinks -= 1;
         self.write_inode(&parent_attrs);
 
         attrs.hardlinks = 0;
@@ -1845,6 +1893,25 @@ impl Filesystem for SimpleFS {
             );
             self.write_directory_content(parent, &entries);
 
+            // Each directory's ".." is a link to its parent, so swapping a directory with a
+            // non-directory across two parents moves one link between them
+            if parent != newparent {
+                match (
+                    inode_attrs.kind == FileKind::Directory,
+                    new_inode_attrs.kind == FileKind::Directory,
+                ) {
+                    (true, false) => {
+                        parent_attrs.hardlinks -= 1;
+                        new_parent_attrs.hardlinks += 1;
+                    }
+                    (false, true) => {
+                        parent_attrs.hardlinks += 1;
+                        new_parent_attrs.hardlinks -= 1;
+                    }
+                    _ => {}
+                }
+            }
+
             let now = time_now();
             parent_attrs.last_metadata_changed = now;
             parent_attrs.last_modified = now;
@@ -1908,12 +1975,14 @@ impl Filesystem for SimpleFS {
         let now = time_now();
 
         // If target already exists decrement its hardlink count
+        let mut replaced_directory = false;
         if let Ok(mut existing_inode_attrs) = self.lookup_name(newparent, newname) {
             let mut entries = self.get_directory_content(newparent).unwrap();
             entries.remove(newname.as_bytes());
             self.write_directory_content(newparent, &entries);
 
             if existing_inode_attrs.kind == FileKind::Directory {
+                replaced_directory = true;
                 existing_inode_attrs.hardlinks = 0;
             } else {
                 existing_inode_attrs.hardlinks -= 1;
@@ -1969,6 +2038,24 @@ impl Filesystem for SimpleFS {
             (inode_attrs.inode, inode_attrs.kind),
         );
         self.write_directory_content(newparent, &entries);
+
+        // Each directory's ".." is a link to its parent, so moving one out of a parent or
+        // replacing one changes the parents' counts. Within one directory parent_attrs and
+        // new_parent_attrs are two copies of the same inode, so both get the net change
+        if parent == newparent {
+            if replaced_directory {
+                parent_attrs.hardlinks -= 1;
+                new_parent_attrs.hardlinks -= 1;
+            }
+        } else {
+            if inode_attrs.kind == FileKind::Directory {
+                parent_attrs.hardlinks -= 1;
+                new_parent_attrs.hardlinks += 1;
+            }
+            if replaced_directory {
+                new_parent_attrs.hardlinks -= 1;
+            }
+        }
 
         parent_attrs.last_metadata_changed = now;
         parent_attrs.last_modified = now;
