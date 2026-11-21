@@ -109,6 +109,7 @@ impl<'a> RequestWithSender<'a> {
                     // Only allow operations that the kernel may issue without a uid set
                     ll::Operation::Init(_)
                     | ll::Operation::Destroy(_)
+                    | ll::Operation::Interrupt(_)
                     | ll::Operation::Read(_)
                     | ll::Operation::ReadDir(_)
                     | ll::Operation::BatchForget(_)
@@ -145,7 +146,19 @@ impl<'a> RequestWithSender<'a> {
 
             ll::Operation::Interrupt(_) => {
                 // TODO: handle FUSE_INTERRUPT
-                return Err(Errno::ENOSYS);
+                // ENOSYS tells the kernel to stop sending interrupts. It accepts a reply to an
+                // interrupt only on the device that read the interrupted request, and only while
+                // that request is unanswered, so ENOENT here is expected: with clone_fd another
+                // worker may have read the request, or it may already have been answered
+                let reply = self.reply::<ReplyRaw>();
+                match reply.try_send_ll(&ResponseErrno(Errno::ENOSYS)) {
+                    Err(err) if err.raw_os_error() == Some(libc::ENOENT) => {
+                        debug!("Interrupt reply not accepted by the kernel: {err}");
+                    }
+                    Err(err) => error!("Failed to send FUSE reply: {err}"),
+                    Ok(()) => {}
+                }
+                return Ok(None);
             }
 
             ll::Operation::Lookup(x) => {
@@ -675,5 +688,68 @@ impl<'a> RequestWithSender<'a> {
     #[inline]
     fn request_header(&self) -> &Request {
         Request::ref_cast(self.masked_header.as_ref().unwrap_or(self.request.header()))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::fs::File;
+    use std::io::Read;
+    use std::os::fd::OwnedFd;
+    use std::os::unix::net::UnixStream;
+    use std::sync::Arc;
+
+    use nix::unistd::Uid;
+
+    use super::RequestWithSender;
+    use crate::Filesystem;
+    use crate::InitFlags;
+    use crate::channel::Channel;
+    use crate::dev_fuse::DevFuse;
+    use crate::ll::fuse_abi::fuse_opcode;
+    use crate::session::FilesystemHolder;
+    use crate::session::SessionACL;
+    use crate::session::SessionEventLoop;
+
+    struct NoopFs;
+    impl Filesystem for NoopFs {}
+
+    #[repr(C, align(8))]
+    struct Aligned([u8; 48]);
+
+    /// The kernel sends FUSE_INTERRUPT with no caller ids, so the session ACL must let it
+    /// through: only an ENOSYS reply stops the kernel from sending more
+    #[test]
+    fn interrupt_is_answered_enosys_on_a_session_not_owned_by_root() {
+        let (kernel, device) = UnixStream::pair().unwrap();
+        let se = SessionEventLoop {
+            thread_name: "test".to_string(),
+            ch: Channel::new(Arc::new(DevFuse(File::from(OwnedFd::from(device))))),
+            filesystem: Arc::new(FilesystemHolder { fs: Some(NoopFs) }),
+            allowed: SessionACL::Owner,
+            session_owner: Uid::from_raw(1000),
+            negotiated: InitFlags::empty(),
+            kernel_capabilities: InitFlags::empty(),
+            kernel_abi: None,
+        };
+
+        // The kernel numbers an interrupt after the request it interrupts, with the low bit set
+        let interrupted: u64 = 6;
+        let unique = interrupted | 1;
+        let mut data = Aligned([0; 48]);
+        data.0[0..4].copy_from_slice(&48u32.to_ne_bytes());
+        data.0[4..8].copy_from_slice(&(fuse_opcode::FUSE_INTERRUPT as u32).to_ne_bytes());
+        data.0[8..16].copy_from_slice(&unique.to_ne_bytes());
+        data.0[40..48].copy_from_slice(&interrupted.to_ne_bytes());
+        RequestWithSender::new(se.ch.sender(), &data.0, se.negotiated)
+            .unwrap()
+            .dispatch(&se);
+
+        let mut reply = [0u8; 16];
+        (&kernel).read_exact(&mut reply).unwrap();
+        let len = u32::from_ne_bytes(reply[0..4].try_into().unwrap());
+        let error = i32::from_ne_bytes(reply[4..8].try_into().unwrap());
+        let reply_unique = u64::from_ne_bytes(reply[8..16].try_into().unwrap());
+        assert_eq!((len, error, reply_unique), (16, -libc::ENOSYS, unique));
     }
 }

@@ -5,6 +5,9 @@
 Bug fixes:
 * Fix a read of uninitialized memory when mounting through `fusermount`, reported by
   MemorySanitizer
+* Fix "Failed to send FUSE reply" errors logged for interrupted requests with `clone_fd`
+* Fix the kernel sending `FUSE_INTERRUPT` for every interrupted request on a session not
+  owned by root
 
 ## 0.19.0 - 2026-11-20
 

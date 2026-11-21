@@ -131,12 +131,17 @@ impl ReplyRaw {
     /// Reply to a request with the given error code and data. Must be called
     /// only once (the `ok` and `error` methods ensure this by consuming `self`)
     pub(crate) fn send_ll_mut(&mut self, response: &impl Response) {
-        assert!(self.sender.is_some());
-        let sender = self.sender.take().unwrap();
-        let res = response.with_iovec(self.unique, |iov| sender.send(iov));
-        if let Err(err) = res {
+        if let Err(err) = self.try_send_ll_mut(response) {
             error!("Failed to send FUSE reply: {err}");
         }
+    }
+    fn try_send_ll_mut(&mut self, response: &impl Response) -> std::io::Result<()> {
+        assert!(self.sender.is_some());
+        let sender = self.sender.take().unwrap();
+        response.with_iovec(self.unique, |iov| sender.send(iov))
+    }
+    pub(crate) fn try_send_ll(mut self, response: &impl Response) -> std::io::Result<()> {
+        self.try_send_ll_mut(response)
     }
     pub(crate) fn send_ll(mut self, response: &impl Response) {
         self.send_ll_mut(response);
