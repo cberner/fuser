@@ -43,6 +43,8 @@ pub(crate) enum ReplySender {
     Assert(AssertSender),
     #[cfg(test)]
     Sync(std::sync::mpsc::SyncSender<()>),
+    #[cfg(test)]
+    Capture(std::sync::Arc<std::sync::Mutex<Vec<u8>>>),
 }
 
 impl ReplySender {
@@ -57,6 +59,14 @@ impl ReplySender {
                 sender.send(()).unwrap();
                 Ok(())
             }
+            #[cfg(test)]
+            ReplySender::Capture(sent) => {
+                let mut sent = sent.lock().unwrap();
+                for x in data {
+                    sent.extend_from_slice(x);
+                }
+                Ok(())
+            }
         }
     }
 
@@ -65,9 +75,9 @@ impl ReplySender {
         match self {
             ReplySender::Channel(sender) => sender.open_backing(fd),
             #[cfg(test)]
-            ReplySender::Assert(_) => unreachable!(),
-            #[cfg(test)]
-            ReplySender::Sync(_) => unreachable!(),
+            ReplySender::Assert(_) | ReplySender::Sync(_) | ReplySender::Capture(_) => {
+                unreachable!()
+            }
         }
     }
 
@@ -76,9 +86,9 @@ impl ReplySender {
         match self {
             ReplySender::Channel(sender) => unsafe { sender.wrap_backing(id) },
             #[cfg(test)]
-            ReplySender::Assert(_) => unreachable!(),
-            #[cfg(test)]
-            ReplySender::Sync(_) => unreachable!(),
+            ReplySender::Assert(_) | ReplySender::Sync(_) | ReplySender::Capture(_) => {
+                unreachable!()
+            }
         }
     }
 }
@@ -542,9 +552,35 @@ impl ReplyCreate {
         fh: ll::FileHandle,
         flags: FopenFlags,
     ) {
+        self.created_with_ttls(ttl, ttl, attr, generation, fh, flags);
+    }
+
+    /// Reply to a request with a newly created file entry and its newly open file handle.
+    ///
+    /// Use this function instead of `ReplyCreate::created` if the
+    /// entry TTL needs to be different from the attribute TTL.
+    ///
+    /// * `attr_ttl` - Time-to-live for the file attributes. Controls how long the
+    ///   kernel will cache inode metadata (e.g., size, permissions, timestamps)
+    ///   before issuing a new `GETATTR` request.
+    /// * `entry_ttl` - Time-to-live for the directory entry (name-to-inode mapping).
+    ///   Controls how long the kernel will cache the existence of this
+    ///   path without issuing a new `LOOKUP` request.
+    /// # Panics
+    /// When attempting to use kernel passthrough. Use `opened_passthrough()` instead.
+    pub fn created_with_ttls(
+        self,
+        attr_ttl: &Duration,
+        entry_ttl: &Duration,
+        attr: &FileAttr,
+        generation: Generation,
+        fh: ll::FileHandle,
+        flags: FopenFlags,
+    ) {
         assert!(!flags.contains(FopenFlags::FOPEN_PASSTHROUGH));
         self.reply.send_ll(&ll::ResponseStruct::new_create(
-            ttl,
+            *attr_ttl,
+            *entry_ttl,
             &attr.into(),
             generation,
             fh,
@@ -597,7 +633,8 @@ impl ReplyCreate {
         backing_id: &BackingId,
     ) {
         self.reply.send_ll(&ll::ResponseStruct::new_create(
-            ttl,
+            *ttl,
+            *ttl,
             &attr.into(),
             generation,
             fh,
@@ -827,15 +864,40 @@ impl ReplyDirectoryPlus {
         attr: &FileAttr,
         generation: Generation,
     ) -> bool {
+        self.add_with_ttls(ino, offset, name, ttl, ttl, attr, generation)
+    }
+
+    /// Add an entry to the directory reply buffer. Returns true if the buffer is full.
+    ///
+    /// Use this function instead of `ReplyDirectoryPlus::add` if the
+    /// entry TTL needs to be different from the attribute TTL.
+    ///
+    /// * `attr_ttl` - Time-to-live for the file attributes. Controls how long the
+    ///   kernel will cache inode metadata (e.g., size, permissions, timestamps)
+    ///   before issuing a new `GETATTR` request.
+    /// * `entry_ttl` - Time-to-live for the directory entry (name-to-inode mapping).
+    ///   Controls how long the kernel will cache the existence of this
+    ///   path without issuing a new `LOOKUP` request.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_with_ttls<T: AsRef<OsStr>>(
+        &mut self,
+        ino: INodeNo,
+        offset: u64,
+        name: T,
+        attr_ttl: &Duration,
+        entry_ttl: &Duration,
+        attr: &FileAttr,
+        generation: Generation,
+    ) -> bool {
         let name = name.as_ref();
         self.buf.push(&DirEntryPlus::new(
             ino,
             generation,
             DirEntOffset(offset),
             name,
-            *ttl,
+            *entry_ttl,
             attr.into(),
-            *ttl,
+            *attr_ttl,
         ))
     }
 
@@ -915,6 +977,8 @@ impl ReplyLseek {
 
 #[cfg(test)]
 mod test {
+    use std::sync::Arc;
+    use std::sync::Mutex;
     use std::sync::mpsc::sync_channel;
     use std::thread;
     use std::time::Duration;
@@ -1247,6 +1311,82 @@ mod test {
             ll::FileHandle(0xbb),
             FopenFlags::from_bits_retain(0x0c),
         );
+    }
+
+    /// The `entry_valid` and `attr_valid` pairs of the `fuse_entry_out` that starts `at` bytes
+    /// into a reply, as (secs, nsecs)
+    fn entry_out_ttls(sent: &[u8], at: usize) -> ((u64, u32), (u64, u32)) {
+        let u64_at = |i: usize| u64::from_ne_bytes(sent[at + i..at + i + 8].try_into().unwrap());
+        let u32_at = |i: usize| u32::from_ne_bytes(sent[at + i..at + i + 4].try_into().unwrap());
+        ((u64_at(16), u32_at(32)), (u64_at(24), u32_at(36)))
+    }
+
+    fn capture() -> (ReplySender, Arc<Mutex<Vec<u8>>>) {
+        let sent = Arc::new(Mutex::new(vec![]));
+        (ReplySender::Capture(sent.clone()), sent)
+    }
+
+    fn test_attr() -> FileAttr {
+        FileAttr {
+            ino: INodeNo(0x11),
+            size: 0,
+            blocks: 0,
+            atime: UNIX_EPOCH,
+            mtime: UNIX_EPOCH,
+            ctime: UNIX_EPOCH,
+            crtime: UNIX_EPOCH,
+            kind: FileType::RegularFile,
+            perm: 0o644,
+            nlink: 1,
+            uid: 0,
+            gid: 0,
+            rdev: 0,
+            flags: 0,
+            blksize: 512,
+        }
+    }
+
+    #[test]
+    fn reply_create_with_ttls() {
+        let (sender, sent) = capture();
+        let reply: ReplyCreate = Reply::new(ll::RequestId(0xdeadbeef), sender);
+        let attr_ttl = Duration::new(1, 2);
+        let entry_ttl = Duration::new(3600, 4);
+        reply.created_with_ttls(
+            &attr_ttl,
+            &entry_ttl,
+            &test_attr(),
+            ll::Generation(0),
+            ll::FileHandle(0),
+            FopenFlags::empty(),
+        );
+        // fuse_entry_out follows the 16-byte fuse_out_header
+        let (entry, attr) = entry_out_ttls(&sent.lock().unwrap(), 16);
+        assert_eq!(entry, (3600, 4));
+        assert_eq!(attr, (1, 2));
+    }
+
+    #[test]
+    fn reply_directory_plus_add_with_ttls() {
+        let (sender, sent) = capture();
+        let mut reply = ReplyDirectoryPlus::new(ll::RequestId(0xdeadbeef), sender, 4096);
+        let attr_ttl = Duration::new(1, 2);
+        let entry_ttl = Duration::new(3600, 4);
+        assert!(!reply.add_with_ttls(
+            INodeNo(0x11),
+            1,
+            "hello",
+            &attr_ttl,
+            &entry_ttl,
+            &test_attr(),
+            ll::Generation(0),
+        ));
+        reply.ok();
+        // The first fuse_direntplus, which starts with its fuse_entry_out, follows the
+        // 16-byte fuse_out_header
+        let (entry, attr) = entry_out_ttls(&sent.lock().unwrap(), 16);
+        assert_eq!(entry, (3600, 4));
+        assert_eq!(attr, (1, 2));
     }
 
     #[test]
