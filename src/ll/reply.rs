@@ -202,7 +202,8 @@ impl ResponseStruct<abi::fuse_statfs_out> {
 
 impl ResponseStruct<abi::fuse_create_out> {
     pub(crate) fn new_create(
-        ttl: &Duration,
+        attr_ttl: Duration,
+        entry_ttl: Duration,
         attr: &Attr,
         generation: Generation,
         fh: FileHandle,
@@ -213,10 +214,10 @@ impl ResponseStruct<abi::fuse_create_out> {
             abi::fuse_entry_out {
                 nodeid: attr.attr.ino,
                 generation: generation.into(),
-                entry_valid: ttl.as_secs(),
-                attr_valid: ttl.as_secs(),
-                entry_valid_nsec: ttl.subsec_nanos(),
-                attr_valid_nsec: ttl.subsec_nanos(),
+                entry_valid: entry_ttl.as_secs(),
+                attr_valid: attr_ttl.as_secs(),
+                entry_valid_nsec: entry_ttl.subsec_nanos(),
+                attr_valid_nsec: attr_ttl.subsec_nanos(),
                 attr: attr.attr,
             },
             abi::fuse_open_out {
@@ -911,7 +912,8 @@ mod test {
             blksize: 0xdd,
         };
         let r = ResponseStruct::new_create(
-            &ttl,
+            ttl,
+            ttl,
             &attr.into(),
             Generation(0xaa),
             FileHandle(0xbb),
