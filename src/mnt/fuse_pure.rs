@@ -34,7 +34,6 @@ use nix::fcntl::OFlag;
 use nix::fcntl::fcntl;
 use nix::sys::socket::ControlMessageOwned;
 use nix::sys::socket::MsgFlags;
-use nix::sys::socket::SockaddrStorage;
 use nix::sys::socket::recvmsg;
 
 use crate::SessionACL;
@@ -177,8 +176,10 @@ fn receive_fusermount_message(socket: &UnixStream) -> Result<DevFuse, Error> {
     let mut iov = [IoSliceMut::new(&mut io_vec_buf)];
     let mut cmsg_buffer = nix::cmsg_space!(RawFd);
 
+    // A connected socket carries no peer address. Asking nix for one makes it read the
+    // address family of storage the kernel never wrote
     let msg = loop {
-        match recvmsg::<SockaddrStorage>(
+        match recvmsg::<()>(
             socket.as_raw_fd(),
             &mut iov,
             Some(&mut cmsg_buffer),
@@ -495,4 +496,48 @@ fn fuse_mount_sys(
     _acl: SessionACL,
 ) -> Result<Option<DevFuse>, Error> {
     Ok(None)
+}
+
+#[cfg(test)]
+mod test {
+    use std::io::ErrorKind;
+    use std::io::IoSlice;
+    use std::os::fd::AsRawFd;
+    use std::os::unix::fs::MetadataExt;
+    use std::os::unix::net::UnixStream;
+
+    use nix::sys::socket::ControlMessage;
+    use nix::sys::socket::MsgFlags;
+    use nix::sys::socket::sendmsg;
+
+    use super::receive_fusermount_message;
+
+    /// Mirrors what fusermount sends: one byte of payload with the fd in SCM_RIGHTS
+    #[test]
+    fn receives_fd_from_fusermount() {
+        let (sender, receiver) = UnixStream::pair().unwrap();
+        let file = tempfile::tempfile().unwrap();
+        let fds = [file.as_raw_fd()];
+        sendmsg::<()>(
+            sender.as_raw_fd(),
+            &[IoSlice::new(&[0])],
+            &[ControlMessage::ScmRights(&fds)],
+            MsgFlags::empty(),
+            None,
+        )
+        .unwrap();
+
+        let received = receive_fusermount_message(&receiver).unwrap();
+        let sent = file.metadata().unwrap();
+        let received = received.0.metadata().unwrap();
+        assert_eq!((received.dev(), received.ino()), (sent.dev(), sent.ino()));
+    }
+
+    #[test]
+    fn eof_from_fusermount() {
+        let (sender, receiver) = UnixStream::pair().unwrap();
+        drop(sender);
+        let err = receive_fusermount_message(&receiver).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::UnexpectedEof);
+    }
 }
