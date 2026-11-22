@@ -185,8 +185,8 @@ impl<FS: Filesystem> Session<FS> {
 
         let mountpoint = mountpoint.as_ref();
         info!("Mounting {}", mountpoint.display());
-        // If AutoUnmount is requested, but not AllowRoot or AllowOther, return an error
-        // because fusermount needs allow_root or allow_other to handle the auto_unmount option
+        // fusermount needs allow_root or allow_other to handle the auto_unmount option, and only
+        // the Owner ACL mounts without allow_other
         if options.mount_options.contains(&MountOption::AutoUnmount)
             && options.acl == SessionACL::Owner
         {
