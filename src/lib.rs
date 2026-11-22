@@ -161,10 +161,7 @@ const UNSUPPORTED_CAPABILITIES: InitFlags = ALIASED_UNSUPPORTED_CAPABILITIES
     .union(InitFlags::FUSE_OVER_IO_URING)
     // Announces that the filesystem copes with requests the kernel resends. fuser cannot send
     // the FUSE_NOTIFY_RESEND notification that asks for a resend in the first place
-    .union(InitFlags::FUSE_HAS_RESEND)
-    // The timeout is carried by a request_timeout field of fuse_init_out that fuser declares as
-    // reserved and always sends as zero, which the kernel reads as "no timeout requested"
-    .union(InitFlags::FUSE_REQUEST_TIMEOUT);
+    .union(InitFlags::FUSE_HAS_RESEND);
 
 /// The refused capabilities that occupy a bit below 32, where macFUSE assigns a meaning of its
 /// own. On macOS these bits are `FUSE_ALLOCATE` and `FUSE_RENAME_EXCL` - the latter of which
@@ -395,6 +392,8 @@ pub struct KernelConfig {
     max_write: u32,
     time_gran: Duration,
     max_stack_depth: u32,
+    /// Seconds, 0 for none
+    request_timeout: u16,
     kernel_abi: Version,
     /// Whether the mount carries `MountOption::DefaultPermissions`, which
     /// `InitFlags::FUSE_ALLOW_IDMAP` cannot be negotiated without
@@ -423,6 +422,7 @@ impl KernelConfig {
             // 1ns means nano-second granularity.
             time_gran: Duration::new(0, 1),
             max_stack_depth: 0,
+            request_timeout: 0,
             kernel_abi,
             default_permissions,
             acl,
@@ -476,6 +476,46 @@ impl KernelConfig {
 
         let previous = self.max_stack_depth;
         self.max_stack_depth = value;
+        Ok(previous)
+    }
+
+    /// Set how long the kernel waits for an answer to any request before it gives up on the
+    /// filesystem. When a request goes unanswered for longer, the kernel aborts the connection:
+    /// every pending and later request fails, as if the filesystem had died, and the session
+    /// ends. [`Duration::ZERO`], the default, asks for no timeout.
+    ///
+    /// This needs `InitFlags::FUSE_REQUEST_TIMEOUT` from the kernel (Linux 6.14 and later),
+    /// and is negotiated when a non-zero timeout is set. The kernel works in whole seconds and
+    /// only checks for expired requests periodically (every 15 seconds on current kernels), so
+    /// it raises a shorter timeout to that interval, and an expired request may wait up to an
+    /// interval longer before the connection is aborted. The `fs.fuse.default_request_timeout`
+    /// and `fs.fuse.max_request_timeout` sysctls can also apply a timeout or cap this one.
+    ///
+    /// On success returns the previous value.
+    /// # Errors
+    /// Returns the nearest value which will succeed: [`Duration::ZERO`] if the kernel does not
+    /// support request timeouts, the next whole second for a fraction of a second, or the
+    /// largest timeout the kernel accepts (`u16::MAX` seconds).
+    pub fn set_request_timeout(&mut self, value: Duration) -> Result<Duration, Duration> {
+        if value.is_zero() {
+            let previous = Duration::from_secs(self.request_timeout.into());
+            self.request_timeout = 0;
+            self.requested.remove(InitFlags::FUSE_REQUEST_TIMEOUT);
+            return Ok(previous);
+        }
+        if !self.capabilities.contains(InitFlags::FUSE_REQUEST_TIMEOUT) {
+            return Err(Duration::ZERO);
+        }
+        if value.subsec_nanos() != 0 {
+            return Err(Duration::from_secs(value.as_secs().saturating_add(1))
+                .min(Duration::from_secs(u16::MAX.into())));
+        }
+        let Ok(seconds) = u16::try_from(value.as_secs()) else {
+            return Err(Duration::from_secs(u16::MAX.into()));
+        };
+        let previous = Duration::from_secs(self.request_timeout.into());
+        self.request_timeout = seconds;
+        self.requested |= InitFlags::FUSE_REQUEST_TIMEOUT;
         Ok(previous)
     }
 
@@ -1428,6 +1468,86 @@ pub fn spawn_mount<'a, FS: Filesystem + Send + 'static + 'a, P: AsRef<Path>>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn request_timeout_config(capabilities: InitFlags) -> KernelConfig {
+        KernelConfig::new(
+            capabilities,
+            65536,
+            Version(7, 44),
+            false,
+            SessionACL::Owner,
+        )
+    }
+
+    #[test]
+    fn set_request_timeout() {
+        let mut config = request_timeout_config(InitFlags::empty());
+        // A kernel without the capability can only be asked for no timeout
+        assert_eq!(
+            config.set_request_timeout(Duration::from_secs(5)),
+            Err(Duration::ZERO)
+        );
+        assert_eq!(
+            config.set_request_timeout(Duration::ZERO),
+            Ok(Duration::ZERO)
+        );
+
+        let mut config = request_timeout_config(InitFlags::FUSE_REQUEST_TIMEOUT);
+        assert!(!config.requested.contains(InitFlags::FUSE_REQUEST_TIMEOUT));
+        assert_eq!(
+            config.set_request_timeout(Duration::from_millis(1500)),
+            Err(Duration::from_secs(2))
+        );
+        assert_eq!(
+            config.set_request_timeout(Duration::from_secs(70_000)),
+            Err(Duration::from_secs(u16::MAX.into()))
+        );
+        assert_eq!(
+            config.set_request_timeout(Duration::from_secs(5)),
+            Ok(Duration::ZERO)
+        );
+        assert!(config.requested.contains(InitFlags::FUSE_REQUEST_TIMEOUT));
+        assert_eq!(
+            config.set_request_timeout(Duration::ZERO),
+            Ok(Duration::from_secs(5))
+        );
+        assert!(!config.requested.contains(InitFlags::FUSE_REQUEST_TIMEOUT));
+    }
+
+    /// The INIT reply carries the timeout, and the capability that tells the kernel to read it
+    #[test]
+    fn init_reply_carries_request_timeout() {
+        use crate::ll::reply::Response;
+
+        #[repr(C, align(8))]
+        struct Aligned([u8; 104]);
+        let mut request = Aligned([0; 104]);
+        request.0[0..4].copy_from_slice(&104u32.to_ne_bytes());
+        request.0[4..8].copy_from_slice(&26u32.to_ne_bytes()); // FUSE_INIT
+        request.0[40..44].copy_from_slice(&7u32.to_ne_bytes()); // major
+        request.0[44..48].copy_from_slice(&44u32.to_ne_bytes()); // minor
+        let offered = InitFlags::FUSE_INIT_EXT | InitFlags::FUSE_REQUEST_TIMEOUT;
+        request.0[52..56].copy_from_slice(&offered.pair().0.to_ne_bytes());
+        request.0[56..60].copy_from_slice(&offered.pair().1.to_ne_bytes());
+        let request = ll::AnyRequest::try_from(&request.0[..]).unwrap();
+        let ll::Operation::Init(init) = request.operation().unwrap() else {
+            panic!("not an INIT request");
+        };
+
+        let mut config = request_timeout_config(init.capabilities());
+        config.set_request_timeout(Duration::from_secs(30)).unwrap();
+        let reply = init.reply(&config).with_iovec(ll::RequestId(0), |iov| {
+            iov.iter()
+                .flat_map(|x| x.iter().copied())
+                .collect::<Vec<u8>>()
+        });
+        // The 16-byte fuse_out_header comes first; flags2 is at 32 and request_timeout at 40
+        // of fuse_init_out
+        let flags2 = u32::from_ne_bytes(reply[16 + 32..16 + 36].try_into().unwrap());
+        let timeout = u16::from_ne_bytes(reply[16 + 40..16 + 42].try_into().unwrap());
+        assert_ne!(flags2 & InitFlags::FUSE_REQUEST_TIMEOUT.pair().1, 0);
+        assert_eq!(timeout, 30);
+    }
 
     #[test]
     fn file_attr_from_metadata() {

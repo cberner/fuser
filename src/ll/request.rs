@@ -1078,11 +1078,15 @@ mod op {
                 unused2: 0,
                 flags2: flags.pair().1,
                 max_stack_depth: 0,
-                reserved: [0; 6],
+                request_timeout: 0,
+                unused: [0; 11],
             };
 
             if flags.contains(InitFlags::FUSE_PASSTHROUGH) {
                 init.max_stack_depth = config.max_stack_depth;
+            }
+            if flags.contains(InitFlags::FUSE_REQUEST_TIMEOUT) {
+                init.request_timeout = config.request_timeout;
             }
 
             let init = init.as_bytes();
@@ -1112,7 +1116,8 @@ mod op {
                 unused2: 0,
                 flags2: 0,
                 max_stack_depth: 0,
-                reserved: [0; 6],
+                request_timeout: 0,
+                unused: [0; 11],
             };
             ResponseData::new_data(init.as_bytes())
         }
