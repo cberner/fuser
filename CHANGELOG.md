@@ -16,6 +16,8 @@ Bug fixes:
   owned by root
 * Raise the minimum versions of dependencies to ones fuser is tested with. Some could not be
   resolved together, such as `libc` 0.2.51 with `nix`
+* Fix building for Android without the `libfuse` feature, which now uses the pure-Rust backend
+* Say that `MountOption::AutoUnmount` is what needs a FUSE mount helper when none is found
 
 ## 0.19.0 - 2026-11-20
 
