@@ -61,6 +61,10 @@ impl ReplySender {
             }
             #[cfg(test)]
             ReplySender::Capture(sent) => {
+                // As writev(2) does
+                if data.len() > ll::MAX_IOVECS {
+                    return Err(std::io::Error::from_raw_os_error(libc::EINVAL));
+                }
                 let mut sent = sent.lock().unwrap();
                 for x in data {
                     sent.extend_from_slice(x);
@@ -223,6 +227,24 @@ impl ReplyData {
     /// Reply to a request with the given data
     pub fn data(self, data: &[u8]) {
         self.reply.send_ll(&ll::ResponseSlice(data));
+    }
+
+    /// Reply to a request with data gathered from several buffers, in order.
+    ///
+    /// The buffers are written to the kernel as they are, without first being copied into
+    /// one. A single write takes at most `IOV_MAX` buffers (1024 on Linux, macOS and the BSDs),
+    /// one of which carries the reply header, so with more than that they are copied into one
+    /// buffer instead.
+    pub fn data_vectored(self, data: &[IoSlice<'_>]) {
+        if data.len() < ll::MAX_IOVECS {
+            self.reply.send_ll(&ll::ResponseIoSlices(data));
+        } else {
+            let mut joined = Vec::with_capacity(data.iter().map(|x| x.len()).sum());
+            for x in data {
+                joined.extend_from_slice(x);
+            }
+            self.reply.send_ll(&ll::ResponseSlice(&joined));
+        }
     }
 
     /// Reply to a request with the given error code
@@ -1324,6 +1346,38 @@ mod test {
     fn capture() -> (ReplySender, Arc<Mutex<Vec<u8>>>) {
         let sent = Arc::new(Mutex::new(vec![]));
         (ReplySender::Capture(sent.clone()), sent)
+    }
+
+    /// What `data()` sends for the given bytes
+    fn data_reply(data: &[u8]) -> Vec<u8> {
+        let (sender, sent) = capture();
+        let reply: ReplyData = Reply::new(ll::RequestId(0xdeadbeef), sender);
+        reply.data(data);
+        sent.lock().unwrap().clone()
+    }
+
+    #[test]
+    fn reply_data_vectored() {
+        let (sender, sent) = capture();
+        let reply: ReplyData = Reply::new(ll::RequestId(0xdeadbeef), sender);
+        reply.data_vectored(&[
+            IoSlice::new(b"he"),
+            IoSlice::new(b"llo"),
+            IoSlice::new(b""),
+            IoSlice::new(b" world"),
+        ]);
+        assert_eq!(*sent.lock().unwrap(), data_reply(b"hello world"));
+    }
+
+    /// More buffers than one write takes are copied into one rather than refused
+    #[test]
+    fn reply_data_vectored_beyond_iovec_limit() {
+        let bytes: Vec<u8> = (0..2 * ll::MAX_IOVECS).map(|i| i as u8).collect();
+        let slices: Vec<IoSlice<'_>> = bytes.chunks(1).map(IoSlice::new).collect();
+        let (sender, sent) = capture();
+        let reply: ReplyData = Reply::new(ll::RequestId(0xdeadbeef), sender);
+        reply.data_vectored(&slices);
+        assert_eq!(*sent.lock().unwrap(), data_reply(&bytes));
     }
 
     fn test_attr() -> FileAttr {

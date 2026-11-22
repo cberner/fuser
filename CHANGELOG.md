@@ -5,6 +5,8 @@
 New features:
 * Add `ReplyCreate::created_with_ttls()` and `ReplyDirectoryPlus::add_with_ttls()` to reply with
   distinct entry and attribute TTLs, as `ReplyEntry::entry_with_ttls()` does
+* Add `ReplyData::data_vectored()` to reply with data from several buffers without first copying
+  them into one
 
 Bug fixes:
 * Fix a read of uninitialized memory when mounting through `fusermount`, reported by
