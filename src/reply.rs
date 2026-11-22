@@ -461,6 +461,11 @@ impl ReplyOpen {
     ///
     /// Note that you must reuse the given `BackingId` for all future [`ReplyOpen::opened_passthrough()`]
     /// invocations as long as the passed file handle stays open!
+    ///
+    /// The kernel reads and writes the backing file directly for most I/O on the handle, but it
+    /// can still send [`Filesystem::read()`](crate::Filesystem::read) requests for it, for
+    /// example to fill the page cache for `readahead(2)`. Keep enough to answer those, such as
+    /// the backing file itself, while the handle is open.
     pub fn opened_passthrough(self, fh: ll::FileHandle, flags: FopenFlags, backing_id: &BackingId) {
         // TODO: assert passthrough capability is enabled.
         let flags = flags | FopenFlags::FOPEN_PASSTHROUGH;
@@ -645,6 +650,9 @@ impl ReplyCreate {
     ///
     /// Note that you must reuse the given `BackingId` for all future [`ReplyOpen::opened_passthrough()`]
     /// invocations as long as the passed file handle stays open!
+    ///
+    /// As with [`ReplyOpen::opened_passthrough()`], the kernel can still send
+    /// [`Filesystem::read()`](crate::Filesystem::read) requests for the handle.
     pub fn created_passthrough(
         self,
         ttl: &Duration,

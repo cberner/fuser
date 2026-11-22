@@ -12,6 +12,7 @@ use std::os::fd::AsRawFd;
 use std::os::fd::FromRawFd;
 use std::os::fd::OwnedFd;
 use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::FileExt;
 use std::os::unix::net::UnixDatagram;
 use std::sync::Arc;
 use std::sync::Weak;
@@ -33,6 +34,7 @@ use fuser::LockOwner;
 use fuser::MountOption;
 use fuser::OpenFlags;
 use fuser::ReplyAttr;
+use fuser::ReplyData;
 use fuser::ReplyDirectory;
 use fuser::ReplyEmpty;
 use fuser::ReplyEntry;
@@ -215,6 +217,32 @@ impl Filesystem for ForkPassthroughFs {
 
         eprintln!("  -> opened_passthrough({fh:?}, 0, {id:?});\n");
         reply.opened_passthrough(FileHandle(fh), FopenFlags::empty(), &id);
+    }
+
+    /// The kernel reads most of a passthrough file from the backing file itself, but still sends
+    /// some reads here, such as those that fill the page cache for `readahead(2)`. This process
+    /// only holds `BackingId`s, not the backing files, so it opens the file to answer them
+    fn read(
+        &self,
+        _req: &Request,
+        ino: INodeNo,
+        _fh: FileHandle,
+        offset: u64,
+        size: u32,
+        _flags: OpenFlags,
+        _lock_owner: Option<LockOwner>,
+        reply: ReplyData,
+    ) {
+        if ino != INodeNo(2) {
+            reply.error(Errno::ENOENT);
+            return;
+        }
+        eprintln!("read() fallback: offset {offset}, size {size}");
+        let mut buf = vec![0; size as usize];
+        match File::open("/etc/profile").and_then(|file| file.read_at(&mut buf, offset)) {
+            Ok(n) => reply.data(&buf[..n]),
+            Err(e) => reply.error(Errno::from(e)),
+        }
     }
 
     fn release(
