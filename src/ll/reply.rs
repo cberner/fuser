@@ -60,6 +60,22 @@ impl Response for ResponseSlice<'_> {
     }
 }
 
+/// The most buffers one `writev` accepts
+#[cfg(any(target_os = "linux", target_os = "android"))]
+pub(crate) const MAX_IOVECS: usize = libc::UIO_MAXIOV as usize;
+/// The most buffers one `writev` accepts
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+pub(crate) const MAX_IOVECS: usize = libc::IOV_MAX as usize;
+
+/// A payload gathered from several buffers. With the header it must fit in [`MAX_IOVECS`]
+pub(crate) struct ResponseIoSlices<'a>(pub(crate) &'a [IoSlice<'a>]);
+
+impl<'a> Response for ResponseIoSlices<'a> {
+    fn payload(&self) -> &[IoSlice<'a>] {
+        self.0
+    }
+}
+
 pub(crate) struct ResponseEmpty;
 
 impl Response for ResponseEmpty {
@@ -924,6 +940,22 @@ mod test {
             r.with_iovec(RequestId(0xdeadbeef), ioslice_to_vec),
             expected
         );
+    }
+
+    /// The buffers go to the kernel as they are, after the header, rather than being copied
+    #[test]
+    fn reply_io_slices() {
+        let slices = [IoSlice::new(b"he"), IoSlice::new(b"llo")];
+        let r = ResponseIoSlices(&slices);
+        r.with_iovec(RequestId(0xdeadbeef), |iov| {
+            assert_eq!(iov.len(), 3);
+            assert_eq!(iov[0].len(), size_of::<abi::fuse_out_header>());
+            assert_eq!(iov[1].as_ptr(), slices[0].as_ptr());
+            assert_eq!(iov[2].as_ptr(), slices[1].as_ptr());
+        });
+        let sent = r.with_iovec(RequestId(0xdeadbeef), ioslice_to_vec);
+        assert_eq!(sent[0], 21);
+        assert_eq!(&sent[16..], b"hello");
     }
 
     #[test]
