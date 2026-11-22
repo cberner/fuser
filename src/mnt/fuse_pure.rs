@@ -106,14 +106,31 @@ fn fuse_mount_pure(
     acl: SessionACL,
 ) -> Result<(DevFuse, Option<UnixStream>), io::Error> {
     if options.contains(&MountOption::AutoUnmount) {
-        // Auto unmount is only supported via fusermount
-        return fuse_mount_fusermount(mountpoint, options, acl);
+        // Auto unmount is only supported via fusermount. A plain mount may not need a helper at
+        // all, so say which option required one
+        return fuse_mount_fusermount(mountpoint, options, acl).map_err(|e| {
+            if e.kind() == ErrorKind::NotFound {
+                Error::new(
+                    ErrorKind::NotFound,
+                    format!(
+                        "MountOption::AutoUnmount needs a FUSE mount helper, and mounting \
+                         without it does not: {e}"
+                    ),
+                )
+            } else {
+                e
+            }
+        });
     }
 
-    // The direct mount path is currently implemented only for Linux and macOS.
+    // The direct mount path is currently implemented only for Linux, Android and macOS.
     // Other supported Unix targets (such as the BSDs) rely on the setuid
     // mount helper, which mirrors libfuse's approach.
-    if cfg!(target_os = "linux") || cfg!(target_os = "macos") {
+    if cfg!(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos"
+    )) {
         let res = fuse_mount_sys(mountpoint, options, acl)?;
         match res {
             Some(file) => return Ok((file, None)),
@@ -373,7 +390,7 @@ fn fuse_mount_mount_fusefs(
 }
 
 // If returned option is none. Then fusermount binary should be tried
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(any(target_os = "linux", target_os = "android", target_os = "macos"))]
 fn fuse_mount_sys(
     mountpoint: &OsStr,
     options: &[MountOption],
@@ -417,14 +434,14 @@ fn fuse_mount_sys(
         mount_options.push_str(acl_option);
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     let mut flags = nix::mount::MsFlags::empty();
     #[cfg(target_os = "macos")]
     let mut flags = nix::mount::MntFlags::empty();
 
     if !options.contains(&MountOption::Dev) {
         // Default to nodev
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "android"))]
         {
             flags |= nix::mount::MsFlags::MS_NODEV;
         }
@@ -435,7 +452,7 @@ fn fuse_mount_sys(
     }
     if !options.contains(&MountOption::Suid) {
         // Default to nosuid
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "android"))]
         {
             flags |= nix::mount::MsFlags::MS_NOSUID;
         }
@@ -466,7 +483,7 @@ fn fuse_mount_sys(
         source = name;
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     let result = nix::mount::mount(
         Some(source),
         mountpoint,
@@ -489,7 +506,7 @@ fn fuse_mount_sys(
     }
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[cfg(not(any(target_os = "linux", target_os = "android", target_os = "macos")))]
 fn fuse_mount_sys(
     _mountpoint: &OsStr,
     _options: &[MountOption],

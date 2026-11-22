@@ -268,7 +268,7 @@ pub(crate) fn option_group(option: &MountOption) -> MountOptionGroup {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 #[allow(dead_code)]
 pub(crate) fn option_to_flag(option: &MountOption) -> io::Result<nix::mount::MsFlags> {
     match option {
