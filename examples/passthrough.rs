@@ -7,6 +7,7 @@ mod common;
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs::File;
+use std::os::unix::fs::FileExt;
 use std::time::Duration;
 use std::time::UNIX_EPOCH;
 
@@ -25,6 +26,7 @@ use fuser::LockOwner;
 use fuser::MountOption;
 use fuser::OpenFlags;
 use fuser::ReplyAttr;
+use fuser::ReplyData;
 use fuser::ReplyDirectory;
 use fuser::ReplyEmpty;
 use fuser::ReplyEntry;
@@ -57,9 +59,20 @@ const TTL: Duration = Duration::from_secs(1); // 1 second
 /// desired, but our little example filesystem only contains one file. :)
 #[derive(Debug, Default)]
 struct BackingCache {
-    by_handle: HashMap<u64, Arc<BackingId>>,
-    by_inode: HashMap<INodeNo, Weak<BackingId>>,
+    by_handle: HashMap<u64, Arc<Backing>>,
+    by_inode: HashMap<INodeNo, Weak<Backing>>,
     next_fh: u64,
+}
+
+/// A backing file and the `BackingId` the kernel knows it by.
+///
+/// The file is kept open as well as being handed to the kernel, because the kernel still sends
+/// some reads of a passthrough file to `Filesystem::read()` - those for `readahead(2)`, for
+/// example - and they are answered from it.
+#[derive(Debug)]
+struct Backing {
+    id: BackingId,
+    file: File,
 }
 
 impl BackingCache {
@@ -68,29 +81,34 @@ impl BackingCache {
         self.next_fh
     }
 
-    /// Gets the existing `BackingId` for `ino` if it exists, or calls `callback` to create it.
+    /// Gets the existing `Backing` for `ino` if it exists, or calls `callback` to create it.
     ///
-    /// Returns a unique file handle and the `BackingID` (possibly shared, possibly new).  The
+    /// Returns a unique file handle and the `Backing` (possibly shared, possibly new).  The
     /// returned file handle should be `put()` when you're done with it.
     fn get_or(
         &mut self,
         ino: INodeNo,
-        callback: impl Fn() -> std::io::Result<BackingId>,
-    ) -> std::io::Result<(u64, Arc<BackingId>)> {
+        callback: impl Fn() -> std::io::Result<Backing>,
+    ) -> std::io::Result<(u64, Arc<Backing>)> {
         let fh = self.next_fh();
 
-        let id = if let Some(id) = self.by_inode.get(&ino).and_then(Weak::upgrade) {
-            eprintln!("HIT! reusing {id:?}");
-            id
+        let backing = if let Some(backing) = self.by_inode.get(&ino).and_then(Weak::upgrade) {
+            eprintln!("HIT! reusing {:?}", backing.id);
+            backing
         } else {
-            let id = Arc::new(callback()?);
-            self.by_inode.insert(ino, Arc::downgrade(&id));
-            eprintln!("MISS! new {id:?}");
-            id
+            let backing = Arc::new(callback()?);
+            self.by_inode.insert(ino, Arc::downgrade(&backing));
+            eprintln!("MISS! new {:?}", backing.id);
+            backing
         };
 
-        self.by_handle.insert(fh, Arc::clone(&id));
-        Ok((fh, id))
+        self.by_handle.insert(fh, Arc::clone(&backing));
+        Ok((fh, backing))
+    }
+
+    /// The `Backing` behind an open file handle.
+    fn get(&self, fh: u64) -> Option<Arc<Backing>> {
+        self.by_handle.get(&fh).cloned()
     }
 
     /// Releases a file handle previously obtained from `get_or()`.  If this was a last user of a
@@ -99,7 +117,7 @@ impl BackingCache {
         eprintln!("Put fh {fh}");
         match self.by_handle.remove(&fh) {
             None => eprintln!("ERROR: Put fh {fh} but it wasn't found in cache!!\n"),
-            Some(id) => eprintln!("Put fh {fh}, was {id:?}\n"),
+            Some(backing) => eprintln!("Put fh {fh}, was {:?}\n", backing.id),
         }
     }
 }
@@ -205,17 +223,43 @@ impl Filesystem for PassthroughFs {
             return;
         }
 
-        let (fh, id) = self
+        let (fh, backing) = self
             .backing_cache
             .lock()
             .get_or(ino, || {
                 let file = File::open("/etc/profile")?;
-                reply.open_backing(file)
+                let id = reply.open_backing(&file)?;
+                Ok(Backing { id, file })
             })
             .unwrap();
 
-        eprintln!("  -> opened_passthrough({fh:?}, 0, {id:?});\n");
-        reply.opened_passthrough(FileHandle(fh), FopenFlags::empty(), &id);
+        eprintln!("  -> opened_passthrough({fh:?}, 0, {:?});\n", backing.id);
+        reply.opened_passthrough(FileHandle(fh), FopenFlags::empty(), &backing.id);
+    }
+
+    /// The kernel reads most of a passthrough file from the backing file itself, but still sends
+    /// some reads here, such as those that fill the page cache for `readahead(2)`
+    fn read(
+        &self,
+        _req: &Request,
+        _ino: INodeNo,
+        fh: FileHandle,
+        offset: u64,
+        size: u32,
+        _flags: OpenFlags,
+        _lock_owner: Option<LockOwner>,
+        reply: ReplyData,
+    ) {
+        let Some(backing) = self.backing_cache.lock().get(fh.into()) else {
+            reply.error(Errno::EBADF);
+            return;
+        };
+        eprintln!("read() fallback: fh {fh:?}, offset {offset}, size {size}");
+        let mut buf = vec![0; size as usize];
+        match backing.file.read_at(&mut buf, offset) {
+            Ok(n) => reply.data(&buf[..n]),
+            Err(e) => reply.error(Errno::from(e)),
+        }
     }
 
     fn release(
