@@ -623,7 +623,9 @@ pub(crate) struct fuse_init_out {
     pub(crate) unused2: u16,
     pub(crate) flags2: u32,
     pub(crate) max_stack_depth: u32,
-    pub(crate) reserved: [u32; 6],
+    /// Seconds, read by the kernel only with `FUSE_REQUEST_TIMEOUT` (ABI 7.43)
+    pub(crate) request_timeout: u16,
+    pub(crate) unused: [u16; 11],
 }
 
 #[repr(C)]

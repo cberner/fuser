@@ -7,6 +7,8 @@ New features:
   distinct entry and attribute TTLs, as `ReplyEntry::entry_with_ttls()` does
 * Add `ReplyData::data_vectored()` to reply with data from several buffers without first copying
   them into one
+* Add `KernelConfig::set_request_timeout()`, which has the kernel abort the connection when a
+  request goes unanswered for too long (`FUSE_REQUEST_TIMEOUT`, Linux 6.14)
 
 Bug fixes:
 * Fix a read of uninitialized memory when mounting through `fusermount`, reported by
