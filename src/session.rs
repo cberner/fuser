@@ -280,9 +280,13 @@ impl<FS: Filesystem> Session<FS> {
     }
 
     /// Run the session loop that receives kernel requests and dispatches them to method
-    /// calls into the filesystem. This read-dispatch-loop is non-concurrent to prevent
-    /// having multiple buffers (which take up much memory), but the filesystem methods
-    /// may run concurrent by spawning threads.
+    /// calls into the filesystem, and return when the session ends.
+    ///
+    /// [`Config::n_threads`](crate::Config::n_threads) event loops run this, each on its own
+    /// thread with its own request buffer, so filesystem methods may be called concurrently.
+    /// With one thread, the default, requests are dispatched one at a time, but a method may
+    /// still reply later from a thread of its own. More than one thread is supported on
+    /// Linux only.
     /// # Errors
     /// Returns any final error when the session comes to an end.
     pub fn run(self) -> io::Result<()> {
