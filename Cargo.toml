@@ -25,31 +25,31 @@ categories = ["external-ffi-bindings", "api-bindings", "filesystem", "os::unix-a
 build = "build.rs"
 
 [dependencies]
-bitflags = "2.9"
-libc = "0.2.51"
-log = "0.4.6"
-memchr = "2.7.2"
-num_enum = "0.7.5"
+bitflags = "2.13.2"
+libc = "0.2.191"
+log = "0.4.35"
+memchr = "2.8.3"
+num_enum = "0.7.6"
 page_size = "0.6.0"
-parking_lot = "0.12"
-ref-cast = "1.0.25"
-serde = { version = "1.0.102", features = ["std", "derive"], optional = true }
-smallvec = "1.6.1"
-async-trait = { version = "0.1", optional = true }
-tokio = { version = "1.48.0", features = ["rt", "rt-multi-thread"], optional = true }
-zerocopy = { version = "0.8", features = ["derive"] }
-nix = { version = "0.31.0", features = ["fs", "user", "poll", "socket", "uio", "mount", "process", "ioctl"] }
+parking_lot = "0.12.5"
+ref-cast = "1.0.27"
+serde = { version = "1.0.229", features = ["std", "derive"], optional = true }
+smallvec = "1.16.6"
+async-trait = { version = "0.1.92", optional = true }
+tokio = { version = "1.54.1", features = ["rt", "rt-multi-thread"], optional = true }
+zerocopy = { version = "0.8.64", features = ["derive"] }
+nix = { version = "0.32.0", features = ["fs", "user", "poll", "socket", "uio", "mount", "process", "ioctl"] }
 
 [dev-dependencies]
-env_logger = "0.11.7"
-clap = { version = "4.4", features = ["cargo", "derive"] }
-rmp-serde = "1.3.0"
-serde = { version = "1.0.102", features = ["std", "derive"] }
-tempfile = "3.10.1"
-nix = { version = "0.31.0", features = ["poll", "fs", "ioctl"] }
+env_logger = "0.11.12"
+clap = { version = "4.6.9", features = ["cargo", "derive"] }
+rmp-serde = "1.3.1"
+serde = { version = "1.0.229", features = ["std", "derive"] }
+tempfile = "3.27.0"
+nix = { version = "0.32.0", features = ["poll", "fs", "ioctl"] }
 
 [build-dependencies]
-pkg-config = "0.3.14"
+pkg-config = "0.3.34"
 
 [features]
 default = []

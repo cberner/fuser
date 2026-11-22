@@ -12,6 +12,8 @@ Bug fixes:
 * Fix "Failed to send FUSE reply" errors logged for interrupted requests with `clone_fd`
 * Fix the kernel sending `FUSE_INTERRUPT` for every interrupted request on a session not
   owned by root
+* Raise the minimum versions of dependencies to ones fuser is tested with. Some could not be
+  resolved together, such as `libc` 0.2.51 with `nix`
 
 ## 0.19.0 - 2026-11-20
 
