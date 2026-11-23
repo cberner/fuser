@@ -146,11 +146,13 @@ impl Errno {
     pub const EIDRM: Errno = errno!(libc::EIDRM);
     /// Object is remote
     pub const EREMOTE: Errno = errno!(libc::EREMOTE);
-    /// Link has been severed
+    /// Link has been severed. Not defined on OpenBSD
+    #[cfg(not(target_os = "openbsd"))]
     pub const ENOLINK: Errno = errno!(libc::ENOLINK);
     /// Protocol error
     pub const EPROTO: Errno = errno!(libc::EPROTO);
-    /// Multihop attempted
+    /// Multihop attempted. Not defined on OpenBSD
+    #[cfg(not(target_os = "openbsd"))]
     pub const EMULTIHOP: Errno = errno!(libc::EMULTIHOP);
     /// Bad message
     pub const EBADMSG: Errno = errno!(libc::EBADMSG);

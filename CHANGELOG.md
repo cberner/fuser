@@ -26,6 +26,8 @@ Bug fixes:
 * Document that `SessionACL::RootAndOwner` is enforced in userspace, so anything the kernel has
   cached is visible to every user, as is all file data once `open()` replies `ENOSYS`. Use
   `MountOption::DefaultPermissions` to have the kernel check every access
+* Fix building for NetBSD, DragonFly and OpenBSD. On OpenBSD, `Errno::ENOLINK` and
+  `Errno::EMULTIHOP` are not defined, since it has no such errors
 
 ## 0.19.0 - 2026-11-20
 

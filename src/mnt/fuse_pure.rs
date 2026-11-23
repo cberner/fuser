@@ -39,9 +39,12 @@ use nix::sys::socket::recvmsg;
 use crate::SessionACL;
 use crate::dev_fuse::DevFuse;
 use crate::mnt::mount_options::MountOption;
+#[cfg(any(target_os = "linux", target_os = "android", target_os = "macos"))]
 use crate::mnt::mount_options::MountOptionGroup;
+#[cfg(any(target_os = "linux", target_os = "android", target_os = "macos"))]
 use crate::mnt::mount_options::option_group;
 use crate::mnt::mount_options::option_to_escaped_string;
+#[cfg(any(target_os = "linux", target_os = "android", target_os = "macos"))]
 use crate::mnt::mount_options::option_to_flag;
 use crate::mnt::mount_options::option_to_string;
 
