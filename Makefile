@@ -81,3 +81,8 @@ test_macos: pre
 	cargo test --all --all-targets --features=libfuse2 -- --skip=mnt::test::mount_unmount
 	cargo run -p fuser-tests -- macos-mount
 	./tests/macos_pjdfs.sh
+
+test_macos_fskit: pre
+	./tests/macos_enable_fskit.sh
+	FUSER_MOUNT_OPTION=backend=fskit cargo run -p fuser-tests -- macos-mount
+	FUSER_MOUNT_OPTION=backend=fskit ./tests/macos_pjdfs.sh

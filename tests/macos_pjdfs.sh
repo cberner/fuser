@@ -28,17 +28,29 @@ export PJDFS_EXIT_STATUS=1
 export RUST_BACKTRACE=1
 
 DATA_DIR=$(mktemp --directory)
-DIR=$(mktemp --directory)
+# Canonical, as the mount table lists it (/var is a symlink to /private/var)
+DIR=$(cd "$(mktemp --directory)" && pwd -P)
 
 cargo build --release --example simple
-cargo run --release --example simple -- -vvv --suid --data-dir $DATA_DIR --mount-point $DIR > /tmp/mount.log 2>&1 &
+cargo run --release --example simple -- -vvv --suid ${FUSER_MOUNT_OPTION:+-o "$FUSER_MOUNT_OPTION"} --data-dir $DATA_DIR --mount-point $DIR > /tmp/mount.log 2>&1 &
 FUSE_PID=$!
-sleep 0.5
 
 echo "mounting at $DIR"
-# Make sure FUSE was successfully mounted
+# Make sure FUSE was successfully mounted. With the FSKit backend the mount table shows
+# macfuse://<uuid> rather than the fsname, so match the mount point
+for _ in $(seq 1 100); do
+  mount | grep -q " on $DIR (" && break
+  sleep 0.1
+done
 mount
-mount | grep fuser
+mount | grep " on $DIR ("
+
+# macFUSE's FSKit backend reports a NAME_MAX of 256, one more than the filesystem allows, and no
+# PATH_MAX, so the tests that probe those limits cannot pass there
+FSKIT_SKIP='^$'
+if [ "${FUSER_MOUNT_OPTION:-}" = "backend=fskit" ]; then
+  FSKIT_SKIP='/(chmod|ftruncate|link|mkdir|open|rmdir|symlink|truncate|unlink)/0[23]\.t$'
+fi
 
 set +e
 cd ${DIR}
@@ -97,6 +109,7 @@ find $PJDFS_TMP_DIR/pjdfstest/tests -name '*.t' \
 | grep -v 'open/06.t' \
 | grep -v 'open/07.t' \
 | grep -v 'open/08.t' \
+| grep -v -E "$FSKIT_SKIP" \
 | xargs prove -f  | tee /tmp/pjdfs.log
 export PJDFS_EXIT_STATUS=$?
 echo "Total failed:"
