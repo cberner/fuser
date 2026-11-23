@@ -28,6 +28,8 @@ Bug fixes:
   `MountOption::DefaultPermissions` to have the kernel check every access
 * Fix building for NetBSD, DragonFly and OpenBSD. On OpenBSD, `Errno::ENOLINK` and
   `Errno::EMULTIHOP` are not defined, since it has no such errors
+* Fix a request hanging forever on NetBSD when its reply did not yet fit in perfused's socket
+  buffer. The reply is now retried instead of dropped
 
 ## 0.19.0 - 2026-11-20
 
