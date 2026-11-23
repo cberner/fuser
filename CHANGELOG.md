@@ -9,6 +9,9 @@ New features:
   them into one
 * Add `KernelConfig::set_request_timeout()`, which has the kernel abort the connection when a
   request goes unanswered for too long (`FUSE_REQUEST_TIMEOUT`, Linux 6.14)
+* Add `Filesystem::flock()` for BSD `flock(2)` locks, sent once `InitFlags::FUSE_FLOCK_LOCKS` is
+  negotiated. They previously reached `setlk()` indistinguishable from POSIX locks, which the
+  default implementation still forwards them to
 
 Bug fixes:
 * Fix a read of uninitialized memory when mounting through `fusermount`, reported by
