@@ -13,6 +13,8 @@ mod fuse3_sys;
 
 #[cfg(fuser_mount_impl = "pure-rust")]
 mod fuse_pure;
+#[cfg(fuser_macfuse_fskit)]
+pub(crate) mod mfmount;
 pub(crate) mod mount_options;
 
 use std::io;
@@ -37,19 +39,13 @@ fn with_fuse_args<T, F: FnOnce(&fuse_args) -> T>(
 ) -> T {
     use std::ffi::CString;
 
-    use mount_options::option_to_escaped_string;
-
     let mut args = vec![CString::new("rust-fuse").unwrap()];
-    for x in options {
+    for option in fuse_args_options(options, acl) {
         args.extend_from_slice(&[
             CString::new("-o").unwrap(),
-            CString::new(option_to_escaped_string(x))
+            CString::new(option)
                 .expect("option values are checked for NUL by check_option_values()"),
         ]);
-    }
-    if let Some(acl) = acl.to_mount_option() {
-        args.push(CString::new("-o").unwrap());
-        args.push(CString::new(acl).unwrap());
     }
     let argptrs: Vec<_> = args.iter().map(|s| s.as_ptr()).collect();
     f(&fuse_args {
@@ -57,6 +53,19 @@ fn with_fuse_args<T, F: FnOnce(&fuse_args) -> T>(
         argv: argptrs.as_ptr(),
         allocated: 0,
     })
+}
+
+/// The `-o` values libfuse is given for `options`
+#[cfg(any(test, fuser_mount_impl = "libfuse2", fuser_mount_impl = "libfuse3"))]
+fn fuse_args_options(options: &[MountOption], acl: SessionACL) -> Vec<String> {
+    let mut args: Vec<String> = options
+        .iter()
+        .map(mount_options::option_to_escaped_string)
+        .collect();
+    if let Some(acl) = acl.to_mount_option() {
+        args.push(acl.to_owned());
+    }
+    args
 }
 
 /// Name what could not be reached, so that a bare "No such file or directory" does not

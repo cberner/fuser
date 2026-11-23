@@ -5,23 +5,50 @@ use std::os::fd::AsFd;
 use std::os::fd::AsRawFd;
 use std::os::fd::BorrowedFd;
 
-/// A newtype for `File` that represents the `/dev/fuse` device.
+/// The kernel connection of a mount: the `/dev/fuse` device, or on macOS an MFMount channel.
 #[derive(Debug)]
-pub(crate) struct DevFuse(pub(crate) File);
+pub(crate) struct DevFuse {
+    /// For an MFMount channel, which has no fd, a placeholder that is not connected to it
+    file: File,
+    #[cfg(fuser_macfuse_fskit)]
+    pub(crate) mf_channel: Option<crate::mnt::mfmount::MfChannel>,
+}
 
 impl AsRawFd for DevFuse {
     fn as_raw_fd(&self) -> std::os::unix::io::RawFd {
-        self.0.as_raw_fd()
+        self.file.as_raw_fd()
     }
 }
 
 impl AsFd for DevFuse {
     fn as_fd(&self) -> BorrowedFd<'_> {
-        self.0.as_fd()
+        self.file.as_fd()
     }
 }
 
 impl DevFuse {
+    pub(crate) fn new(file: File) -> Self {
+        Self {
+            file,
+            #[cfg(fuser_macfuse_fskit)]
+            mf_channel: None,
+        }
+    }
+
+    #[cfg(all(test, fuser_mount_impl = "pure-rust"))]
+    pub(crate) fn file(&self) -> &File {
+        &self.file
+    }
+
+    /// A connection over macFUSE's FSKit backend
+    #[cfg(fuser_macfuse_fskit)]
+    pub(crate) fn from_mf_channel(channel: crate::mnt::mfmount::MfChannel) -> io::Result<Self> {
+        Ok(Self {
+            file: File::open("/dev/null")?,
+            mf_channel: Some(channel),
+        })
+    }
+
     pub(crate) const PATH: &'static str = "/dev/fuse";
 
     #[allow(dead_code)] // Not used with every feature.
@@ -30,7 +57,7 @@ impl DevFuse {
             .read(true)
             .write(true)
             .open(Self::PATH)
-            .map(Self)
+            .map(Self::new)
             .map_err(open_error)
     }
 }

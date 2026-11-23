@@ -73,6 +73,13 @@ sudo yum install fuse-devel pkgconfig
 
 Install [FUSE for macOS], which can be obtained from their website or installed using the Homebrew or Nix package managers. macOS version 10.9 or later is required. If you are using a Mac with Apple Silicon, you must also [enable support for third party kernel extensions][enable kext].
 
+With macFUSE 5.3.3 or later, a filesystem can instead be mounted through Apple's FSKit, which needs no
+kernel extension, by passing `MountOption::CUSTOM("backend=fskit".to_string())`. macFUSE's file
+system extensions must be enabled in System Settings > General > Login Items & Extensions > File
+System Extensions. FSKit does not tell the filesystem who made a request: `Request::uid()`,
+`gid()` and `pid()` are 0, and `SessionACL` is not enforced by fuser. macFUSE's FSKit backend also
+does not support the notification API yet. fuser's macOS CI tests use this backend.
+
 
 #### To install using Homebrew
 

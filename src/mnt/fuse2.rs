@@ -16,6 +16,9 @@ use crate::mnt::with_fuse_args;
 #[derive(Debug)]
 pub(crate) struct MountImpl {
     mountpoint: CString,
+    /// Mounted with macFUSE's FSKit backend
+    #[cfg(fuser_macfuse_fskit)]
+    fskit: bool,
 }
 impl MountImpl {
     pub(crate) fn new(
@@ -24,6 +27,20 @@ impl MountImpl {
         acl: SessionACL,
     ) -> io::Result<(Arc<DevFuse>, MountImpl)> {
         let mountpoint = CString::new(mountpoint.as_os_str().as_bytes()).unwrap();
+        // libfuse's fuse_mount_compat25() cannot mount with the FSKit backend, which has no
+        // device fd to return
+        #[cfg(fuser_macfuse_fskit)]
+        if crate::mnt::mfmount::wants_fskit(options) {
+            let options = crate::mnt::fuse_args_options(options, acl).join(",");
+            let channel = crate::mnt::mfmount::MfChannel::mount(&mountpoint, &options)?;
+            return Ok((
+                Arc::new(DevFuse::from_mf_channel(channel)?),
+                MountImpl {
+                    mountpoint,
+                    fskit: true,
+                },
+            ));
+        }
         with_fuse_args(options, acl, |args| {
             let fd = libfuse_call(
                 "fuse_mount_compat25",
@@ -31,7 +48,14 @@ impl MountImpl {
                 |fd| *fd >= 0,
             )?;
             let file = unsafe { File::from_raw_fd(fd) };
-            Ok((Arc::new(DevFuse(file)), MountImpl { mountpoint }))
+            Ok((
+                Arc::new(DevFuse::new(file)),
+                MountImpl {
+                    mountpoint,
+                    #[cfg(fuser_macfuse_fskit)]
+                    fskit: false,
+                },
+            ))
         })
     }
 
@@ -43,6 +67,12 @@ impl MountImpl {
         // directly, which is what osxfuse does anyway, since we already converted
         // to the real path when we first mounted.
         if let Err(err) = crate::mnt::libc_umount(&self.mountpoint) {
+            // The volume is gone already, e.g. unmounted with umount(8), which ends the
+            // session that this unmount is tearing down
+            #[cfg(fuser_macfuse_fskit)]
+            if self.fskit && err == nix::errno::Errno::EINVAL {
+                return Ok(());
+            }
             // Linux always returns EPERM for non-root users.  We have to go
             // through the setuid-root "fusermount -u" to unmount.
             if err == nix::errno::Errno::EPERM {

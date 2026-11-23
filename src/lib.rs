@@ -1655,7 +1655,7 @@ mod tests {
         let fs = Arc::new(session::FilesystemHolder::new(fs));
         let se = session::SessionEventLoop {
             thread_name: "test".to_string(),
-            ch: channel::Channel::new(Arc::new(dev_fuse::DevFuse(std::fs::File::from(
+            ch: channel::Channel::new(Arc::new(dev_fuse::DevFuse::new(std::fs::File::from(
                 OwnedFd::from(device),
             )))),
             filesystem: fs.clone(),

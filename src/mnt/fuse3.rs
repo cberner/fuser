@@ -68,7 +68,7 @@ impl MountImpl {
             // don't want it being closed out from under us:
             let fd = fd.try_clone_to_owned()?;
             let file = File::from(fd);
-            Ok((Arc::new(DevFuse(file)), mount))
+            Ok((Arc::new(DevFuse::new(file)), mount))
         })
     }
 
