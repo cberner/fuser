@@ -226,6 +226,18 @@ impl<FS: Filesystem> Session<FS> {
         let mountpoint = mountpoint.as_ref();
         info!("Mounting {}", mountpoint.display());
         let (file, mount) = Mount::new(mountpoint, &options.mount_options, options.acl)?;
+        #[allow(unused_mut)]
+        let mut allowed = options.acl;
+        // macFUSE's FSKit backend sends no caller ids: every request reads as uid 0, so
+        // filtering on them would refuse everything (Owner) or allow everything (RootAndOwner)
+        #[cfg(fuser_macfuse_fskit)]
+        if file.mf_channel.is_some() && allowed != SessionACL::All {
+            warn!(
+                "macFUSE's FSKit backend does not report the caller of a request, \
+                 so {allowed:?} is not enforced by fuser"
+            );
+            allowed = SessionACL::All;
+        }
 
         let ch = Channel::new(file);
 
@@ -235,7 +247,7 @@ impl<FS: Filesystem> Session<FS> {
             mount: UmountOnDrop {
                 mount: Arc::new(Mutex::new(Some(mount))),
             },
-            allowed: options.acl,
+            allowed,
             session_owner: geteuid(),
             proto_version: None,
             negotiated: InitFlags::empty(),
@@ -256,7 +268,7 @@ impl<FS: Filesystem> Session<FS> {
         acl: SessionACL,
         config: Config,
     ) -> io::Result<Self> {
-        let ch = Channel::new(Arc::new(DevFuse(File::from(fd))));
+        let ch = Channel::new(Arc::new(DevFuse::new(File::from(fd))));
         let mut session = Session {
             filesystem: FilesystemHolder::new(filesystem),
             ch,
@@ -2086,7 +2098,7 @@ mod test {
         kernel.set_nonblocking(true).unwrap();
         let se = SessionEventLoop {
             thread_name: "test".to_string(),
-            ch: Channel::new(Arc::new(DevFuse(File::from(OwnedFd::from(device))))),
+            ch: Channel::new(Arc::new(DevFuse::new(File::from(OwnedFd::from(device))))),
             filesystem: Arc::new(FilesystemHolder::new(ReplyCheckingFs {
                 kernel: kernel.try_clone().unwrap(),
                 calls: AtomicU64::new(0),
@@ -2140,7 +2152,7 @@ mod test {
             .unwrap();
         let se = SessionEventLoop {
             thread_name: "test".to_string(),
-            ch: Channel::new(Arc::new(DevFuse(File::from(OwnedFd::from(device))))),
+            ch: Channel::new(Arc::new(DevFuse::new(File::from(OwnedFd::from(device))))),
             filesystem: Arc::new(FilesystemHolder::new(PanickingFs)),
             allowed: SessionACL::All,
             session_owner: geteuid(),
@@ -2222,7 +2234,7 @@ mod test {
         let (release, release_statfs) = std::sync::mpsc::channel();
         let se = Arc::new(SessionEventLoop {
             thread_name: "test".to_string(),
-            ch: Channel::new(Arc::new(DevFuse(File::from(OwnedFd::from(device))))),
+            ch: Channel::new(Arc::new(DevFuse::new(File::from(OwnedFd::from(device))))),
             filesystem: Arc::new(FilesystemHolder::new(OrderFs {
                 events: events.clone(),
                 release_statfs: std::sync::Mutex::new(release_statfs),

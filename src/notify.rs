@@ -252,7 +252,7 @@ mod test {
     fn notifier_with_abi(kernel_capabilities: InitFlags, kernel_abi: Option<Version>) -> Notifier {
         // /dev/null stands in for the FUSE device: the cases below either return before
         // sending, or send a notification whose fate is not what is under test
-        let dev = Arc::new(DevFuse(
+        let dev = Arc::new(DevFuse::new(
             File::options().write(true).open("/dev/null").unwrap(),
         ));
         Notifier::new(Channel::new(dev).sender(), kernel_capabilities, kernel_abi)

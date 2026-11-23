@@ -28,6 +28,10 @@ impl Channel {
 
     /// Receives data up to the capacity of the given buffer (can block).
     fn receive(&self, buffer: &mut [u8]) -> nix::Result<usize> {
+        #[cfg(fuser_macfuse_fskit)]
+        if let Some(channel) = &self.0.mf_channel {
+            return channel.receive(buffer);
+        }
         nix::unistd::read(&self.0, buffer)
     }
 
@@ -89,6 +93,11 @@ pub(crate) struct ChannelSender(Arc<DevFuse>);
 
 impl ChannelSender {
     pub(crate) fn send(&self, bufs: &[io::IoSlice<'_>]) -> io::Result<()> {
+        #[cfg(fuser_macfuse_fskit)]
+        if let Some(channel) = &self.0.mf_channel {
+            channel.send(bufs)?;
+            return Ok(());
+        }
         #[cfg(not(target_os = "netbsd"))]
         let rc = nix::sys::uio::writev(&self.0, bufs)?;
         #[cfg(target_os = "netbsd")]

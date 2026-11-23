@@ -748,7 +748,7 @@ mod test {
         let (kernel, device) = UnixStream::pair().unwrap();
         let se = SessionEventLoop {
             thread_name: "test".to_string(),
-            ch: Channel::new(Arc::new(DevFuse(File::from(OwnedFd::from(device))))),
+            ch: Channel::new(Arc::new(DevFuse::new(File::from(OwnedFd::from(device))))),
             filesystem: Arc::new(FilesystemHolder::new(NoopFs)),
             allowed: SessionACL::Owner,
             session_owner: Uid::from_raw(1000),

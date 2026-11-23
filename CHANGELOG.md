@@ -19,6 +19,8 @@ New features:
 * Add `Filesystem::flock()` for BSD `flock(2)` locks, sent once `InitFlags::FUSE_FLOCK_LOCKS` is
   negotiated. They previously reached `setlk()` indistinguishable from POSIX locks, which the
   default implementation still forwards them to
+* Support mounting with macFUSE's FSKit backend, which needs no kernel extension, with the
+  `backend=fskit` mount option (macFUSE 5.3.3 or later)
 
 Bug fixes:
 * Fix a read of uninitialized memory when mounting through `fusermount`, reported by

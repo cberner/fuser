@@ -3,6 +3,8 @@ fn main() {
     println!(
         "cargo::rustc-check-cfg=cfg(fuser_mount_impl, values(\"pure-rust\", \"libfuse2\", \"libfuse3\", \"macos-no-mount\"))"
     );
+    // macFUSE's FSKit backend, mounted through its MFMount framework
+    println!("cargo::rustc-check-cfg=cfg(fuser_macfuse_fskit)");
 
     let target_os =
         std::env::var("CARGO_CFG_TARGET_OS").expect("CARGO_CFG_TARGET_OS should be set");
@@ -23,6 +25,7 @@ fn main() {
                 .map_err(|e| eprintln!("{e}"))
                 .unwrap();
             println!("cargo::rustc-cfg=fuser_mount_impl=\"libfuse2\"");
+            println!("cargo::rustc-cfg=fuser_macfuse_fskit");
         }
     } else if cfg!(feature = "libfuse3") {
         configure_libfuse3().unwrap();
