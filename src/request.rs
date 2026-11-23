@@ -86,6 +86,18 @@ impl<'a> RequestWithSender<'a> {
     /// request and sends back the returned reply to the kernel
     pub(crate) fn dispatch<FS: Filesystem>(&self, se: &SessionEventLoop<FS>) {
         debug!("{} thread={}", self.request, se.thread_name);
+        let Some(_dispatching) = se.filesystem.begin_dispatch() else {
+            // destroy() has been called. As libfuse does, refuse whatever the kernel still
+            // sends before the connection ends; forgets take no reply
+            debug!("{} after destroy(), not dispatched", self.request);
+            if !matches!(
+                self.request.operation(),
+                Ok(ll::Operation::Forget(_) | ll::Operation::BatchForget(_))
+            ) {
+                self.reply::<ReplyRaw>().send_ll(&ResponseErrno(Errno::EIO));
+            }
+            return;
+        };
         match self.dispatch_req(se) {
             Ok(Some(resp)) => self.reply::<ReplyRaw>().send_ll(&resp),
             Ok(None) => {}
@@ -737,7 +749,7 @@ mod test {
         let se = SessionEventLoop {
             thread_name: "test".to_string(),
             ch: Channel::new(Arc::new(DevFuse(File::from(OwnedFd::from(device))))),
-            filesystem: Arc::new(FilesystemHolder { fs: Some(NoopFs) }),
+            filesystem: Arc::new(FilesystemHolder::new(NoopFs)),
             allowed: SessionACL::Owner,
             session_owner: Uid::from_raw(1000),
             negotiated: InitFlags::empty(),

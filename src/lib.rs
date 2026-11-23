@@ -678,8 +678,20 @@ pub trait Filesystem: Send + Sync + 'static {
     }
 
     /// Clean up filesystem.
-    /// Called on filesystem exit.
-    fn destroy(&mut self) {}
+    ///
+    /// Called exactly once, as in libfuse. On a `fuseblk` mount (one mounted with `blkdev`), the
+    /// kernel sends `FUSE_DESTROY` while unmounting and waits for the reply, which is sent once
+    /// this returns: `umount` completes, and the block device is released, only after that, so
+    /// writes made here reach the device first. Other mounts get no `FUSE_DESTROY`, and this is
+    /// called when the session ends, after the connection is gone.
+    ///
+    /// No other method runs while it does or after it: it waits for requests being handled on
+    /// other threads to return, and any the kernel still sends afterwards are answered with
+    /// `EIO` without reaching the filesystem. Replies a method sends later from threads of its
+    /// own are not waited for. It must not access the mountpoint, which is being unmounted.
+    /// Cleanup that needs exclusive access to the filesystem can go in its `Drop`, which runs
+    /// once the session has let go of it.
+    fn destroy(&self) {}
 
     /// Look up a directory entry by name and get its attributes.
     fn lookup(&self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
@@ -1640,7 +1652,7 @@ mod tests {
         }
 
         let (_kernel, device) = UnixStream::pair().unwrap();
-        let fs = Arc::new(session::FilesystemHolder { fs: Some(fs) });
+        let fs = Arc::new(session::FilesystemHolder::new(fs));
         let se = session::SessionEventLoop {
             thread_name: "test".to_string(),
             ch: channel::Channel::new(Arc::new(dev_fuse::DevFuse(std::fs::File::from(

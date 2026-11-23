@@ -166,7 +166,7 @@ impl Filesystem for ForkPassthroughFs {
         Ok(())
     }
 
-    fn destroy(&mut self) {
+    fn destroy(&self) {
         // Tell the parent process to shut down
         self.socket.send(&[]).unwrap();
     }
