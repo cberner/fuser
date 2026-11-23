@@ -89,7 +89,10 @@ pub(crate) struct ChannelSender(Arc<DevFuse>);
 
 impl ChannelSender {
     pub(crate) fn send(&self, bufs: &[io::IoSlice<'_>]) -> io::Result<()> {
+        #[cfg(not(target_os = "netbsd"))]
         let rc = nix::sys::uio::writev(&self.0, bufs)?;
+        #[cfg(target_os = "netbsd")]
+        let rc = retry_on_emsgsize(bufs, || nix::sys::uio::writev(&self.0, bufs))?;
         // writev is atomic, so do not need to check how many bytes are written.
         // libfuse does not do it either
         // https://github.com/libfuse/libfuse/blob/6278995cca991978abd25ebb2c20ebd3fc9e8a13/lib/fuse_lowlevel.c#L267
@@ -103,5 +106,71 @@ impl ChannelSender {
 
     pub(crate) unsafe fn wrap_backing(&self, id: u32) -> BackingId {
         unsafe { BackingId::wrap_raw(&self.0, id) }
+    }
+}
+
+/// On NetBSD the device is a `SOCK_SEQPACKET` socket to perfused. A send there fails with
+/// `EMSGSIZE`, rather than blocking, while perfused has not read enough of the earlier replies
+/// for this one to fit, and `poll(2)` reports the socket writable all the same. Dropping the
+/// reply would hang its caller forever, so retry after a short sleep, as perfused does for its
+/// own writes.
+#[cfg(any(target_os = "netbsd", test))]
+fn retry_on_emsgsize(
+    bufs: &[io::IoSlice<'_>],
+    mut write: impl FnMut() -> nix::Result<usize>,
+) -> nix::Result<usize> {
+    let mut retries: u32 = 0;
+    loop {
+        match write() {
+            Err(Errno::EMSGSIZE) => {
+                retries += 1;
+                if retries == 1000 {
+                    log::warn!(
+                        "FUSE reply of {} bytes still does not fit in perfused's socket buffer \
+                         after {retries} tries; retrying",
+                        bufs.iter().map(|b| b.len()).sum::<usize>()
+                    );
+                }
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            result => return result,
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::io::IoSlice;
+
+    use nix::errno::Errno;
+
+    use super::retry_on_emsgsize;
+
+    #[test]
+    fn emsgsize_is_retried_until_the_reply_fits() {
+        let bufs = [IoSlice::new(b"reply")];
+        let mut calls = 0;
+        let result = retry_on_emsgsize(&bufs, || {
+            calls += 1;
+            if calls <= 3 {
+                Err(Errno::EMSGSIZE)
+            } else {
+                Ok(5)
+            }
+        });
+        assert_eq!(result, Ok(5));
+        assert_eq!(calls, 4);
+    }
+
+    #[test]
+    fn other_errors_are_not_retried() {
+        let bufs = [IoSlice::new(b"reply")];
+        let mut calls = 0;
+        let result = retry_on_emsgsize(&bufs, || {
+            calls += 1;
+            Err(Errno::ENOENT)
+        });
+        assert_eq!(result, Err(Errno::ENOENT));
+        assert_eq!(calls, 1);
     }
 }
