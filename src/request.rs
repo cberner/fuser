@@ -462,6 +462,18 @@ impl<'a> RequestWithSender<'a> {
                     self.reply(),
                 );
             }
+            ll::Operation::SetLk(x) if x.flock() => {
+                filesystem.flock(
+                    self.request_header(),
+                    self.request.nodeid(),
+                    x.file_handle(),
+                    x.lock_owner(),
+                    x.lock().typ,
+                    x.lock().pid,
+                    x.sleep(),
+                    self.reply(),
+                );
+            }
             ll::Operation::SetLk(x) => {
                 filesystem.setlk(
                     self.request_header(),

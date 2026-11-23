@@ -1005,6 +1005,11 @@ pub trait Filesystem: Send + Sync + 'static {
     /// the release. fh will contain the value set by the open method, or will be undefined
     /// if the open method didn't set any value. flags will contain the same flags as for
     /// open.
+    ///
+    /// `lock_owner` is set when the kernel asks for the open file's
+    /// [`flock()`](Self::flock) locks to be released with it, which it does once
+    /// [`InitFlags::FUSE_FLOCK_LOCKS`] has been negotiated. A filesystem implementing
+    /// `flock()` should then release every lock held by `lock_owner`.
     fn release(
         &self,
         _req: &Request,
@@ -1230,6 +1235,9 @@ pub trait Filesystem: Send + Sync + 'static {
     /// used to fill in this field in `getlk()`. Note: if the locking methods are not
     /// implemented, the kernel will still allow file locking to work locally.
     /// Hence these are only interesting for network filesystems and similar.
+    ///
+    /// BSD `flock(2)` locks go to [`flock()`](Self::flock) instead, whose default implementation
+    /// forwards them here.
     fn setlk(
         &self,
         _req: &Request,
@@ -1248,6 +1256,52 @@ pub trait Filesystem: Send + Sync + 'static {
             start: {start}, end: {end}, typ: {typ}, pid: {pid}, sleep: {sleep})"
         );
         reply.error(Errno::ENOSYS);
+    }
+
+    /// Acquire, convert or release a BSD file lock, as `flock(2)` takes.
+    ///
+    /// The kernel sends these only once [`InitFlags::FUSE_FLOCK_LOCKS`] has been negotiated, and
+    /// otherwise handles `flock()` itself, locally. As with [`setlk()`](Self::setlk), this is only
+    /// worth implementing where locks must be seen beyond this machine, as on a network
+    /// filesystem.
+    ///
+    /// A `flock()` lock differs from a POSIX one. It always covers the whole file. It belongs to
+    /// the open file description that `lock_owner` identifies, so it is shared by duplicated and
+    /// inherited descriptors, and is not released when some other descriptor for the file is
+    /// closed. It is released by an `F_UNLCK` here, or when the last descriptor of that open
+    /// file is closed, which arrives as [`release()`](Self::release) with the same `lock_owner`.
+    /// On Linux the two kinds of lock do not conflict with each other.
+    ///
+    /// `typ` is `F_RDLCK` for a shared lock, `F_WRLCK` for an exclusive one, or `F_UNLCK`. A
+    /// lock already held by `lock_owner` is converted to the new type. With `sleep`, wait until
+    /// the lock can be taken; without it (`LOCK_NB`), reply `EWOULDBLOCK` if it cannot be taken
+    /// at once. `pid` is that of the calling process, and 0 for `F_UNLCK`.
+    ///
+    /// The default implementation forwards to [`setlk()`](Self::setlk) as a lock over the
+    /// whole file, which is how these requests reached a filesystem before this method existed.
+    fn flock(
+        &self,
+        req: &Request,
+        ino: INodeNo,
+        fh: FileHandle,
+        lock_owner: LockOwner,
+        typ: i32,
+        pid: u32,
+        sleep: bool,
+        reply: ReplyEmpty,
+    ) {
+        self.setlk(
+            req,
+            ino,
+            fh,
+            lock_owner,
+            0,
+            i64::MAX as u64,
+            typ,
+            pid,
+            sleep,
+            reply,
+        );
     }
 
     /// Map block index within file to block index within device.
@@ -1547,6 +1601,146 @@ mod tests {
         let timeout = u16::from_ne_bytes(reply[16 + 40..16 + 42].try_into().unwrap());
         assert_ne!(flags2 & InitFlags::FUSE_REQUEST_TIMEOUT.pair().1, 0);
         assert_eq!(timeout, 30);
+    }
+
+    /// An `i32` on Linux, but a `c_short` on macOS and the BSDs
+    #[allow(clippy::unnecessary_cast)]
+    const F_WRLCK: i32 = libc::F_WRLCK as i32;
+
+    /// What reached the filesystem: which method, the lock range, type, pid and sleep
+    type LockCall = (&'static str, u64, u64, i32, u32, bool);
+
+    /// Dispatches a SETLKW for the whole file, as `flock(2)` or a POSIX lock, to `fs`
+    fn dispatch_setlk<FS: Filesystem>(fs: FS, flock: bool) -> FS {
+        use std::os::fd::OwnedFd;
+        use std::os::unix::net::UnixStream;
+        use std::sync::Arc;
+
+        #[repr(C, align(8))]
+        struct Aligned([u8; 88]);
+        let mut request = Aligned([0; 88]);
+        request.0[0..4].copy_from_slice(&88u32.to_ne_bytes());
+        request.0[4..8].copy_from_slice(&33u32.to_ne_bytes()); // FUSE_SETLKW
+        request.0[8..16].copy_from_slice(&2u64.to_ne_bytes()); // unique
+        request.0[16..24].copy_from_slice(&2u64.to_ne_bytes()); // nodeid
+        request.0[48..56].copy_from_slice(&9u64.to_ne_bytes()); // owner
+        request.0[64..72].copy_from_slice(&(i64::MAX as u64).to_ne_bytes()); // end
+        request.0[72..76].copy_from_slice(&F_WRLCK.to_ne_bytes()); // typ
+        request.0[76..80].copy_from_slice(&1234u32.to_ne_bytes()); // pid
+        if flock {
+            request.0[80..84].copy_from_slice(&ll::fuse_abi::consts::FUSE_LK_FLOCK.to_ne_bytes());
+        }
+
+        let (_kernel, device) = UnixStream::pair().unwrap();
+        let fs = Arc::new(session::FilesystemHolder { fs: Some(fs) });
+        let se = session::SessionEventLoop {
+            thread_name: "test".to_string(),
+            ch: channel::Channel::new(Arc::new(dev_fuse::DevFuse(std::fs::File::from(
+                OwnedFd::from(device),
+            )))),
+            filesystem: fs.clone(),
+            allowed: SessionACL::All,
+            session_owner: nix::unistd::Uid::from_raw(0),
+            negotiated: InitFlags::FUSE_FLOCK_LOCKS,
+            kernel_capabilities: InitFlags::FUSE_FLOCK_LOCKS,
+            kernel_abi: None,
+        };
+        request::RequestWithSender::new(se.ch.sender(), &request.0, se.negotiated)
+            .unwrap()
+            .dispatch(&se);
+        drop(se);
+        Arc::try_unwrap(fs).ok().unwrap().fs.take().unwrap()
+    }
+
+    #[derive(Default)]
+    struct LockRecorder(std::sync::Mutex<Vec<LockCall>>);
+
+    impl Filesystem for LockRecorder {
+        fn setlk(
+            &self,
+            _: &Request,
+            _: INodeNo,
+            _: FileHandle,
+            _: LockOwner,
+            start: u64,
+            end: u64,
+            typ: i32,
+            pid: u32,
+            sleep: bool,
+            reply: ReplyEmpty,
+        ) {
+            self.0
+                .lock()
+                .unwrap()
+                .push(("setlk", start, end, typ, pid, sleep));
+            reply.ok();
+        }
+    }
+
+    /// Records flock() as well, so that it no longer reaches setlk() through the default
+    #[derive(Default)]
+    struct FlockRecorder(LockRecorder);
+
+    impl Filesystem for FlockRecorder {
+        fn setlk(
+            &self,
+            req: &Request,
+            ino: INodeNo,
+            fh: FileHandle,
+            owner: LockOwner,
+            start: u64,
+            end: u64,
+            typ: i32,
+            pid: u32,
+            sleep: bool,
+            reply: ReplyEmpty,
+        ) {
+            self.0
+                .setlk(req, ino, fh, owner, start, end, typ, pid, sleep, reply);
+        }
+        fn flock(
+            &self,
+            _: &Request,
+            _: INodeNo,
+            _: FileHandle,
+            _: LockOwner,
+            typ: i32,
+            pid: u32,
+            sleep: bool,
+            reply: ReplyEmpty,
+        ) {
+            self.0
+                .0
+                .lock()
+                .unwrap()
+                .push(("flock", 0, 0, typ, pid, sleep));
+            reply.ok();
+        }
+    }
+
+    #[test]
+    fn flock_requests_go_to_flock_and_posix_ones_to_setlk() {
+        let posix = dispatch_setlk(FlockRecorder::default(), false);
+        assert_eq!(
+            *posix.0.0.lock().unwrap(),
+            [("setlk", 0, i64::MAX as u64, F_WRLCK, 1234, true)]
+        );
+        let flock = dispatch_setlk(FlockRecorder::default(), true);
+        assert_eq!(
+            *flock.0.0.lock().unwrap(),
+            [("flock", 0, 0, F_WRLCK, 1234, true)]
+        );
+    }
+
+    /// A filesystem that does not implement flock() gets the request in setlk(), as it did
+    /// before flock() existed
+    #[test]
+    fn default_flock_forwards_to_setlk_over_the_whole_file() {
+        let fs = dispatch_setlk(LockRecorder::default(), true);
+        assert_eq!(
+            *fs.0.lock().unwrap(),
+            [("setlk", 0, i64::MAX as u64, F_WRLCK, 1234, true)]
+        );
     }
 
     #[test]

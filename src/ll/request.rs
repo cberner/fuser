@@ -1275,6 +1275,11 @@ mod op {
         pub(crate) fn sleep(&self) -> bool {
             self.wait
         }
+        /// Whether this is a BSD `flock(2)` lock rather than a POSIX one. The kernel sends
+        /// these only once `FUSE_FLOCK_LOCKS` is negotiated
+        pub(crate) fn flock(&self) -> bool {
+            self.arg.lk_flags & crate::ll::fuse_abi::consts::FUSE_LK_FLOCK != 0
+        }
     }
 
     /// Check file access permissions.
