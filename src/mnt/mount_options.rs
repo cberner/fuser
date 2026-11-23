@@ -342,8 +342,9 @@ pub(crate) fn option_to_flag(option: &MountOption) -> io::Result<nix::mount::Mnt
             io::ErrorKind::Unsupported,
             "NoDev option is not supported on FreeBSD",
         )),
+        // nix only defines MNT_NODEV for Apple targets
         #[cfg(not(target_os = "freebsd"))]
-        MountOption::NoDev => Ok(nix::mount::MntFlags::MNT_NODEV),
+        MountOption::NoDev => Ok(nix::mount::MntFlags::from_bits_retain(libc::MNT_NODEV)),
         MountOption::Suid => Ok(nix::mount::MntFlags::empty()),
         MountOption::NoSuid => Ok(nix::mount::MntFlags::MNT_NOSUID),
         MountOption::RW => Ok(nix::mount::MntFlags::empty()),
