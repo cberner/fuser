@@ -42,6 +42,8 @@ mount | grep fuser
 
 set +e
 cd ${DIR}
+# So that the status is prove's, not that of the find at the head of the pipeline
+set -o pipefail
 # TODO: fix the skipped tests
 find $PJDFS_TMP_DIR/pjdfstest/tests -name '*.t' \
 | grep -v 'symlink/05.t' \
@@ -96,7 +98,7 @@ find $PJDFS_TMP_DIR/pjdfstest/tests -name '*.t' \
 | grep -v 'open/07.t' \
 | grep -v 'open/08.t' \
 | xargs prove -f  | tee /tmp/pjdfs.log
-export PJDFS_EXIT_STATUS=${PIPESTATUS[0]}
+export PJDFS_EXIT_STATUS=$?
 echo "Total failed:"
 cat /tmp/pjdfs.log | egrep -o 'Failed: [0-9]+' | egrep -o '[0-9]+' | paste -s -d+ - | bc
 
