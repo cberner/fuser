@@ -26,6 +26,8 @@ use log::warn;
 use nix::unistd::Uid;
 use nix::unistd::geteuid;
 use parking_lot::Mutex;
+use parking_lot::RwLock;
+use parking_lot::RwLockReadGuard;
 
 use crate::Errno;
 use crate::Filesystem;
@@ -110,16 +112,39 @@ impl SessionACL {
     }
 }
 
-/// Calls `destroy` on drop.
+/// Holds the filesystem and calls its `destroy` exactly once: on `FUSE_DESTROY`, or else
+/// when the session ends or is dropped. No other method runs during or after it: every
+/// dispatch holds `destroyed` for reading, and `destroy` holds it for writing.
 #[derive(Debug)]
 pub(crate) struct FilesystemHolder<FS: Filesystem> {
     pub(crate) fs: Option<FS>,
+    destroyed: RwLock<bool>,
 }
 
 impl<FS: Filesystem> FilesystemHolder<FS> {
-    fn destroy(&mut self) {
-        if let Some(mut fs) = self.fs.take() {
-            fs.destroy();
+    pub(crate) fn new(fs: FS) -> Self {
+        Self {
+            fs: Some(fs),
+            destroyed: RwLock::new(false),
+        }
+    }
+
+    /// Held while a request is dispatched, which holds off `destroy` until it returns.
+    /// None once `destroy` has been called, when requests are no longer dispatched.
+    pub(crate) fn begin_dispatch(&self) -> Option<RwLockReadGuard<'_, bool>> {
+        let destroyed = self.destroyed.read();
+        (!*destroyed).then_some(destroyed)
+    }
+
+    /// Waits for requests being dispatched to return, then calls `destroy` unless it
+    /// already has been
+    pub(crate) fn destroy(&self) {
+        let mut destroyed = self.destroyed.write();
+        if !*destroyed {
+            *destroyed = true;
+            if let Some(fs) = &self.fs {
+                fs.destroy();
+            }
         }
     }
 }
@@ -205,9 +230,7 @@ impl<FS: Filesystem> Session<FS> {
         let ch = Channel::new(file);
 
         let mut session = Session {
-            filesystem: FilesystemHolder {
-                fs: Some(filesystem),
-            },
+            filesystem: FilesystemHolder::new(filesystem),
             ch,
             mount: UmountOnDrop {
                 mount: Arc::new(Mutex::new(Some(mount))),
@@ -235,9 +258,7 @@ impl<FS: Filesystem> Session<FS> {
     ) -> io::Result<Self> {
         let ch = Channel::new(Arc::new(DevFuse(File::from(fd))));
         let mut session = Session {
-            filesystem: FilesystemHolder {
-                fs: Some(filesystem),
-            },
+            filesystem: FilesystemHolder::new(filesystem),
             ch,
             mount: UmountOnDrop {
                 mount: Arc::new(Mutex::new(None)),
@@ -320,7 +341,7 @@ impl<FS: Filesystem> Session<FS> {
             return Err(io::Error::other("n_threads"));
         };
 
-        let mut filesystem = Arc::new(filesystem);
+        let filesystem = Arc::new(filesystem);
 
         let mut channels = Vec::with_capacity(n_threads);
 
@@ -377,12 +398,8 @@ impl<FS: Filesystem> Session<FS> {
             }
         }
 
-        let Some(filesystem) = Arc::get_mut(&mut filesystem) else {
-            return Err(io::Error::other(
-                "BUG: must have one refcount for filesystem",
-            ));
-        };
-
+        // Unless FUSE_DESTROY already did. The filesystem itself is dropped with the last
+        // reference to it, normally here
         filesystem.destroy();
 
         reply
@@ -608,7 +625,14 @@ impl<FS: Filesystem> SessionEventLoop<FS> {
                         // Dispatch request
                         Some(req) => {
                             if let Ok(Operation::Destroy(_)) = req.request.operation() {
-                                req.reply::<ReplyEmpty>().ok();
+                                // As libfuse does, finish destroy() before replying: the
+                                // kernel completes umount once it has the reply, and on a
+                                // fuseblk mount releases the block device with it. The reply
+                                // exists first, so that a panic in destroy() still sends EIO
+                                // rather than leaving umount waiting
+                                let reply: ReplyEmpty = req.reply();
+                                self.filesystem.destroy();
+                                reply.ok();
                                 return Ok(());
                             } else {
                                 req.dispatch(self)
@@ -1644,7 +1668,7 @@ mod test {
             destroyed: Arc<std::sync::atomic::AtomicBool>,
         }
         impl Filesystem for DestroyFs {
-            fn destroy(&mut self) {
+            fn destroy(&self) {
                 // Give drop a chance to return early: without the join, drop
                 // consistently wins this race and the assertion below fails
                 std::thread::sleep(std::time::Duration::from_millis(200));
@@ -1784,7 +1808,7 @@ mod test {
             );
         }
 
-        fn destroy(&mut self) {
+        fn destroy(&self) {
             // Whatever is still held is dropped here, on the session's own thread
             drop(self.session.lock().take());
             self.results.send(Ok(())).unwrap();
@@ -1973,7 +1997,7 @@ mod test {
                 );
             }
 
-            fn destroy(&mut self) {
+            fn destroy(&self) {
                 let _ = self.destroyed.send(());
             }
         }
@@ -2032,5 +2056,246 @@ mod test {
         }
         let path = std::path::PathBuf::from(format!("/sys/fs/fuse/connections/{}/abort", device?));
         path.exists().then_some(path)
+    }
+
+    /// As in libfuse, `destroy` finishes before FUSE_DESTROY is answered, since the kernel
+    /// completes umount, and on fuseblk releases the device, once it has the reply. It runs
+    /// once: ending the session afterwards does not call it again
+    #[test]
+    fn destroy_runs_before_the_destroy_reply_and_only_once() {
+        use std::io::Read;
+        use std::os::unix::net::UnixStream;
+
+        struct ReplyCheckingFs {
+            kernel: UnixStream,
+            calls: AtomicU64,
+        }
+        impl Filesystem for ReplyCheckingFs {
+            fn destroy(&self) {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                let mut byte = [0u8; 1];
+                assert_eq!(
+                    (&self.kernel).read(&mut byte).unwrap_err().kind(),
+                    io::ErrorKind::WouldBlock,
+                    "FUSE_DESTROY was answered before destroy() ran"
+                );
+            }
+        }
+
+        let (kernel, device) = UnixStream::pair().unwrap();
+        kernel.set_nonblocking(true).unwrap();
+        let se = SessionEventLoop {
+            thread_name: "test".to_string(),
+            ch: Channel::new(Arc::new(DevFuse(File::from(OwnedFd::from(device))))),
+            filesystem: Arc::new(FilesystemHolder::new(ReplyCheckingFs {
+                kernel: kernel.try_clone().unwrap(),
+                calls: AtomicU64::new(0),
+            })),
+            allowed: SessionACL::All,
+            session_owner: geteuid(),
+            negotiated: InitFlags::empty(),
+            kernel_capabilities: InitFlags::empty(),
+            kernel_abi: None,
+        };
+
+        let unique: u64 = 4;
+        let mut destroy = [0u8; 40];
+        destroy[0..4].copy_from_slice(&40u32.to_ne_bytes());
+        destroy[4..8].copy_from_slice(&(abi::fuse_opcode::FUSE_DESTROY as u32).to_ne_bytes());
+        destroy[8..16].copy_from_slice(&unique.to_ne_bytes());
+        (&kernel).write_all(&destroy).unwrap();
+        se.event_loop().unwrap();
+
+        let mut reply = [0u8; 16];
+        kernel.set_nonblocking(false).unwrap();
+        (&kernel).read_exact(&mut reply).unwrap();
+        let error = i32::from_ne_bytes(reply[4..8].try_into().unwrap());
+        let reply_unique = u64::from_ne_bytes(reply[8..16].try_into().unwrap());
+        assert_eq!((error, reply_unique), (0, unique));
+
+        // What run() does once the event loops have ended
+        se.filesystem.destroy();
+        let calls = &se.filesystem.fs.as_ref().unwrap().calls;
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    /// A panic in `destroy` still answers FUSE_DESTROY, with EIO: otherwise umount, and the
+    /// other workers waiting for it to finish, would wait forever
+    #[test]
+    fn destroy_reply_is_sent_when_destroy_panics() {
+        use std::io::Read;
+        use std::os::unix::net::UnixStream;
+
+        struct PanickingFs;
+        impl Filesystem for PanickingFs {
+            fn destroy(&self) {
+                panic!("destroy failed");
+            }
+        }
+
+        let (kernel, device) = UnixStream::pair().unwrap();
+        // Without a reply this would wait forever, as umount would
+        kernel
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
+        let se = SessionEventLoop {
+            thread_name: "test".to_string(),
+            ch: Channel::new(Arc::new(DevFuse(File::from(OwnedFd::from(device))))),
+            filesystem: Arc::new(FilesystemHolder::new(PanickingFs)),
+            allowed: SessionACL::All,
+            session_owner: geteuid(),
+            negotiated: InitFlags::empty(),
+            kernel_capabilities: InitFlags::empty(),
+            kernel_abi: None,
+        };
+
+        let unique: u64 = 4;
+        let mut destroy = [0u8; 40];
+        destroy[0..4].copy_from_slice(&40u32.to_ne_bytes());
+        destroy[4..8].copy_from_slice(&(abi::fuse_opcode::FUSE_DESTROY as u32).to_ne_bytes());
+        destroy[8..16].copy_from_slice(&unique.to_ne_bytes());
+        (&kernel).write_all(&destroy).unwrap();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| se.event_loop()));
+        assert!(result.is_err(), "destroy() should have panicked");
+
+        let mut reply = [0u8; 16];
+        (&kernel).read_exact(&mut reply).unwrap();
+        let error = i32::from_ne_bytes(reply[4..8].try_into().unwrap());
+        let reply_unique = u64::from_ne_bytes(reply[8..16].try_into().unwrap());
+        assert_eq!((error, reply_unique), (-libc::EIO, unique));
+    }
+
+    #[repr(C, align(8))]
+    struct AlignedRequest([u8; 48]);
+
+    /// A request with no body beyond `extra`, as the kernel would send it
+    fn raw_request(opcode: abi::fuse_opcode, unique: u64, extra: &[u8]) -> AlignedRequest {
+        let len = 40 + extra.len();
+        let mut data = AlignedRequest([0; 48]);
+        data.0[0..4].copy_from_slice(&(len as u32).to_ne_bytes());
+        data.0[4..8].copy_from_slice(&(opcode as u32).to_ne_bytes());
+        data.0[8..16].copy_from_slice(&unique.to_ne_bytes());
+        data.0[16..24].copy_from_slice(&1u64.to_ne_bytes());
+        data.0[40..len].copy_from_slice(extra);
+        data
+    }
+
+    /// The methods an `OrderFs` ran, in order
+    type Events = Arc<std::sync::Mutex<Vec<&'static str>>>;
+
+    /// Records which methods ran, in order. `statfs` waits for `release_statfs` once it has
+    /// recorded that it started
+    struct OrderFs {
+        events: Events,
+        release_statfs: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+    }
+    impl Filesystem for OrderFs {
+        fn statfs(&self, _req: &Request, _ino: crate::INodeNo, reply: crate::ReplyStatfs) {
+            self.events.lock().unwrap().push("statfs start");
+            let _ = self
+                .release_statfs
+                .lock()
+                .unwrap()
+                .recv_timeout(std::time::Duration::from_secs(10));
+            self.events.lock().unwrap().push("statfs end");
+            reply.error(Errno::ENOSYS);
+        }
+        fn forget(&self, _req: &Request, _ino: crate::INodeNo, _nlookup: u64) {
+            self.events.lock().unwrap().push("forget");
+        }
+        fn destroy(&self) {
+            self.events.lock().unwrap().push("destroy");
+        }
+    }
+
+    fn order_fs_session() -> (
+        Arc<SessionEventLoop<OrderFs>>,
+        std::os::unix::net::UnixStream,
+        Events,
+        std::sync::mpsc::Sender<()>,
+    ) {
+        let (kernel, device) = std::os::unix::net::UnixStream::pair().unwrap();
+        kernel
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
+        let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (release, release_statfs) = std::sync::mpsc::channel();
+        let se = Arc::new(SessionEventLoop {
+            thread_name: "test".to_string(),
+            ch: Channel::new(Arc::new(DevFuse(File::from(OwnedFd::from(device))))),
+            filesystem: Arc::new(FilesystemHolder::new(OrderFs {
+                events: events.clone(),
+                release_statfs: std::sync::Mutex::new(release_statfs),
+            })),
+            allowed: SessionACL::All,
+            session_owner: geteuid(),
+            negotiated: InitFlags::empty(),
+            kernel_capabilities: InitFlags::empty(),
+            kernel_abi: None,
+        });
+        (se, kernel, events, release)
+    }
+
+    /// What the kernel still sends after destroy() has been called is not dispatched:
+    /// requests are answered EIO, and forgets, which take no reply, are dropped
+    #[test]
+    fn requests_after_destroy_are_not_dispatched() {
+        use std::io::Read;
+
+        let (se, kernel, events, _release) = order_fs_session();
+        se.filesystem.destroy();
+
+        let forget = raw_request(abi::fuse_opcode::FUSE_FORGET, 6, &1u64.to_ne_bytes());
+        RequestWithSender::new(se.ch.sender(), &forget.0, se.negotiated)
+            .unwrap()
+            .dispatch(&se);
+        let statfs = raw_request(abi::fuse_opcode::FUSE_STATFS, 8, &[]);
+        RequestWithSender::new(se.ch.sender(), &statfs.0[..40], se.negotiated)
+            .unwrap()
+            .dispatch(&se);
+
+        // The only reply is the statfs one: the forget got none
+        let mut reply = [0u8; 16];
+        (&kernel).read_exact(&mut reply).unwrap();
+        let error = i32::from_ne_bytes(reply[4..8].try_into().unwrap());
+        let reply_unique = u64::from_ne_bytes(reply[8..16].try_into().unwrap());
+        assert_eq!((error, reply_unique), (-libc::EIO, 8));
+        assert_eq!(*events.lock().unwrap(), vec!["destroy"]);
+    }
+
+    /// destroy() waits for a request another worker is still handling to return
+    #[test]
+    fn destroy_waits_for_requests_being_dispatched() {
+        let (se, _kernel, events, release) = order_fs_session();
+        let dispatcher = {
+            let se = se.clone();
+            std::thread::spawn(move || {
+                let statfs = raw_request(abi::fuse_opcode::FUSE_STATFS, 4, &[]);
+                RequestWithSender::new(se.ch.sender(), &statfs.0[..40], se.negotiated)
+                    .unwrap()
+                    .dispatch(&se);
+            })
+        };
+        while events.lock().unwrap().is_empty() {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let destroyer = {
+            let se = se.clone();
+            std::thread::spawn(move || se.filesystem.destroy())
+        };
+
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert_eq!(
+            *events.lock().unwrap(),
+            vec!["statfs start"],
+            "destroy() ran while statfs was still being handled"
+        );
+        release.send(()).unwrap();
+        dispatcher.join().unwrap();
+        destroyer.join().unwrap();
+        assert_eq!(
+            *events.lock().unwrap(),
+            vec!["statfs start", "statfs end", "destroy"]
+        );
     }
 }

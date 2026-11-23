@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+Breaking changes:
+* `Filesystem::destroy()` takes `&self` and runs before `FUSE_DESTROY` is answered, as in libfuse.
+  On a `fuseblk` mount, `umount` and the release of the block device now wait for it, where they
+  previously completed first. Elsewhere it still runs when the session ends. It waits for requests
+  being handled to return, and requests that arrive after it are answered with `EIO` instead of
+  being dispatched. Cleanup that needs `&mut self` belongs in `Drop`
+
 New features:
 * Add `ReplyCreate::created_with_ttls()` and `ReplyDirectoryPlus::add_with_ttls()` to reply with
   distinct entry and attribute TTLs, as `ReplyEntry::entry_with_ttls()` does
