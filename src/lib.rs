@@ -903,6 +903,11 @@ pub trait Filesystem: Send + Sync + 'static {
     /// Honoring it is necessary but not sufficient: that capability also makes clearing the
     /// `security.capability` xattr on every write, chown and truncate the filesystem's job,
     /// and no argument reports that. See [`InitFlags::FUSE_HANDLE_KILLPRIV_V2`].
+    ///
+    /// Replying `ENOSYS` tells the kernel that opens need no answer: it stops sending them
+    /// and treats every later open as successful. Opens then reach neither the filesystem
+    /// nor the session's [`SessionACL`] check, so under [`SessionACL::RootAndOwner`] any user
+    /// can read file data the kernel has cached.
     fn open(
         &self,
         _req: &Request,
@@ -1045,6 +1050,9 @@ pub trait Filesystem: Send + Sync + 'static {
     /// anything in fh, though that makes it impossible to implement standard conforming
     /// directory stream operations in case the contents of the directory can change
     /// between opendir and releasedir.
+    ///
+    /// Replying `ENOSYS` makes the kernel stop sending opendir, as with
+    /// [`open()`](Self::open), so cached directory listings can then be read by any user.
     fn opendir(&self, _req: &Request, _ino: INodeNo, _flags: OpenFlags, reply: ReplyOpen) {
         reply.opened(FileHandle(0), FopenFlags::empty());
     }

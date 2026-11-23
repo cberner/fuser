@@ -23,6 +23,9 @@ Bug fixes:
   resolved together, such as `libc` 0.2.51 with `nix`
 * Fix building for Android without the `libfuse` feature, which now uses the pure-Rust backend
 * Say that `MountOption::AutoUnmount` is what needs a FUSE mount helper when none is found
+* Document that `SessionACL::RootAndOwner` is enforced in userspace, so anything the kernel has
+  cached is visible to every user, as is all file data once `open()` replies `ENOSYS`. Use
+  `MountOption::DefaultPermissions` to have the kernel check every access
 
 ## 0.19.0 - 2026-11-20
 

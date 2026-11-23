@@ -78,6 +78,19 @@ pub enum SessionACL {
     /// Allow requests from any user. Corresponds to the `allow_other` mount option.
     All,
     /// Allow requests from root. Corresponds to the `allow_root` mount option.
+    ///
+    /// The kernel has no such option, so this mounts with `allow_other` and fuser refuses
+    /// requests from other users itself, as libfuse does. Requests on a handle that is
+    /// already open (reads, writes, releases and the like) are let through whoever sends
+    /// them, since the open was checked.
+    ///
+    /// Only requests reach fuser, though, and the kernel answers some from its caches, which
+    /// every user can then see: names and attributes within their TTLs, and file data and
+    /// directory listings once opened. If [`open()`](crate::Filesystem::open) or
+    /// [`opendir()`](crate::Filesystem::opendir) replies `ENOSYS`, the kernel stops sending
+    /// opens, so those are never checked either. To keep other users out, use
+    /// [`MountOption::DefaultPermissions`](crate::MountOption::DefaultPermissions) with
+    /// accurate permissions, so that the kernel checks every access itself.
     RootAndOwner,
     /// Allow requests from the owning UID. This is FUSE's default mode of operation.
     #[default]
