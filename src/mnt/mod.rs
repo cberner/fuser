@@ -116,6 +116,71 @@ use std::sync::Arc;
 
 use crate::SessionACL;
 
+/// Refuses `MountOption::AutoUnmount` where the mount helper would silently leave the mount
+/// behind.
+///
+/// The helper's auto_unmount watcher runs as root and first checks that the connection is
+/// gone. Without `allow_other` the kernel refuses that check unless root owns the mount, so
+/// before fusermount3 3.15, which makes it as the mount's owner, the watcher leaves the mount
+/// in place. libfuse 2's fusermount never got that change.
+pub(crate) fn check_auto_unmount(options: &[MountOption], acl: SessionACL) -> io::Result<()> {
+    if !options.contains(&MountOption::AutoUnmount)
+        || acl != SessionACL::Owner
+        || nix::unistd::getuid().is_root()
+    {
+        return Ok(());
+    }
+    #[cfg(fuser_mount_impl = "pure-rust")]
+    let helper = match fuse_pure::detect_fusermount_bin() {
+        Ok(helper) => helper,
+        // Mounting reports the missing helper
+        Err(_) => return Ok(()),
+    };
+    // libfuse runs the helper in the directory it was built with (FUSERMOUNT_DIR, the distro's
+    // bindir) before searching PATH
+    #[cfg(fuser_mount_impl = "libfuse3")]
+    let helper = ["/usr/bin/fusermount3", "/bin/fusermount3"]
+        .into_iter()
+        .find(|path| Path::new(path).exists())
+        .unwrap_or("fusermount3")
+        .to_string();
+    #[cfg(fuser_mount_impl = "libfuse2")]
+    let helper = "fusermount".to_string();
+    #[cfg(fuser_mount_impl = "macos-no-mount")]
+    let helper = "fusermount".to_string();
+
+    let version = std::process::Command::new(&helper)
+        .arg("-V")
+        .output()
+        .ok()
+        .and_then(|out| fusermount_version(&String::from_utf8_lossy(&out.stdout)));
+    match version {
+        Some(version) if version >= (3, 15) => Ok(()),
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "MountOption::AutoUnmount with SessionACL::Owner needs fusermount3 3.15 or later \
+                 when not running as root, and {helper} is {}. Older helpers leave the mount in \
+                 place. Use another SessionACL, which mounts with allow_other",
+                match version {
+                    Some((major, minor)) => format!("version {major}.{minor}"),
+                    None => "of an unknown version".to_string(),
+                }
+            ),
+        )),
+    }
+}
+
+/// Parses the major and minor version from `fusermount -V` output, such as
+/// "fusermount3 version: 3.14.0"
+fn fusermount_version(output: &str) -> Option<(u32, u32)> {
+    let version = output.split("version:").nth(1)?.trim();
+    let mut parts = version.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.trim_end().parse().ok()?;
+    Some((major, minor))
+}
+
 #[derive(Debug)]
 enum MountImpl {
     #[cfg(fuser_mount_impl = "pure-rust")]
@@ -432,6 +497,32 @@ mod test {
     use std::ffi::CStr;
 
     use crate::mnt::*;
+
+    #[test]
+    fn fusermount_version_is_parsed() {
+        assert_eq!(
+            fusermount_version("fusermount3 version: 3.14.0\n"),
+            Some((3, 14))
+        );
+        assert_eq!(
+            fusermount_version("fusermount3 version: 3.17.4\n"),
+            Some((3, 17))
+        );
+        assert_eq!(
+            fusermount_version("fusermount version: 2.9.9\n"),
+            Some((2, 9))
+        );
+        assert_eq!(fusermount_version("usage: mount_fusefs ..."), None);
+        assert_eq!(fusermount_version(""), None);
+    }
+
+    #[test]
+    fn auto_unmount_is_only_checked_without_allow_other() {
+        let options = [MountOption::AutoUnmount];
+        assert!(check_auto_unmount(&options, SessionACL::All).is_ok());
+        assert!(check_auto_unmount(&options, SessionACL::RootAndOwner).is_ok());
+        assert!(check_auto_unmount(&[], SessionACL::Owner).is_ok());
+    }
 
     #[test]
     fn fuse_args() {

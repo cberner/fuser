@@ -43,11 +43,13 @@ pub enum MountOption {
     /* Parameterless options */
     /// Automatically unmount when the mounting process exits
     ///
-    /// `fusermount` handles this only together with `allow_other` or `allow_root`, so
-    /// [`Config::acl`] must be [`SessionACL::All`] or [`SessionACL::RootAndOwner`], which both
-    /// mount with `allow_other`. With the default [`SessionACL::Owner`] mounting fails with
-    /// `InvalidInput`. A user other than root also needs `user_allow_other` in
-    /// `/etc/fuse.conf`, or `fusermount` refuses the mount.
+    /// This needs a FUSE mount helper (`fusermount3`), which unmounts once the process exits.
+    /// With the default [`SessionACL::Owner`], which mounts without `allow_other`, only
+    /// fusermount3 3.15 or later does so for a user other than root, so mounting fails with
+    /// `InvalidInput` if the helper is older. [`SessionACL::All`] and
+    /// [`SessionACL::RootAndOwner`] mount with `allow_other`, which works with any helper, but a
+    /// user other than root then needs `user_allow_other` in `/etc/fuse.conf`, or the helper
+    /// refuses the mount.
     AutoUnmount,
     /// Enable permission checking in the kernel
     DefaultPermissions,

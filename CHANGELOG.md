@@ -30,6 +30,9 @@ Bug fixes:
   `Errno::EMULTIHOP` are not defined, since it has no such errors
 * Fix a request hanging forever on NetBSD when its reply did not yet fit in perfused's socket
   buffer. The reply is now retried instead of dropped
+* Allow `MountOption::AutoUnmount` with `SessionACL::Owner` when running as root, or with
+  fusermount3 3.15 or later. It is still refused with older helpers for other users, since they
+  leave the mount in place
 
 ## 0.19.0 - 2026-11-20
 
