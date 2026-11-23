@@ -17,8 +17,11 @@ pub(crate) async fn run_macos_mount_tests() -> anyhow::Result<()> {
     let hello_exe = cargo_build_example("hello", &[]).await?;
 
     eprintln!("Starting hello filesystem...");
+    // e.g. "backend=fskit" to test macFUSE's FSKit backend
+    let extra_option = std::env::var("FUSER_MOUNT_OPTION").ok();
     let mut fuse_process = Command::new(&hello_exe)
-        .args([&mount_path])
+        .args(extra_option.iter().flat_map(|o| ["-o", o.as_str()]))
+        .arg(mount_path)
         .kill_on_drop(true)
         .spawn()
         .context("Failed to start hello example")?;

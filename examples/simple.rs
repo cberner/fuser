@@ -110,6 +110,10 @@ struct Args {
     #[clap(long, default_value_t = 1)]
     n_threads: usize,
 
+    /// Extra mount option passed through verbatim, e.g. `-o backend=fskit` for macFUSE
+    #[clap(short = 'o', long = "option")]
+    options: Vec<String>,
+
     /// Sets the level of verbosity
     #[clap(short, action = clap::ArgAction::Count)]
     v: u8,
@@ -3359,6 +3363,8 @@ fn main() {
     if args.auto_unmount {
         cfg.mount_options.push(MountOption::AutoUnmount);
     }
+    cfg.mount_options
+        .extend(args.options.iter().cloned().map(MountOption::CUSTOM));
     if let Ok(enabled) = fuse_allow_other_enabled() {
         if enabled {
             cfg.acl = SessionACL::All;

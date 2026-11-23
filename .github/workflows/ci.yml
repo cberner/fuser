@@ -155,6 +155,16 @@ jobs:
       - name: Lint
         run: INTERACTIVE="" make pre
 
+      # The kernel extension cannot be loaded on GitHub's runners, so mount through FSKit
+      - name: Enable macFUSE FSKit extensions
+        run: ./tests/macos_enable_fskit.sh
+
+      - name: Mount tests (FSKit)
+        run: FUSER_MOUNT_OPTION=backend=fskit cargo run -p fuser-tests -- macos-mount
+
+      - name: pjdfs tests (FSKit)
+        run: FUSER_MOUNT_OPTION=backend=fskit ./tests/macos_pjdfs.sh
+
   freebsd-ci:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
