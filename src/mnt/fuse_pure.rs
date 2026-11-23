@@ -158,7 +158,7 @@ fn fuse_unmount_pure(mountpoint: &CStr) -> io::Result<()> {
     crate::mnt::fusermount_unmount(&detect_fusermount_bin()?, mountpoint)
 }
 
-fn detect_fusermount_bin() -> io::Result<String> {
+pub(crate) fn detect_fusermount_bin() -> io::Result<String> {
     if let Some(fusermount) = env::var_os("FUSERMOUNT_PATH") {
         return Ok(fusermount
             .to_str()

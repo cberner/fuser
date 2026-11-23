@@ -196,18 +196,10 @@ impl<FS: Filesystem> Session<FS> {
     ) -> io::Result<Session<FS>> {
         check_option_conflicts(options)?;
 
+        crate::mnt::check_auto_unmount(&options.mount_options, options.acl)?;
+
         let mountpoint = mountpoint.as_ref();
         info!("Mounting {}", mountpoint.display());
-        // fusermount needs allow_root or allow_other to handle the auto_unmount option, and only
-        // the Owner ACL mounts without allow_other
-        if options.mount_options.contains(&MountOption::AutoUnmount)
-            && options.acl == SessionACL::Owner
-        {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("auto_unmount requires acl != Owner, got: {:?}", options.acl),
-            ));
-        }
         let (file, mount) = Mount::new(mountpoint, &options.mount_options, options.acl)?;
 
         let ch = Channel::new(file);
