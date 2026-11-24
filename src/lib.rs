@@ -1588,8 +1588,11 @@ mod tests {
         assert!(!config.requested.contains(InitFlags::FUSE_REQUEST_TIMEOUT));
     }
 
-    /// The INIT reply carries the timeout, and the capability that tells the kernel to read it
+    /// The INIT reply carries the timeout, and the capability that tells the kernel to read it.
+    /// Not on macOS, where fuser speaks protocol 7.19, whose `fuse_init_out` has neither
+    /// `flags2` nor `request_timeout`
     #[test]
+    #[cfg(not(target_os = "macos"))]
     fn init_reply_carries_request_timeout() {
         use crate::ll::reply::Response;
 
