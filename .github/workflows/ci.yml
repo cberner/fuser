@@ -155,6 +155,10 @@ jobs:
       - name: Lint
         run: INTERACTIVE="" make pre
 
+      # The mount tests need macFUSE's kernel extension, which cannot be loaded here
+      - name: Unit tests
+        run: cargo test --lib -- --skip mnt::test
+
       # The kernel extension cannot be loaded on GitHub's runners, so mount through FSKit
       - name: Enable macFUSE FSKit extensions
         run: ./tests/macos_enable_fskit.sh

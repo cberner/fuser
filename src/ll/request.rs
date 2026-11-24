@@ -650,6 +650,9 @@ mod op {
     pub(crate) struct Rename<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_rename_in,
+        /// The `renamex_np` flags, carried only by macFUSE's extended layout
+        #[cfg(target_os = "macos")]
+        flags: u32,
         name: &'a Path,
         newname: &'a Path,
     }
@@ -671,7 +674,7 @@ mod op {
         /// reply with an EINVAL error.
         #[cfg(target_os = "macos")]
         pub(crate) fn flags(&self) -> crate::RenameFlags {
-            crate::RenameFlags::from_bits_retain(self.arg.flags)
+            crate::RenameFlags::from_bits_retain(self.flags)
         }
     }
 
@@ -1035,6 +1038,21 @@ mod op {
         }
     }
 
+    /// How much of `fuse_init_out` to send. The layout follows the protocol version both sides
+    /// speak, the lower of the two minors, not the peer's alone: a peer newer than fuser, such
+    /// as FUSE-T offering 7.23 to fuser's 7.19 on macOS, picks its protocol from the size of
+    /// the reply and would otherwise expect layouts fuser does not send.
+    pub(crate) fn init_out_size(peer_minor: u32, our_minor: u32) -> usize {
+        let minor = peer_minor.min(our_minor);
+        if minor < 5 {
+            FUSE_COMPAT_INIT_OUT_SIZE
+        } else if minor < 23 {
+            FUSE_COMPAT_22_INIT_OUT_SIZE
+        } else {
+            size_of::<fuse_init_out>()
+        }
+    }
+
     #[derive(Debug)]
     pub(crate) struct Init<'a> {
         #[expect(dead_code)]
@@ -1090,14 +1108,9 @@ mod op {
             }
 
             let init = init.as_bytes();
-            let init = if self.arg.minor < 5 {
-                &init[..FUSE_COMPAT_INIT_OUT_SIZE]
-            } else if self.arg.minor < 23 {
-                &init[..FUSE_COMPAT_22_INIT_OUT_SIZE]
-            } else {
-                init
-            };
-            ResponseData::new_data(init)
+            ResponseData::new_data(
+                &init[..init_out_size(self.arg.minor, FUSE_KERNEL_MINOR_VERSION)],
+            )
         }
 
         /// Reply with only our version, used when kernel major version > our major version.
@@ -1821,6 +1834,16 @@ mod op {
             fuse_opcode::FUSE_RENAME => Operation::Rename(Rename {
                 header,
                 arg: data.fetch()?,
+                // macFUSE adds the renamex_np flags only when it offers FUSE_RENAME_SWAP, which
+                // fuser always requests: as in its libfuse, the layout follows that capability.
+                // FUSE-T, which does not offer it, sends the plain layout
+                #[cfg(target_os = "macos")]
+                flags: if negotiated.contains(InitFlags::FUSE_RENAME_SWAP) {
+                    let ext: &fuse_rename_in_macos_ext = data.fetch()?;
+                    ext.flags
+                } else {
+                    0
+                },
                 name: data.fetch_str()?.as_ref(),
                 newname: data.fetch_str()?.as_ref(),
             }),
@@ -2475,9 +2498,33 @@ mod tests {
         0x66, 0x6f, 0x6f, 0x2e, 0x74, 0x78, 0x74, 0x00, // name
     ]);
 
-    // macFUSE sends the extended fuse_rename_in layout, which carries the renamex_np flags
+    #[cfg(target_endian = "big")]
+    const RENAME_REQUEST: AlignedData<[u8; 64]> = AlignedData([
+        0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x0c, // len, opcode
+        0xde, 0xad, 0xbe, 0xef, 0xba, 0xad, 0xd0, 0x0d, // unique
+        0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, // nodeid
+        0xc0, 0x01, 0xd0, 0x0d, 0xc0, 0x01, 0xca, 0xfe, // uid, gid
+        0xc0, 0xde, 0xba, 0x5e, 0x00, 0x00, 0x00, 0x00, // pid, padding
+        0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00, // newdir
+        0x6f, 0x6c, 0x64, 0x2e, 0x74, 0x78, 0x74, 0x00, // name
+        0x6e, 0x65, 0x77, 0x2e, 0x74, 0x78, 0x74, 0x00, // newname
+    ]);
+
+    #[cfg(target_endian = "little")]
+    const RENAME_REQUEST: AlignedData<[u8; 64]> = AlignedData([
+        0x40, 0x00, 0x00, 0x00, 0x0c, 0x00, 0x00, 0x00, // len, opcode
+        0x0d, 0xf0, 0xad, 0xba, 0xef, 0xbe, 0xad, 0xde, // unique
+        0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, // nodeid
+        0x0d, 0xd0, 0x01, 0xc0, 0xfe, 0xca, 0x01, 0xc0, // uid, gid
+        0x5e, 0xba, 0xde, 0xc0, 0x00, 0x00, 0x00, 0x00, // pid, padding
+        0x00, 0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99, // newdir
+        0x6f, 0x6c, 0x64, 0x2e, 0x74, 0x78, 0x74, 0x00, // name
+        0x6e, 0x65, 0x77, 0x2e, 0x74, 0x78, 0x74, 0x00, // newname
+    ]);
+
+    // macFUSE's extended fuse_rename_in layout, which carries the renamex_np flags
     #[cfg(all(target_endian = "big", target_os = "macos"))]
-    const RENAME_REQUEST: AlignedData<[u8; 72]> = AlignedData([
+    const RENAME_EXT_REQUEST: AlignedData<[u8; 72]> = AlignedData([
         0x00, 0x00, 0x00, 0x48, 0x00, 0x00, 0x00, 0x0c, // len, opcode
         0xde, 0xad, 0xbe, 0xef, 0xba, 0xad, 0xd0, 0x0d, // unique
         0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, // nodeid
@@ -2490,7 +2537,7 @@ mod tests {
     ]);
 
     #[cfg(all(target_endian = "little", target_os = "macos"))]
-    const RENAME_REQUEST: AlignedData<[u8; 72]> = AlignedData([
+    const RENAME_EXT_REQUEST: AlignedData<[u8; 72]> = AlignedData([
         0x48, 0x00, 0x00, 0x00, 0x0c, 0x00, 0x00, 0x00, // len, opcode
         0x0d, 0xf0, 0xad, 0xba, 0xef, 0xbe, 0xad, 0xde, // unique
         0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, // nodeid
@@ -2498,30 +2545,6 @@ mod tests {
         0x5e, 0xba, 0xde, 0xc0, 0x00, 0x00, 0x00, 0x00, // pid, padding
         0x00, 0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99, // newdir
         0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // flags (RENAME_SWAP), padding
-        0x6f, 0x6c, 0x64, 0x2e, 0x74, 0x78, 0x74, 0x00, // name
-        0x6e, 0x65, 0x77, 0x2e, 0x74, 0x78, 0x74, 0x00, // newname
-    ]);
-
-    #[cfg(all(target_endian = "big", not(target_os = "macos")))]
-    const RENAME_REQUEST: AlignedData<[u8; 64]> = AlignedData([
-        0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x0c, // len, opcode
-        0xde, 0xad, 0xbe, 0xef, 0xba, 0xad, 0xd0, 0x0d, // unique
-        0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, // nodeid
-        0xc0, 0x01, 0xd0, 0x0d, 0xc0, 0x01, 0xca, 0xfe, // uid, gid
-        0xc0, 0xde, 0xba, 0x5e, 0x00, 0x00, 0x00, 0x00, // pid, padding
-        0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00, // newdir
-        0x6f, 0x6c, 0x64, 0x2e, 0x74, 0x78, 0x74, 0x00, // name
-        0x6e, 0x65, 0x77, 0x2e, 0x74, 0x78, 0x74, 0x00, // newname
-    ]);
-
-    #[cfg(all(target_endian = "little", not(target_os = "macos")))]
-    const RENAME_REQUEST: AlignedData<[u8; 64]> = AlignedData([
-        0x40, 0x00, 0x00, 0x00, 0x0c, 0x00, 0x00, 0x00, // len, opcode
-        0x0d, 0xf0, 0xad, 0xba, 0xef, 0xbe, 0xad, 0xde, // unique
-        0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, // nodeid
-        0x0d, 0xd0, 0x01, 0xc0, 0xfe, 0xca, 0x01, 0xc0, // uid, gid
-        0x5e, 0xba, 0xde, 0xc0, 0x00, 0x00, 0x00, 0x00, // pid, padding
-        0x00, 0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99, // newdir
         0x6f, 0x6c, 0x64, 0x2e, 0x74, 0x78, 0x74, 0x00, // name
         0x6e, 0x65, 0x77, 0x2e, 0x74, 0x78, 0x74, 0x00, // newname
     ]);
@@ -2561,6 +2584,8 @@ mod tests {
         }
     }
 
+    /// The plain layout: Linux, and macOS FUSE implementations that do not offer
+    /// FUSE_RENAME_SWAP, such as FUSE-T
     #[test]
     fn rename() {
         let req = AnyRequest::try_from(&RENAME_REQUEST[..]).unwrap();
@@ -2572,10 +2597,42 @@ mod tests {
                 assert_eq!(x.dest().dir, INodeNo(0x99aa_bbcc_ddee_ff00));
                 assert_eq!(x.dest().name, Path::new("new.txt"));
                 #[cfg(target_os = "macos")]
+                assert_eq!(x.flags(), crate::RenameFlags::empty());
+            }
+            _ => panic!("Unexpected request operation"),
+        }
+    }
+
+    /// macFUSE's extended layout, sent once it offers FUSE_RENAME_SWAP
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn rename_macfuse_extended() {
+        let mut req = AnyRequest::try_from(&RENAME_EXT_REQUEST[..]).unwrap();
+        req.set_negotiated(InitFlags::FUSE_RENAME_SWAP | InitFlags::FUSE_RENAME_EXCL);
+        match req.operation().unwrap() {
+            Operation::Rename(x) => {
+                assert_eq!(x.src().name, Path::new("old.txt"));
+                assert_eq!(x.dest().dir, INodeNo(0x99aa_bbcc_ddee_ff00));
+                assert_eq!(x.dest().name, Path::new("new.txt"));
                 assert_eq!(x.flags(), crate::RenameFlags::RENAME_SWAP);
             }
             _ => panic!("Unexpected request operation"),
         }
+    }
+
+    /// The INIT reply is sized for the protocol both sides speak, so a peer newer than
+    /// fuser gets the layout of fuser's own minor (#761)
+    #[test]
+    fn init_reply_size_follows_the_lower_minor() {
+        use crate::ll::fuse_abi::fuse_init_out;
+        let full = size_of::<fuse_init_out>();
+        // FUSE-T offers 7.23 to fuser's 7.19 on macOS: a 7.19 reply, not the 7.23 one
+        assert_eq!(op::init_out_size(23, 19), 24);
+        assert_eq!(op::init_out_size(19, 19), 24);
+        assert_eq!(op::init_out_size(19, 44), 24);
+        assert_eq!(op::init_out_size(4, 44), 8);
+        assert_eq!(op::init_out_size(23, 44), full);
+        assert_eq!(op::init_out_size(50, 44), full);
     }
 
     #[test]

@@ -42,6 +42,9 @@ Bug fixes:
 * Allow `MountOption::AutoUnmount` with `SessionACL::Owner` when running as root, or with
   fusermount3 3.15 or later. It is still refused with older helpers for other users, since they
   leave the mount in place
+* macOS: fix two incompatibilities with FUSE-T. The INIT reply is sized for the protocol version
+  both sides speak, rather than the newer one FUSE-T offers, and RENAME is parsed with macFUSE's
+  extended layout only when `FUSE_RENAME_SWAP` was negotiated, as macFUSE's libfuse does
 
 ## 0.19.0 - 2026-11-20
 
