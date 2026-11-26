@@ -26,7 +26,7 @@ impl Request {
     ///
     /// An idmapped mount has none to send: which ids a caller would have depends on the mount
     /// it came through. Nothing is left needing them. The capability that allows such a mount,
-    /// [`crate::InitFlags::FUSE_ALLOW_IDMAP`], can only be negotiated where
+    /// `crate::InitFlags::FUSE_ALLOW_IDMAP`, can only be negotiated where
     /// `default_permissions` is in force, so the kernel makes the access checks these ids
     /// would otherwise serve, and the requests that create an inode are given an
     /// [`crate::Owner`] naming who it belongs to. Those ids reach the filesystem only that

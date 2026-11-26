@@ -65,14 +65,16 @@ impl<'a> RequestWithSender<'a> {
         };
         request.set_negotiated(negotiated);
 
-        let masked_header =
-            negotiated
-                .contains(InitFlags::FUSE_ALLOW_IDMAP)
-                .then(|| fuse_in_header {
-                    uid: crate::FUSE_INVALID_UIDGID,
-                    gid: crate::FUSE_INVALID_UIDGID,
-                    ..request.header().clone()
-                });
+        // macFUSE has no FUSE_ALLOW_IDMAP
+        #[cfg(target_os = "macos")]
+        let idmapped = false;
+        #[cfg(not(target_os = "macos"))]
+        let idmapped = negotiated.contains(InitFlags::FUSE_ALLOW_IDMAP);
+        let masked_header = idmapped.then(|| fuse_in_header {
+            uid: crate::FUSE_INVALID_UIDGID,
+            gid: crate::FUSE_INVALID_UIDGID,
+            ..request.header().clone()
+        });
 
         Some(Self {
             ch,

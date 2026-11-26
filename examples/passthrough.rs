@@ -20,6 +20,7 @@ use fuser::FileType;
 use fuser::Filesystem;
 use fuser::FopenFlags;
 use fuser::INodeNo;
+#[cfg(not(target_os = "macos"))]
 use fuser::InitFlags;
 use fuser::KernelConfig;
 use fuser::LockOwner;
@@ -187,11 +188,23 @@ impl PassthroughFs {
 
 impl Filesystem for PassthroughFs {
     fn init(&mut self, _req: &Request, config: &mut KernelConfig) -> std::io::Result<()> {
-        config
-            .add_capabilities(InitFlags::FUSE_PASSTHROUGH)
-            .unwrap();
-        config.set_max_stack_depth(2).unwrap();
-        Ok(())
+        // Passthrough is a Linux capability, which macFUSE does not have
+        #[cfg(target_os = "macos")]
+        {
+            let _ = config;
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "passthrough needs Linux",
+            ))
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            config
+                .add_capabilities(InitFlags::FUSE_PASSTHROUGH)
+                .unwrap();
+            config.set_max_stack_depth(2).unwrap();
+            Ok(())
+        }
     }
 
     fn lookup(&self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {

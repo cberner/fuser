@@ -66,6 +66,7 @@ pub struct Notifier {
     /// Everything the kernel advertised during init. Some notifications are only
     /// meaningful on a kernel that supports them, and the kernel reports success
     /// regardless, so they are refused here rather than silently doing something else
+    #[cfg_attr(target_os = "macos", expect(dead_code))]
     kernel_capabilities: InitFlags,
     /// The ABI version the kernel offered during init, or `None` before init has run.
     /// Notifications added after a given version have no capability bit to key on, so the
@@ -119,10 +120,14 @@ impl Notifier {
     /// Returns an error if the notification data is too large.
     /// Returns an error if the kernel rejects the notification.
     pub fn expire_entry(&self, parent: INodeNo, name: &OsStr) -> io::Result<()> {
-        if !self
+        // macFUSE has no FUSE_HAS_EXPIRE_ONLY
+        #[cfg(target_os = "macos")]
+        let expire_only = false;
+        #[cfg(not(target_os = "macos"))]
+        let expire_only = self
             .kernel_capabilities
-            .contains(InitFlags::FUSE_HAS_EXPIRE_ONLY)
-        {
+            .contains(InitFlags::FUSE_HAS_EXPIRE_ONLY);
+        if !expire_only {
             return Err(io::Error::from_raw_os_error(libc::ENOTSUP));
         }
         let notif = Notification::new_inval_entry(parent, name, FUSE_EXPIRE_ONLY)
@@ -269,6 +274,7 @@ mod test {
     }
 
     #[test]
+    #[cfg(not(target_os = "macos"))]
     fn expire_entry_sent_with_kernel_support() {
         notifier(InitFlags::FUSE_HAS_EXPIRE_ONLY)
             .expire_entry(INodeNo::ROOT, OsStr::new("x"))

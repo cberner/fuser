@@ -1064,6 +1064,8 @@ mod op {
     impl Init<'_> {
         pub(crate) fn capabilities(&self) -> InitFlags {
             let flags = InitFlags::from_bits_retain(u64::from(self.arg.flags));
+            // macFUSE has no flags2
+            #[cfg(not(target_os = "macos"))]
             if flags.contains(InitFlags::FUSE_INIT_EXT) {
                 return InitFlags::from_bits_retain(
                     u64::from(self.arg.flags) | (u64::from(self.arg.flags2) << 32),
@@ -1079,10 +1081,15 @@ mod op {
         }
 
         pub(crate) fn reply(&self, config: &crate::KernelConfig) -> ResponseData {
+            #[cfg(not(target_os = "macos"))]
             let flags = config.requested | InitFlags::FUSE_INIT_EXT;
+            #[cfg(target_os = "macos")]
+            let flags = config.requested;
             // use requested features and reported as capable
             let flags = flags & self.capabilities();
 
+            // The fields set below exist only in protocol versions macFUSE does not speak
+            #[cfg_attr(target_os = "macos", expect(unused_mut))]
             let mut init = fuse_init_out {
                 major: FUSE_KERNEL_VERSION,
                 minor: FUSE_KERNEL_MINOR_VERSION,
@@ -1100,9 +1107,11 @@ mod op {
                 unused: [0; 11],
             };
 
+            #[cfg(not(target_os = "macos"))]
             if flags.contains(InitFlags::FUSE_PASSTHROUGH) {
                 init.max_stack_depth = config.max_stack_depth;
             }
+            #[cfg(not(target_os = "macos"))]
             if flags.contains(InitFlags::FUSE_REQUEST_TIMEOUT) {
                 init.request_timeout = config.request_timeout;
             }

@@ -4,6 +4,9 @@ use bitflags::bitflags;
 
 bitflags! {
     /// Init request/reply flags.
+    ///
+    /// On macOS only the flags macFUSE defines exist. Bits 23 to 31 mean something else there
+    /// than on Linux, and macFUSE has no flags beyond bit 31.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub struct InitFlags: u64 {
         /// asynchronous read requests
@@ -21,28 +24,39 @@ bitflags! {
         /// don't apply umask to file mode on create operations
         const FUSE_DONT_MASK = 1 << 6;
         /// kernel supports splice write on the device
+        #[cfg(not(target_os = "macos"))]
         const FUSE_SPLICE_WRITE = 1 << 7;
         /// kernel supports splice move on the device
+        #[cfg(not(target_os = "macos"))]
         const FUSE_SPLICE_MOVE = 1 << 8;
         /// kernel supports splice read on the device
+        #[cfg(not(target_os = "macos"))]
         const FUSE_SPLICE_READ = 1 << 9;
         /// remote locking for BSD style file locks
         const FUSE_FLOCK_LOCKS = 1 << 10;
         /// kernel supports ioctl on directories
+        #[cfg(not(target_os = "macos"))]
         const FUSE_HAS_IOCTL_DIR = 1 << 11;
         /// automatically invalidate cached pages
+        #[cfg(not(target_os = "macos"))]
         const FUSE_AUTO_INVAL_DATA = 1 << 12;
         /// do READDIRPLUS (READDIR+LOOKUP in one)
+        #[cfg(not(target_os = "macos"))]
         const FUSE_DO_READDIRPLUS = 1 << 13;
         /// adaptive readdirplus
+        #[cfg(not(target_os = "macos"))]
         const FUSE_READDIRPLUS_AUTO = 1 << 14;
         /// asynchronous direct I/O submission
+        #[cfg(not(target_os = "macos"))]
         const FUSE_ASYNC_DIO = 1 << 15;
         /// use writeback cache for buffered writes
+        #[cfg(not(target_os = "macos"))]
         const FUSE_WRITEBACK_CACHE = 1 << 16;
         /// kernel supports zero-message opens
+        #[cfg(not(target_os = "macos"))]
         const FUSE_NO_OPEN_SUPPORT = 1 << 17;
         /// allow parallel lookups and readdir
+        #[cfg(not(target_os = "macos"))]
         const FUSE_PARALLEL_DIROPS = 1 << 18;
         /// fs handles killing suid/sgid/cap on write/chown/trunc
         ///
@@ -60,22 +74,31 @@ bitflags! {
         /// `fallocate` and `copy_file_range`, and neither carries a signal saying so, so a
         /// filesystem that wants those to behave like a local one has to clear the bits there
         /// itself
+        #[cfg(not(target_os = "macos"))]
         const FUSE_HANDLE_KILLPRIV = 1 << 19;
         /// filesystem supports posix acls
+        #[cfg(not(target_os = "macos"))]
         const FUSE_POSIX_ACL = 1 << 20;
         /// reading the device after abort returns ECONNABORTED
+        #[cfg(not(target_os = "macos"))]
         const FUSE_ABORT_ERROR = 1 << 21;
         /// init_out.max_pages contains the max number of req pages
+        #[cfg(not(target_os = "macos"))]
         const FUSE_MAX_PAGES = 1 << 22;
         /// cache READLINK responses
+        #[cfg(not(target_os = "macos"))]
         const FUSE_CACHE_SYMLINKS = 1 << 23;
         /// kernel supports zero-message opendir
+        #[cfg(not(target_os = "macos"))]
         const FUSE_NO_OPENDIR_SUPPORT = 1 << 24;
         /// only invalidate cached pages on explicit request
+        #[cfg(not(target_os = "macos"))]
         const FUSE_EXPLICIT_INVAL_DATA = 1 << 25;
         /// map_alignment field is valid
+        #[cfg(not(target_os = "macos"))]
         const FUSE_MAP_ALIGNMENT = 1 << 26;
         /// filesystem supports submounts
+        #[cfg(not(target_os = "macos"))]
         const FUSE_SUBMOUNTS = 1 << 27;
         /// fs handles killing suid/sgid/cap on write/chown/trunc (v2)
         ///
@@ -96,36 +119,60 @@ bitflags! {
         /// Honoring those covers suid and sgid only, not file capabilities, and only the
         /// operations that carry a signal: see [`Self::FUSE_HANDLE_KILLPRIV`] for the ones that
         /// do not
+        #[cfg(not(target_os = "macos"))]
         const FUSE_HANDLE_KILLPRIV_V2 = 1 << 28;
         /// extended setxattr support
+        #[cfg(not(target_os = "macos"))]
         const FUSE_SETXATTR_EXT = 1 << 29;
         /// extended fuse_init_in request
+        #[cfg(not(target_os = "macos"))]
         const FUSE_INIT_EXT = 1 << 30;
         /// reserved, do not use
+        #[cfg(not(target_os = "macos"))]
         const FUSE_INIT_RESERVED = 1 << 31;
         /// add security context to create/mkdir/symlink/mknod
+        #[cfg(not(target_os = "macos"))]
         const FUSE_SECURITY_CTX = 1 << 32;
         /// filesystem supports per-inode DAX
+        #[cfg(not(target_os = "macos"))]
         const FUSE_HAS_INODE_DAX = 1 << 33;
         /// create with supplementary group
+        #[cfg(not(target_os = "macos"))]
         const FUSE_CREATE_SUPP_GROUP = 1 << 34;
         /// kernel supports expire-only invalidation
+        #[cfg(not(target_os = "macos"))]
         const FUSE_HAS_EXPIRE_ONLY = 1 << 35;
         /// allow mmap for direct I/O files
+        #[cfg(not(target_os = "macos"))]
         const FUSE_DIRECT_IO_ALLOW_MMAP = 1 << 36;
         /// filesystem wants to use passthrough files
+        #[cfg(not(target_os = "macos"))]
         const FUSE_PASSTHROUGH = 1 << 37;
         /// filesystem does not support export
+        #[cfg(not(target_os = "macos"))]
         const FUSE_NO_EXPORT_SUPPORT = 1 << 38;
         /// kernel supports resend requests
+        #[cfg(not(target_os = "macos"))]
         const FUSE_HAS_RESEND = 1 << 39;
         /// allow idmapped mounts
+        #[cfg(not(target_os = "macos"))]
         const FUSE_ALLOW_IDMAP = 1 << 40;
         /// kernel supports io_uring for communication
+        #[cfg(not(target_os = "macos"))]
         const FUSE_OVER_IO_URING = 1 << 41;
         /// kernel supports request timeout
+        #[cfg(not(target_os = "macos"))]
         const FUSE_REQUEST_TIMEOUT = 1 << 42;
 
+        /// `access()` requests carry macFUSE's extended permission mask (delete, append,
+        /// attribute, extended-attribute and ownership rights) instead of plain read, write and
+        /// execute bits
+        #[cfg(target_os = "macos")]
+        const FUSE_ACCESS_EXTENDED = 1 << 23;
+        /// the filesystem is safe against concurrent operations on the same node, so the kernel
+        /// stops serializing them per node
+        #[cfg(target_os = "macos")]
+        const FUSE_NODE_RWLOCK = 1 << 24;
         /// filesystem supports the `RENAME_SWAP` flag of `renamex_np(2)`.
         /// Requesting this also selects macFUSE's extended `fuse_rename_in` layout
         #[cfg(target_os = "macos")]
