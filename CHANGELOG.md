@@ -8,6 +8,14 @@ Breaking changes:
   previously completed first. Elsewhere it still runs when the session ends. It waits for requests
   being handled to return, and requests that arrive after it are answered with `EIO` instead of
   being dispatched. Cleanup that needs `&mut self` belongs in `Drop`
+* macOS: filesystems are no longer advertised as case-insensitive by default. One that is
+  requests `InitFlags::FUSE_CASE_INSENSITIVE` with `KernelConfig::add_capabilities()`
+* macOS: `InitFlags` only defines the flags macFUSE has. Linux's flags from bit 7 up are gone
+  there: bits 23 to 31 mean something else to macFUSE, so requesting `FUSE_NO_OPENDIR_SUPPORT`,
+  for example, enabled `FUSE_NODE_RWLOCK` and stopped the kernel serializing operations on a
+  node. `FUSE_ACCESS_EXTENDED` and `FUSE_NODE_RWLOCK` are added. `FUSE_MAX_PAGES` (macFUSE's
+  `FUSE_PAYLOAD_BUF`) and `FUSE_INIT_EXT` (macFUSE's `FUSE_VOL_RENAME`) are no longer requested
+  on macOS, and `KernelConfig::set_request_timeout()` is Linux-only
 
 New features:
 * Add `ReplyCreate::created_with_ttls()` and `ReplyDirectoryPlus::add_with_ttls()` to reply with

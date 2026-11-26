@@ -37,6 +37,7 @@ use fuser::FileHandle;
 use fuser::Filesystem;
 use fuser::FopenFlags;
 use fuser::INodeNo;
+#[cfg(not(target_os = "macos"))]
 use fuser::InitFlags;
 use fuser::KernelConfig;
 use fuser::LockOwner;
@@ -988,6 +989,15 @@ impl Filesystem for SimpleFS {
     ) -> io::Result<()> {
         // Refused unless the mount can honor it, so what was asked for is not what is in force.
         // A kernel that does not offer the capability at all refuses it the same way
+        // macFUSE has no FUSE_ALLOW_IDMAP
+        #[cfg(target_os = "macos")]
+        if self.idmapped {
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "idmapped mounts need Linux",
+            ));
+        }
+        #[cfg(not(target_os = "macos"))]
         if self.idmapped {
             self.idmapped = config.add_capabilities(InitFlags::FUSE_ALLOW_IDMAP).is_ok();
             if self.idmapped {
@@ -1010,6 +1020,12 @@ impl Filesystem for SimpleFS {
         //
         // v2 otherwise reports per request whether suid and sgid must go, rather than asking
         // for them to be cleared on every write, chown and truncate as FUSE_HANDLE_KILLPRIV does
+        #[cfg(target_os = "macos")]
+        {
+            info!("FUSE_HANDLE_KILLPRIV_V2 not supported");
+            self.suid_support = false;
+        }
+        #[cfg(not(target_os = "macos"))]
         if self.idmapped {
             info!("privilege stripping left to the kernel, there being no caller to judge");
             self.suid_support = false;

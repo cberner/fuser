@@ -111,23 +111,26 @@ mod time;
 const INIT_FLAGS: InitFlags = InitFlags::FUSE_ASYNC_READ.union(InitFlags::FUSE_BIG_WRITES);
 // TODO: Add FUSE_EXPORT_SUPPORT
 
-/// On macOS, we additionally support case insensitiveness, volume renames, xtimes and the
-/// extended rename operations.
+/// On macOS, we additionally support volume renames, xtimes and the extended rename
+/// operations. A filesystem that is case-insensitive requests
+/// `InitFlags::FUSE_CASE_INSENSITIVE` itself.
 ///
-/// `FUSE_RENAME_SWAP`/`FUSE_RENAME_EXCL` must always be requested: macFUSE only sends the
-/// extended `fuse_rename_in` layout that fuser parses once they have been negotiated.
+/// `FUSE_RENAME_SWAP`/`FUSE_RENAME_EXCL` are requested so that `renamex_np(2)` flags reach
+/// `rename()`.
 /// TODO: we should eventually let the filesystem implementation decide which flags to set
 #[cfg(target_os = "macos")]
 const INIT_FLAGS: InitFlags = InitFlags::FUSE_ASYNC_READ
-    .union(InitFlags::FUSE_CASE_INSENSITIVE)
     .union(InitFlags::FUSE_VOL_RENAME)
     .union(InitFlags::FUSE_XTIMES)
     .union(InitFlags::FUSE_RENAME_SWAP)
     .union(InitFlags::FUSE_RENAME_EXCL);
 // TODO: Add FUSE_EXPORT_SUPPORT and FUSE_BIG_WRITES (requires ABI 7.10)
 
+#[cfg_attr(target_os = "macos", expect(unused_variables))]
 fn default_init_flags(capabilities: InitFlags) -> InitFlags {
+    #[cfg_attr(target_os = "macos", expect(unused_mut))]
     let mut flags = INIT_FLAGS;
+    #[cfg(not(target_os = "macos"))]
     if capabilities.contains(InitFlags::FUSE_MAX_PAGES) {
         flags |= InitFlags::FUSE_MAX_PAGES;
     }
@@ -144,9 +147,15 @@ pub(crate) const FUSE_INVALID_UIDGID: u32 = u32::MAX;
 /// the kernel, an unimplemented capability fails silently rather than loudly, so
 /// [`KernelConfig::add_capabilities`] refuses them up front.
 ///
-/// Every bit named here is above 31, where macFUSE defines no capability of its own. The refused
-/// bits that do alias one live in `ALIASED_UNSUPPORTED_CAPABILITIES`, which is empty on macOS.
-const UNSUPPORTED_CAPABILITIES: InitFlags = ALIASED_UNSUPPORTED_CAPABILITIES
+/// macFUSE has none of these capabilities, so nothing is refused on macOS.
+#[cfg(not(target_os = "macos"))]
+const UNSUPPORTED_CAPABILITIES: InitFlags = InitFlags::empty()
+    // Marking a submount root needs FUSE_ATTR_SUBMOUNT in the flags field of fuse_attr, which
+    // fuser sends as padding. Only a transport with submounts (virtiofs) advertises this
+    .union(InitFlags::FUSE_SUBMOUNTS)
+    // Read from a fuse_init_out field fuser leaves zeroed, which makes the kernel refuse the
+    // connection unless that happens to match its DAX alignment. Advertised by virtiofs alone
+    .union(InitFlags::FUSE_MAP_ALIGNMENT)
     // The kernel appends a fuse_secctx_header extension after the name of a create, mkdir,
     // symlink or mknod request. fuser stops parsing at the name, so the security context is
     // dropped and the filesystem creates unlabeled files while believing it labels them
@@ -162,20 +171,8 @@ const UNSUPPORTED_CAPABILITIES: InitFlags = ALIASED_UNSUPPORTED_CAPABILITIES
     // Announces that the filesystem copes with requests the kernel resends. fuser cannot send
     // the FUSE_NOTIFY_RESEND notification that asks for a resend in the first place
     .union(InitFlags::FUSE_HAS_RESEND);
-
-/// The refused capabilities that occupy a bit below 32, where macFUSE assigns a meaning of its
-/// own. On macOS these bits are `FUSE_ALLOCATE` and `FUSE_RENAME_EXCL` - the latter of which
-/// fuser requests itself - so nothing is refused there.
-#[cfg(not(target_os = "macos"))]
-const ALIASED_UNSUPPORTED_CAPABILITIES: InitFlags = InitFlags::empty()
-    // Marking a submount root needs FUSE_ATTR_SUBMOUNT in the flags field of fuse_attr, which
-    // fuser sends as padding. Only a transport with submounts (virtiofs) advertises this
-    .union(InitFlags::FUSE_SUBMOUNTS)
-    // Read from a fuse_init_out field fuser leaves zeroed, which makes the kernel refuse the
-    // connection unless that happens to match its DAX alignment. Advertised by virtiofs alone
-    .union(InitFlags::FUSE_MAP_ALIGNMENT);
 #[cfg(target_os = "macos")]
-const ALIASED_UNSUPPORTED_CAPABILITIES: InitFlags = InitFlags::empty();
+const UNSUPPORTED_CAPABILITIES: InitFlags = InitFlags::empty();
 
 /// Who a newly created inode belongs to.
 ///
@@ -392,13 +389,16 @@ pub struct KernelConfig {
     max_write: u32,
     time_gran: Duration,
     max_stack_depth: u32,
-    /// Seconds, 0 for none
+    /// Seconds, 0 for none. Linux only
+    #[cfg_attr(target_os = "macos", expect(dead_code))]
     request_timeout: u16,
     kernel_abi: Version,
     /// Whether the mount carries `MountOption::DefaultPermissions`, which
-    /// `InitFlags::FUSE_ALLOW_IDMAP` cannot be negotiated without
+    /// `InitFlags::FUSE_ALLOW_IDMAP` cannot be negotiated without. Linux only
+    #[cfg_attr(target_os = "macos", expect(dead_code))]
     default_permissions: bool,
     /// The session's ACL, for the same reason
+    #[cfg_attr(target_os = "macos", expect(dead_code))]
     acl: SessionACL,
 }
 
@@ -443,6 +443,7 @@ impl KernelConfig {
     /// anyone else's, so `SessionACL::Owner` and `SessionACL::RootAndOwner` could not be
     /// enforced; refusing is better than continuing to offer a restriction that has quietly
     /// stopped applying.
+    #[cfg(not(target_os = "macos"))]
     fn idmap_available(&self, also_adding: InitFlags) -> bool {
         // Requesting POSIX ACLs only counts if the kernel offers them, since a capability it
         // does not offer is dropped from the negotiated set and sets nothing
@@ -496,6 +497,7 @@ impl KernelConfig {
     /// Returns the nearest value which will succeed: [`Duration::ZERO`] if the kernel does not
     /// support request timeouts, the next whole second for a fraction of a second, or the
     /// largest timeout the kernel accepts (`u16::MAX` seconds).
+    #[cfg(not(target_os = "macos"))]
     pub fn set_request_timeout(&mut self, value: Duration) -> Result<Duration, Duration> {
         if value.is_zero() {
             let previous = Duration::from_secs(self.request_timeout.into());
@@ -585,7 +587,10 @@ impl KernelConfig {
 
     /// Query kernel capabilities.
     pub fn capabilities(&self) -> InitFlags {
-        self.capabilities & !InitFlags::FUSE_INIT_EXT
+        #[cfg(not(target_os = "macos"))]
+        return self.capabilities & !InitFlags::FUSE_INIT_EXT;
+        #[cfg(target_os = "macos")]
+        return self.capabilities;
     }
 
     /// Kernel ABI version.
@@ -595,9 +600,9 @@ impl KernelConfig {
 
     /// Add a set of capabilities.
     ///
-    /// [`InitFlags::FUSE_ALLOW_IDMAP`] is accepted only where it can be honored: the session
+    /// `InitFlags::FUSE_ALLOW_IDMAP` is accepted only where it can be honored: the session
     /// must allow other users, and `default_permissions` must be in force, whether from
-    /// [`MountOption::DefaultPermissions`] or from negotiating [`InitFlags::FUSE_POSIX_ACL`].
+    /// [`MountOption::DefaultPermissions`] or from negotiating `InitFlags::FUSE_POSIX_ACL`.
     /// Relying on the latter means adding it in this call or an earlier one, since what has
     /// not been asked for yet cannot be counted on.
     ///
@@ -606,11 +611,14 @@ impl KernelConfig {
     /// honor, returns the bits of the capabilities that were refused. Nothing is added in that
     /// case, not even the capabilities that would have been accepted on their own.
     pub fn add_capabilities(&mut self, capabilities_to_add: InitFlags) -> Result<(), InitFlags> {
+        #[cfg(not(target_os = "macos"))]
         let conditional = if self.idmap_available(capabilities_to_add) {
             InitFlags::empty()
         } else {
             InitFlags::FUSE_ALLOW_IDMAP
         };
+        #[cfg(target_os = "macos")]
+        let conditional = InitFlags::empty();
         let refused =
             capabilities_to_add & (!self.capabilities | UNSUPPORTED_CAPABILITIES | conditional);
         if !refused.is_empty() {
@@ -757,12 +765,12 @@ pub trait Filesystem: Send + Sync + 'static {
     ///
     /// `kill_suid_gid` asks the filesystem to clear the suid and sgid bits of the file as part
     /// of this request, because the caller lacks `CAP_FSETID`. It is only ever set once
-    /// [`InitFlags::FUSE_HANDLE_KILLPRIV_V2`] has been negotiated, since the kernel otherwise
+    /// `InitFlags::FUSE_HANDLE_KILLPRIV_V2` has been negotiated, since the kernel otherwise
     /// clears them itself.
     ///
     /// Honoring it is necessary but not sufficient: that capability also makes clearing the
     /// `security.capability` xattr on every write, chown and truncate the filesystem's job,
-    /// and no argument reports that. See [`InitFlags::FUSE_HANDLE_KILLPRIV_V2`].
+    /// and no argument reports that. See `InitFlags::FUSE_HANDLE_KILLPRIV_V2`.
     fn setattr(
         &self,
         _req: &Request,
@@ -909,12 +917,12 @@ pub trait Filesystem: Send + Sync + 'static {
     ///
     /// `kill_suid_gid` asks the filesystem to clear the suid and sgid bits of the file, because
     /// the open truncates it and the caller lacks `CAP_FSETID`. It is only ever set once
-    /// [`InitFlags::FUSE_HANDLE_KILLPRIV_V2`] has been negotiated, since the kernel otherwise
+    /// `InitFlags::FUSE_HANDLE_KILLPRIV_V2` has been negotiated, since the kernel otherwise
     /// clears them itself.
     ///
     /// Honoring it is necessary but not sufficient: that capability also makes clearing the
     /// `security.capability` xattr on every write, chown and truncate the filesystem's job,
-    /// and no argument reports that. See [`InitFlags::FUSE_HANDLE_KILLPRIV_V2`].
+    /// and no argument reports that. See `InitFlags::FUSE_HANDLE_KILLPRIV_V2`.
     ///
     /// Replying `ENOSYS` tells the kernel that opens need no answer: it stops sending them
     /// and treats every later open as successful. Opens then reach neither the filesystem
@@ -1203,12 +1211,12 @@ pub trait Filesystem: Send + Sync + 'static {
     ///
     /// `kill_suid_gid` asks the filesystem to clear the suid and sgid bits of an existing file,
     /// because the open truncates it and the caller lacks `CAP_FSETID`. It is only ever set once
-    /// [`InitFlags::FUSE_HANDLE_KILLPRIV_V2`] has been negotiated, since the kernel otherwise
+    /// `InitFlags::FUSE_HANDLE_KILLPRIV_V2` has been negotiated, since the kernel otherwise
     /// clears them itself.
     ///
     /// Honoring it is necessary but not sufficient: that capability also makes clearing the
     /// `security.capability` xattr on every write, chown and truncate the filesystem's job,
-    /// and no argument reports that. See [`InitFlags::FUSE_HANDLE_KILLPRIV_V2`].
+    /// and no argument reports that. See `InitFlags::FUSE_HANDLE_KILLPRIV_V2`.
     fn create(
         &self,
         _req: &Request,
@@ -1543,6 +1551,7 @@ pub fn spawn_mount<'a, FS: Filesystem + Send + 'static + 'a, P: AsRef<Path>>(
 mod tests {
     use super::*;
 
+    #[cfg(not(target_os = "macos"))]
     fn request_timeout_config(capabilities: InitFlags) -> KernelConfig {
         KernelConfig::new(
             capabilities,
@@ -1554,6 +1563,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_os = "macos"))]
     fn set_request_timeout() {
         let mut config = request_timeout_config(InitFlags::empty());
         // A kernel without the capability can only be asked for no timeout
@@ -1887,6 +1897,7 @@ mod tests {
     /// the connection without default_permissions and fuser cannot enforce an owner-only ACL
     /// once the caller's ids are withheld
     #[test]
+    #[cfg(not(target_os = "macos"))]
     fn add_capabilities_idmap_needs_default_permissions_and_allow_other() {
         let cases = [
             (true, SessionACL::All, true),
@@ -1924,6 +1935,7 @@ mod tests {
     /// requirement on its own - but only where the kernel offers it, since a capability it
     /// does not offer is dropped from the negotiated set and sets nothing
     #[test]
+    #[cfg(not(target_os = "macos"))]
     fn add_capabilities_idmap_accepts_posix_acl_for_default_permissions() {
         // Both in one call
         let mut config = KernelConfig::new(
@@ -1979,6 +1991,7 @@ mod tests {
 
     /// A kernel that does not offer it cannot have it forced on, whatever the mount looks like
     #[test]
+    #[cfg(not(target_os = "macos"))]
     fn add_capabilities_idmap_needs_the_kernel_to_offer_it() {
         let mut config = KernelConfig::new(
             InitFlags::all() & !InitFlags::FUSE_ALLOW_IDMAP,
@@ -1994,6 +2007,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_os = "macos"))]
     fn add_capabilities_refuses_unimplemented() {
         // A kernel advertising everything, so only fuser's own limits can refuse anything
         let mut config = KernelConfig::new(
@@ -2022,6 +2036,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_os = "macos"))]
     fn refused_capabilities_are_never_requested_by_default() {
         // Below bit 32 a capability aliases a macFUSE one, some of which fuser requests itself.
         // Refusing a bit fuser goes on to request would be incoherent, and on macOS would break
@@ -2029,7 +2044,24 @@ mod tests {
         assert!(UNSUPPORTED_CAPABILITIES.intersection(INIT_FLAGS).is_empty());
     }
 
+    /// A macOS filesystem is case-sensitive unless it asks otherwise (#749)
     #[test]
+    #[cfg(target_os = "macos")]
+    fn macos_defaults_are_case_sensitive() {
+        assert!(!default_init_flags(InitFlags::all()).contains(InitFlags::FUSE_CASE_INSENSITIVE));
+    }
+
+    /// Bit 22 is Linux's FUSE_MAX_PAGES but macFUSE's FUSE_PAYLOAD_BUF, which fuser does not
+    /// implement, so it is not requested on macOS however the kernel offers it (#751)
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn macos_defaults_do_not_request_linux_only_bits() {
+        let bit_22 = InitFlags::from_bits_retain(1 << 22);
+        assert!(!default_init_flags(bit_22).contains(bit_22));
+    }
+
+    #[test]
+    #[cfg(not(target_os = "macos"))]
     fn add_capabilities_refuses_all_or_nothing() {
         // Advertise everything except one capability fuser does implement
         let capabilities = InitFlags::all() - InitFlags::FUSE_POSIX_ACL;
