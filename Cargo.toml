@@ -62,6 +62,10 @@ serializable = ["serde"]
 # Can be used like this on Linux to check macOS code compiles:
 # cargo check --target x86_64-apple-darwin --features=macos-no-mount
 macos-no-mount = []
+# Experimental, macOS only: mount through macOS's own SMB client, mount_smbfs, rather than
+# macFUSE. fuser serves the filesystem over SMB from inside the process. Elsewhere this
+# changes nothing: Linux and the BSDs mount through FUSE
+macos-smb = []
 
 [[example]]
 name = "async_hello"

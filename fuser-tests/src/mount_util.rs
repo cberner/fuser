@@ -22,6 +22,10 @@ impl MountEntry {
     /// Returns true if this is a FUSE mount at the specified mountpoint.
     pub(crate) fn is_fuse_mount_at(&self, mountpoint: &Path) -> bool {
         let expected_fstype = if cfg!(target_os = "macos") {
+            // The macos-smb feature mounts with mount_smbfs
+            if self.fstype == "smbfs" {
+                return self.mountpoint == mountpoint;
+            }
             "macfuse"
         } else if cfg!(target_os = "freebsd") {
             "fusefs"

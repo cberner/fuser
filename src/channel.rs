@@ -32,6 +32,10 @@ impl Channel {
         if let Some(channel) = &self.0.mf_channel {
             return channel.receive(buffer);
         }
+        #[cfg(any(test, fuser_mount_impl = "smb"))]
+        if let Some(transport) = &self.0.transport {
+            return transport.receive(buffer);
+        }
         nix::unistd::read(&self.0, buffer)
     }
 
@@ -97,6 +101,10 @@ impl ChannelSender {
         if let Some(channel) = &self.0.mf_channel {
             channel.send(bufs)?;
             return Ok(());
+        }
+        #[cfg(any(test, fuser_mount_impl = "smb"))]
+        if let Some(transport) = &self.0.transport {
+            return transport.send(bufs);
         }
         #[cfg(not(target_os = "netbsd"))]
         let rc = nix::sys::uio::writev(&self.0, bufs)?;

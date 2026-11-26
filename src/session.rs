@@ -238,6 +238,15 @@ impl<FS: Filesystem> Session<FS> {
             );
             allowed = SessionACL::All;
         }
+        // Nor does SMB: every request carries the mounting user, and smbfs decides who else
+        // may use the mount
+        #[cfg(fuser_mount_impl = "smb")]
+        if allowed != SessionACL::All {
+            warn!(
+                "the SMB mount backend does not report the caller of a request, \
+                 so {allowed:?} is not enforced by fuser"
+            );
+        }
 
         let ch = Channel::new(file);
 
@@ -268,7 +277,22 @@ impl<FS: Filesystem> Session<FS> {
         acl: SessionACL,
         config: Config,
     ) -> io::Result<Self> {
-        let ch = Channel::new(Arc::new(DevFuse::new(File::from(fd))));
+        Self::from_device(
+            filesystem,
+            Arc::new(DevFuse::new(File::from(fd))),
+            acl,
+            config,
+        )
+    }
+
+    /// Serve the connection `device`, which is not mounted anywhere
+    pub(crate) fn from_device(
+        filesystem: FS,
+        device: Arc<DevFuse>,
+        acl: SessionACL,
+        config: Config,
+    ) -> io::Result<Self> {
+        let ch = Channel::new(device);
         let mut session = Session {
             filesystem: FilesystemHolder::new(filesystem),
             ch,
@@ -791,10 +815,7 @@ impl BackgroundSession {
         guard
             .join()
             .map_err(|_panic: Box<dyn std::any::Any + Send>| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    "filesystem background thread panicked",
-                )
+                io::Error::other("filesystem background thread panicked")
             })?
     }
 }

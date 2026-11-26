@@ -5,13 +5,16 @@ use std::os::fd::AsFd;
 use std::os::fd::AsRawFd;
 use std::os::fd::BorrowedFd;
 
-/// The kernel connection of a mount: the `/dev/fuse` device, or on macOS an MFMount channel.
+/// The kernel connection of a mount: the `/dev/fuse` device, or on macOS an MFMount channel
+/// or the in-process connection of the SMB backend.
 #[derive(Debug)]
 pub(crate) struct DevFuse {
-    /// For an MFMount channel, which has no fd, a placeholder that is not connected to it
+    /// For a connection without an fd, a placeholder that is not connected to it
     file: File,
     #[cfg(fuser_macfuse_fskit)]
     pub(crate) mf_channel: Option<crate::mnt::mfmount::MfChannel>,
+    #[cfg(any(test, fuser_mount_impl = "smb"))]
+    pub(crate) transport: Option<std::sync::Arc<crate::mnt::smb::transport::Transport>>,
 }
 
 impl AsRawFd for DevFuse {
@@ -32,6 +35,8 @@ impl DevFuse {
             file,
             #[cfg(fuser_macfuse_fskit)]
             mf_channel: None,
+            #[cfg(any(test, fuser_mount_impl = "smb"))]
+            transport: None,
         }
     }
 
@@ -46,6 +51,21 @@ impl DevFuse {
         Ok(Self {
             file: File::open("/dev/null")?,
             mf_channel: Some(channel),
+            #[cfg(test)]
+            transport: None,
+        })
+    }
+
+    /// An in-process connection, whose requests are made by the SMB backend
+    #[cfg(any(test, fuser_mount_impl = "smb"))]
+    pub(crate) fn from_transport(
+        transport: std::sync::Arc<crate::mnt::smb::transport::Transport>,
+    ) -> io::Result<Self> {
+        Ok(Self {
+            file: File::open("/dev/null")?,
+            #[cfg(fuser_macfuse_fskit)]
+            mf_channel: None,
+            transport: Some(transport),
         })
     }
 

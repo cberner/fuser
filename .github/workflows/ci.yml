@@ -169,6 +169,34 @@ jobs:
       - name: pjdfs tests (FSKit)
         run: FUSER_MOUNT_OPTION=backend=fskit ./tests/macos_pjdfs.sh
 
+      # Informational: the timings show in the job summary
+      - name: Benchmark (FSKit)
+        continue-on-error: true
+        timeout-minutes: 15
+        run: FUSER_MOUNT_OPTION=backend=fskit ./tests/macos_bench.sh
+
+      # Experimental: the macos-smb feature mounts through macOS's own SMB client, mount_smbfs,
+      # with no macFUSE
+      - name: Build (macos-smb)
+        run: |
+          cargo clippy --all-targets --features=macos-smb
+          cargo test --lib --features=macos-smb -- --skip mnt::test
+
+      - name: Mount tests (macos-smb)
+        run: FUSER_MACOS_SMB=1 cargo run -p fuser-tests -- macos-mount
+
+      # SMB carries less than FUSE (no links, ownership or modes beyond read-only), so some
+      # pjdfstest cases fail by design. This reports how many; it does not fail the job
+      - name: pjdfs tests (macos-smb, experimental)
+        continue-on-error: true
+        timeout-minutes: 30
+        run: FUSER_FEATURES=macos-smb ./tests/macos_pjdfs.sh
+
+      - name: Benchmark (macos-smb)
+        continue-on-error: true
+        timeout-minutes: 15
+        run: FUSER_FEATURES=macos-smb ./tests/macos_bench.sh
+
   freebsd-ci:
     runs-on: ubuntu-24.04
     timeout-minutes: 30

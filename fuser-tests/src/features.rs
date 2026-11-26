@@ -11,6 +11,8 @@ pub(crate) enum Feature {
     Libfuse2,
     /// Use libfuse3 for mounting.
     Libfuse3,
+    /// Mount through macOS's SMB client instead of macFUSE.
+    MacosSmb,
 }
 
 impl Feature {
@@ -20,6 +22,7 @@ impl Feature {
             Feature::Experimental => "experimental",
             Feature::Libfuse2 => "libfuse2",
             Feature::Libfuse3 => "libfuse3",
+            Feature::MacosSmb => "macos-smb",
         }
     }
 }

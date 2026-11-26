@@ -21,6 +21,11 @@ New features:
   default implementation still forwards them to
 * Support mounting with macFUSE's FSKit backend, which needs no kernel extension, with the
   `backend=fskit` mount option (macFUSE 5.3.3 or later)
+* Experimental, macOS only: the `macos-smb` feature mounts through macOS's own SMB client,
+  `mount_smbfs`, with no macFUSE or other kernel extension. fuser serves the filesystem over SMB
+  from inside the process; filesystems need no changes. The server is fuser's own, serving SMB 2.1
+  with no dependencies. SMB carries no links, ownership or modes beyond a read-only flag, and most
+  mount options are ignored
 
 Bug fixes:
 * Fix a read of uninitialized memory when mounting through `fusermount`, reported by

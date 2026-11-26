@@ -1,7 +1,7 @@
 fn main() {
     // Register rustc cfg for switching between mount implementations.
     println!(
-        "cargo::rustc-check-cfg=cfg(fuser_mount_impl, values(\"pure-rust\", \"libfuse2\", \"libfuse3\", \"macos-no-mount\"))"
+        "cargo::rustc-check-cfg=cfg(fuser_mount_impl, values(\"pure-rust\", \"libfuse2\", \"libfuse3\", \"macos-no-mount\", \"smb\"))"
     );
     // macFUSE's FSKit backend, mounted through its MFMount framework
     println!("cargo::rustc-check-cfg=cfg(fuser_macfuse_fskit)");
@@ -16,7 +16,10 @@ fn main() {
     {
         println!("cargo::rustc-cfg=fuser_mount_impl=\"pure-rust\"");
     } else if target_os == "macos" {
-        if cfg!(feature = "macos-no-mount") {
+        if cfg!(feature = "macos-smb") {
+            // Served over SMB from inside the process and mounted with mount_smbfs: no libfuse
+            println!("cargo::rustc-cfg=fuser_mount_impl=\"smb\"");
+        } else if cfg!(feature = "macos-no-mount") {
             println!("cargo::rustc-cfg=fuser_mount_impl=\"macos-no-mount\"");
         } else {
             pkg_config::Config::new()

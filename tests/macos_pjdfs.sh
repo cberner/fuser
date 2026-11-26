@@ -31,8 +31,10 @@ DATA_DIR=$(mktemp --directory)
 # Canonical, as the mount table lists it (/var is a symlink to /private/var)
 DIR=$(cd "$(mktemp --directory)" && pwd -P)
 
-cargo build --release --example simple
-cargo run --release --example simple -- -vvv --suid ${FUSER_MOUNT_OPTION:+-o "$FUSER_MOUNT_OPTION"} --data-dir $DATA_DIR --mount-point $DIR > /tmp/mount.log 2>&1 &
+# e.g. FUSER_FEATURES=macos-smb to test the SMB backend
+FEATURES=${FUSER_FEATURES:+--features=$FUSER_FEATURES}
+cargo build --release --example simple $FEATURES
+cargo run --release --example simple $FEATURES -- -vvv --suid ${FUSER_MOUNT_OPTION:+-o "$FUSER_MOUNT_OPTION"} --data-dir $DATA_DIR --mount-point $DIR > /tmp/mount.log 2>&1 &
 FUSE_PID=$!
 
 echo "mounting at $DIR"
@@ -114,7 +116,15 @@ find $PJDFS_TMP_DIR/pjdfstest/tests -name '*.t' \
 export PJDFS_EXIT_STATUS=$?
 echo "Total failed:"
 cat /tmp/pjdfs.log | egrep -o 'Failed: [0-9]+' | egrep -o '[0-9]+' | paste -s -d+ - | bc
+echo "Total tests:"
+cat /tmp/pjdfs.log | egrep -o 'Tests=[0-9]+' | egrep -o '[0-9]+'
 
+cd $PROJ_DIR
+# The SMB backend's session only ends with the mount; killing it would leave the mount behind,
+# with no server
+if [ "${FUSER_FEATURES:-}" = "macos-smb" ]; then
+  umount $DIR
+fi
 rm -rf ${DATA_DIR}
 
 kill $FUSE_PID

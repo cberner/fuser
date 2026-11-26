@@ -50,6 +50,7 @@ pub(crate) const FUSE_KERNEL_MINOR_VERSION: u32 = if cfg!(target_os = "macos") {
 
 #[repr(C)]
 #[derive(Debug, IntoBytes, Clone, Copy, KnownLayout, Immutable)]
+#[cfg_attr(any(test, fuser_mount_impl = "smb"), derive(FromBytes))]
 pub(crate) struct fuse_attr {
     pub(crate) ino: u64,
     pub(crate) size: u64,
@@ -83,6 +84,7 @@ pub(crate) struct fuse_attr {
 
 #[repr(C)]
 #[derive(Debug, IntoBytes, KnownLayout, Immutable)]
+#[cfg_attr(any(test, fuser_mount_impl = "smb"), derive(FromBytes))]
 pub(crate) struct fuse_kstatfs {
     pub(crate) blocks: u64,  // Total blocks (in units of frsize)
     pub(crate) bfree: u64,   // Free blocks
@@ -264,6 +266,7 @@ pub(crate) struct fuse_statx_out {
 
 #[repr(C)]
 #[derive(Debug, IntoBytes, KnownLayout, Immutable)]
+#[cfg_attr(any(test, fuser_mount_impl = "smb"), derive(FromBytes))]
 pub(crate) struct fuse_entry_out {
     pub(crate) nodeid: u64,
     pub(crate) generation: u64,
@@ -296,6 +299,7 @@ pub(crate) struct fuse_batch_forget_in {
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
+#[cfg_attr(any(test, fuser_mount_impl = "smb"), derive(IntoBytes))]
 pub(crate) struct fuse_getattr_in {
     pub(crate) getattr_flags: u32,
     pub(crate) dummy: u32,
@@ -304,6 +308,7 @@ pub(crate) struct fuse_getattr_in {
 
 #[repr(C)]
 #[derive(Debug, IntoBytes, KnownLayout, Immutable)]
+#[cfg_attr(any(test, fuser_mount_impl = "smb"), derive(FromBytes))]
 pub(crate) struct fuse_attr_out {
     pub(crate) attr_valid: u64,
     pub(crate) attr_valid_nsec: u32,
@@ -332,6 +337,7 @@ pub(crate) struct fuse_mknod_in {
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
+#[cfg_attr(any(test, fuser_mount_impl = "smb"), derive(IntoBytes))]
 pub(crate) struct fuse_mkdir_in {
     pub(crate) mode: u32,
     pub(crate) umask: u32,
@@ -339,6 +345,7 @@ pub(crate) struct fuse_mkdir_in {
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
+#[cfg_attr(any(test, fuser_mount_impl = "smb"), derive(IntoBytes))]
 pub(crate) struct fuse_rename_in {
     pub(crate) newdir: u64,
 }
@@ -379,6 +386,7 @@ pub(crate) struct fuse_link_in {
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
+#[cfg_attr(any(test, fuser_mount_impl = "smb"), derive(IntoBytes))]
 pub(crate) struct fuse_setattr_in {
     pub(crate) valid: u32,
     pub(crate) padding: u32,
@@ -430,6 +438,7 @@ impl fuse_setattr_in {
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
+#[cfg_attr(any(test, fuser_mount_impl = "smb"), derive(IntoBytes))]
 pub(crate) struct fuse_open_in {
     // NOTE: this field is defined as u32 in fuse_kernel.h in libfuse. However, it is then cast
     // to an i32 when invoking the filesystem's open method and this matches the open() syscall
@@ -439,6 +448,7 @@ pub(crate) struct fuse_open_in {
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
+#[cfg_attr(any(test, fuser_mount_impl = "smb"), derive(IntoBytes))]
 pub(crate) struct fuse_create_in {
     // NOTE: this field is defined as u32 in fuse_kernel.h in libfuse. However, it is then cast
     // to an i32 when invoking the filesystem's create method and this matches the open() syscall
@@ -454,6 +464,7 @@ pub(crate) struct fuse_create_out(pub(crate) fuse_entry_out, pub(crate) fuse_ope
 
 #[repr(C)]
 #[derive(Debug, IntoBytes, KnownLayout, Immutable)]
+#[cfg_attr(any(test, fuser_mount_impl = "smb"), derive(FromBytes))]
 pub(crate) struct fuse_open_out {
     pub(crate) fh: u64,
     pub(crate) open_flags: u32,
@@ -462,6 +473,7 @@ pub(crate) struct fuse_open_out {
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
+#[cfg_attr(any(test, fuser_mount_impl = "smb"), derive(IntoBytes))]
 pub(crate) struct fuse_release_in {
     pub(crate) fh: u64,
     // NOTE: this field is defined as u32 in fuse_kernel.h in libfuse. However, it is then cast
@@ -473,6 +485,7 @@ pub(crate) struct fuse_release_in {
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
+#[cfg_attr(any(test, fuser_mount_impl = "smb"), derive(IntoBytes))]
 pub(crate) struct fuse_flush_in {
     pub(crate) fh: u64,
     pub(crate) unused: u32,
@@ -482,6 +495,7 @@ pub(crate) struct fuse_flush_in {
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
+#[cfg_attr(any(test, fuser_mount_impl = "smb"), derive(IntoBytes))]
 pub(crate) struct fuse_read_in {
     pub(crate) fh: u64,
     pub(crate) offset: u64,
@@ -496,6 +510,7 @@ pub(crate) struct fuse_read_in {
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
+#[cfg_attr(any(test, fuser_mount_impl = "smb"), derive(IntoBytes))]
 pub(crate) struct fuse_write_in {
     pub(crate) fh: u64,
     // NOTE: this field is defined as u64 in fuse_kernel.h in libfuse. However, it is then cast
@@ -512,6 +527,7 @@ pub(crate) struct fuse_write_in {
 
 #[repr(C)]
 #[derive(Debug, IntoBytes, KnownLayout, Immutable)]
+#[cfg_attr(any(test, fuser_mount_impl = "smb"), derive(FromBytes))]
 pub(crate) struct fuse_write_out {
     pub(crate) size: u32,
     pub(crate) padding: u32,
@@ -519,12 +535,14 @@ pub(crate) struct fuse_write_out {
 
 #[repr(C)]
 #[derive(Debug, IntoBytes, KnownLayout, Immutable)]
+#[cfg_attr(any(test, fuser_mount_impl = "smb"), derive(FromBytes))]
 pub(crate) struct fuse_statfs_out {
     pub(crate) st: fuse_kstatfs,
 }
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
+#[cfg_attr(any(test, fuser_mount_impl = "smb"), derive(IntoBytes))]
 pub(crate) struct fuse_fsync_in {
     pub(crate) fh: u64,
     pub(crate) fsync_flags: u32,
@@ -614,6 +632,7 @@ pub(crate) const FUSE_COMPAT_22_INIT_OUT_SIZE: usize = 24;
 
 #[repr(C)]
 #[derive(Debug, IntoBytes, KnownLayout, Immutable)]
+#[cfg_attr(any(test, fuser_mount_impl = "smb"), derive(FromBytes))]
 pub(crate) struct fuse_init_out {
     pub(crate) major: u32,
     pub(crate) minor: u32,
@@ -737,6 +756,7 @@ pub(crate) struct fuse_fallocate_in {
 
 #[repr(C)]
 #[derive(Debug, Clone, FromBytes, KnownLayout, Immutable)]
+#[cfg_attr(any(test, fuser_mount_impl = "smb"), derive(IntoBytes))]
 pub(crate) struct fuse_in_header {
     pub(crate) len: u32,
     pub(crate) opcode: u32,
@@ -750,6 +770,7 @@ pub(crate) struct fuse_in_header {
 
 #[repr(C)]
 #[derive(Debug, IntoBytes, KnownLayout, Immutable)]
+#[cfg_attr(any(test, fuser_mount_impl = "smb"), derive(FromBytes))]
 pub(crate) struct fuse_out_header {
     pub(crate) len: u32,
     pub(crate) error: i32,
@@ -758,6 +779,7 @@ pub(crate) struct fuse_out_header {
 
 #[repr(C)]
 #[derive(Debug, IntoBytes, KnownLayout, Immutable)]
+#[cfg_attr(any(test, fuser_mount_impl = "smb"), derive(FromBytes))]
 pub(crate) struct fuse_dirent {
     pub(crate) ino: u64,
     pub(crate) off: u64,

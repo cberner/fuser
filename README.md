@@ -80,6 +80,16 @@ System Extensions. FSKit does not tell the filesystem who made a request: `Reque
 `gid()` and `pid()` are 0, and `SessionACL` is not enforced by fuser. macFUSE's FSKit backend also
 does not support the notification API yet. fuser's macOS CI tests use this backend.
 
+Experimental: with the `macos-smb` feature, fuser needs neither macFUSE nor any other kernel
+extension, and the same `Filesystem` mounts through macOS's own SMB client. fuser serves it over
+SMB from inside the process, on a loopback port with a password made up for the mount, and mounts
+that share with `mount_smbfs`. The SMB 2.1 server is fuser's own. SMB carries less than FUSE: no
+symbolic or hard links, special files, ownership, modes other than a read-only flag, extended
+attributes, locks or notifications, and every request carries the mounting user's uid and gid,
+so `SessionACL` is not enforced by fuser. Of the mount options, only `RO`, `NoExec`, `NoAtime`,
+`Sync` and `FSName`, which names the share, are used. The password is on `mount_smbfs`'s command
+line while it runs, where other local users can see it.
+
 
 #### To install using Homebrew
 

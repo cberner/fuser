@@ -16,6 +16,8 @@ mod fuse_pure;
 #[cfg(fuser_macfuse_fskit)]
 pub(crate) mod mfmount;
 pub(crate) mod mount_options;
+#[cfg(any(test, fuser_mount_impl = "smb"))]
+pub(crate) mod smb;
 
 use std::io;
 
@@ -136,6 +138,8 @@ pub(crate) fn check_auto_unmount(options: &[MountOption], acl: SessionACL) -> io
     if !options.contains(&MountOption::AutoUnmount)
         || acl != SessionACL::Owner
         || nix::unistd::getuid().is_root()
+        // No mount helper is involved; the SMB backend ignores the option
+        || cfg!(fuser_mount_impl = "smb")
     {
         return Ok(());
     }
@@ -155,7 +159,7 @@ pub(crate) fn check_auto_unmount(options: &[MountOption], acl: SessionACL) -> io
         .to_string();
     #[cfg(fuser_mount_impl = "libfuse2")]
     let helper = "fusermount".to_string();
-    #[cfg(fuser_mount_impl = "macos-no-mount")]
+    #[cfg(any(fuser_mount_impl = "macos-no-mount", fuser_mount_impl = "smb"))]
     let helper = "fusermount".to_string();
 
     let version = std::process::Command::new(&helper)
@@ -198,6 +202,8 @@ enum MountImpl {
     Fuse2(fuse2::MountImpl),
     #[cfg(fuser_mount_impl = "libfuse3")]
     Fuse3(fuse3::MountImpl),
+    #[cfg(fuser_mount_impl = "smb")]
+    Smb(smb::MountImpl),
 }
 
 impl MountImpl {
@@ -209,6 +215,8 @@ impl MountImpl {
             MountImpl::Fuse2(mount) => mount.umount_impl(),
             #[cfg(fuser_mount_impl = "libfuse3")]
             MountImpl::Fuse3(mount) => mount.umount_impl(),
+            #[cfg(fuser_mount_impl = "smb")]
+            MountImpl::Smb(mount) => mount.umount_impl(),
             // This branch is needed because Rust does not consider & empty enum non-empty.
             #[cfg(fuser_mount_impl = "macos-no-mount")]
             _ => Ok(()),
@@ -258,6 +266,11 @@ impl Mount {
         let (dev_fuse, mount_impl) = {
             let (dev_fuse, mount) = fuse3::MountImpl::new(mountpoint, options, acl)?;
             (dev_fuse, MountImpl::Fuse3(mount))
+        };
+        #[cfg(fuser_mount_impl = "smb")]
+        let (dev_fuse, mount_impl) = {
+            let (dev_fuse, mount) = smb::MountImpl::new(mountpoint, options, acl)?;
+            (dev_fuse, MountImpl::Smb(mount))
         };
         #[cfg(fuser_mount_impl = "macos-no-mount")]
         {
