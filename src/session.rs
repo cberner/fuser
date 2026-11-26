@@ -268,7 +268,21 @@ impl<FS: Filesystem> Session<FS> {
         acl: SessionACL,
         config: Config,
     ) -> io::Result<Self> {
-        let ch = Channel::new(Arc::new(DevFuse::new(File::from(fd))));
+        Self::from_channel(
+            filesystem,
+            Channel::new(Arc::new(DevFuse::new(File::from(fd)))),
+            acl,
+            config,
+        )
+    }
+
+    /// A session over a connection that is not mounted here
+    pub(crate) fn from_channel(
+        filesystem: FS,
+        ch: Channel,
+        acl: SessionACL,
+        config: Config,
+    ) -> io::Result<Self> {
         let mut session = Session {
             filesystem: FilesystemHolder::new(filesystem),
             ch,
@@ -306,7 +320,7 @@ impl<FS: Filesystem> Session<FS> {
                 CURRENT_SESSION.set(id);
                 self.run()
             })?;
-        Ok(BackgroundSession {
+        let session = BackgroundSession {
             id,
             guard: Some(guard),
             sender,
@@ -314,7 +328,13 @@ impl<FS: Filesystem> Session<FS> {
             mount,
             kernel_capabilities,
             kernel_abi,
-        })
+        };
+        // A mount that completes in the background must be done before the caller uses it.
+        // If it fails, dropping the session unmounts what there is and waits for it to end
+        if let Some(mount) = &session.mount {
+            mount.wait_mounted()?;
+        }
+        Ok(session)
     }
 
     /// Run the session loop that receives kernel requests and dispatches them to method

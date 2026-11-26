@@ -10,6 +10,12 @@ Breaking changes:
   being dispatched. Cleanup that needs `&mut self` belongs in `Drop`
 
 New features:
+* Experimental, macOS only: the `macos-nfs` feature mounts without macFUSE or FUSE-T, through
+  macOS's own NFS client. fuser serves NFSv3 on 127.0.0.1 from within the process and translates
+  each call into FUSE requests for the unchanged session, so `mount()`, `spawn_mount()` and
+  `Session` work as before. The NFS server is fuser's own, with no dependencies. Requests all
+  carry the mounting user's ids, and extended attributes and notifications are not supported.
+  Linux still uses FUSE
 * Add `ReplyCreate::created_with_ttls()` and `ReplyDirectoryPlus::add_with_ttls()` to reply with
   distinct entry and attribute TTLs, as `ReplyEntry::entry_with_ttls()` does
 * Add `ReplyData::data_vectored()` to reply with data from several buffers without first copying

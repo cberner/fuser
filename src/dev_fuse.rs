@@ -5,13 +5,16 @@ use std::os::fd::AsFd;
 use std::os::fd::AsRawFd;
 use std::os::fd::BorrowedFd;
 
-/// The kernel connection of a mount: the `/dev/fuse` device, or on macOS an MFMount channel.
+/// The kernel connection of a mount: the `/dev/fuse` device, or on macOS an MFMount channel
+/// or the in-process connection to the NFS backend.
 #[derive(Debug)]
 pub(crate) struct DevFuse {
-    /// For an MFMount channel, which has no fd, a placeholder that is not connected to it
+    /// For a connection without an fd, a placeholder that is not connected to it
     file: File,
     #[cfg(fuser_macfuse_fskit)]
     pub(crate) mf_channel: Option<crate::mnt::mfmount::MfChannel>,
+    #[cfg(any(fuser_mount_impl = "nfs", test))]
+    pub(crate) transport: Option<std::sync::Arc<crate::mnt::nfs::transport::Transport>>,
 }
 
 impl AsRawFd for DevFuse {
@@ -32,7 +35,20 @@ impl DevFuse {
             file,
             #[cfg(fuser_macfuse_fskit)]
             mf_channel: None,
+            #[cfg(any(fuser_mount_impl = "nfs", test))]
+            transport: None,
         }
+    }
+
+    /// A connection within the process, to the NFS backend's server
+    #[cfg(any(fuser_mount_impl = "nfs", test))]
+    pub(crate) fn from_transport(
+        transport: std::sync::Arc<crate::mnt::nfs::transport::Transport>,
+    ) -> io::Result<Self> {
+        Ok(Self {
+            transport: Some(transport),
+            ..Self::new(File::open("/dev/null")?)
+        })
     }
 
     #[cfg(all(test, fuser_mount_impl = "pure-rust"))]
@@ -44,8 +60,8 @@ impl DevFuse {
     #[cfg(fuser_macfuse_fskit)]
     pub(crate) fn from_mf_channel(channel: crate::mnt::mfmount::MfChannel) -> io::Result<Self> {
         Ok(Self {
-            file: File::open("/dev/null")?,
             mf_channel: Some(channel),
+            ..Self::new(File::open("/dev/null")?)
         })
     }
 

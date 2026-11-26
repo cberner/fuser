@@ -54,6 +54,9 @@ pkg-config = "0.3.34"
 [features]
 default = []
 experimental = ["async-trait", "tokio"]
+# Experimental, macOS only: mount through macOS's own NFS client instead of macFUSE, by serving
+# NFSv3 on 127.0.0.1 from within the process. Elsewhere it does nothing
+macos-nfs = []
 libfuse = []
 libfuse2 = ["libfuse"]
 libfuse3 = ["libfuse"]

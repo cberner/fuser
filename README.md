@@ -80,6 +80,12 @@ System Extensions. FSKit does not tell the filesystem who made a request: `Reque
 `gid()` and `pid()` are 0, and `SessionACL` is not enforced by fuser. macFUSE's FSKit backend also
 does not support the notification API yet. fuser's macOS CI tests use this backend.
 
+Experimental: with the `macos-nfs` feature, fuser needs neither macFUSE nor FUSE-T. It serves the
+filesystem over NFSv3 on 127.0.0.1 from within the process and mounts it with macOS's own
+`mount_nfs`; filesystems use the same API. NFS carries less than FUSE: every request reaches the
+filesystem as the mounting user, and there are no extended attributes or notifications. `MountOption::CUSTOM` values are passed to `mount_nfs`. See
+`src/mnt/nfs/mod.rs` for the details.
+
 
 #### To install using Homebrew
 
