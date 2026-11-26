@@ -27,6 +27,12 @@ impl<'a> ArgumentIterator<'a> {
         self.data.len()
     }
 
+    /// The remaining bytes, without consuming them.
+    #[cfg(target_os = "macos")]
+    pub(crate) fn peek(&self) -> &'a [u8] {
+        self.data
+    }
+
     /// Fetch a slice of all remaining bytes.
     pub(crate) fn fetch_all(&mut self) -> &'a [u8] {
         let bytes = self.data;

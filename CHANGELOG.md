@@ -44,7 +44,8 @@ Bug fixes:
   leave the mount in place
 * macOS: fix two incompatibilities with FUSE-T. The INIT reply is sized for the protocol version
   both sides speak, rather than the newer one FUSE-T offers, and RENAME is parsed with macFUSE's
-  extended layout only when `FUSE_RENAME_SWAP` was negotiated, as macFUSE's libfuse does
+  extended layout only when the request carries it. FUSE-T offers `FUSE_RENAME_SWAP` but sends
+  the plain layout, so the capability cannot decide
 
 ## 0.19.0 - 2026-11-20
 

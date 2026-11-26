@@ -678,6 +678,15 @@ mod op {
         }
     }
 
+    /// Whether what follows `fuse_rename_in`'s `newdir` starts with macFUSE's
+    /// `fuse_rename_in_macos_ext`. The names after it cannot contain NUL, so the plain layout
+    /// holds exactly their two terminators, while the extension adds more: `flags` has only
+    /// low bits set and `padding` is zero.
+    #[cfg(any(target_os = "macos", test))]
+    pub(crate) fn rename_in_has_macos_ext(rest: &[u8]) -> bool {
+        rest.iter().filter(|b| **b == 0).count() > 2
+    }
+
     /// Create a hard link.
     #[derive(Debug)]
     pub(crate) struct Link<'a> {
@@ -1834,11 +1843,11 @@ mod op {
             fuse_opcode::FUSE_RENAME => Operation::Rename(Rename {
                 header,
                 arg: data.fetch()?,
-                // macFUSE adds the renamex_np flags only when it offers FUSE_RENAME_SWAP, which
-                // fuser always requests: as in its libfuse, the layout follows that capability.
-                // FUSE-T, which does not offer it, sends the plain layout
+                // macFUSE adds the renamex_np flags once it offers FUSE_RENAME_SWAP. FUSE-T
+                // sets that bit too but sends the plain layout, so the capability cannot tell
+                // them apart and the layout is read from the request itself
                 #[cfg(target_os = "macos")]
-                flags: if negotiated.contains(InitFlags::FUSE_RENAME_SWAP) {
+                flags: if rename_in_has_macos_ext(data.peek()) {
                     let ext: &fuse_rename_in_macos_ext = data.fetch()?;
                     ext.flags
                 } else {
@@ -2600,6 +2609,38 @@ mod tests {
                 assert_eq!(x.flags(), crate::RenameFlags::empty());
             }
             _ => panic!("Unexpected request operation"),
+        }
+    }
+
+    /// FUSE-T offers FUSE_RENAME_SWAP, which fuser then negotiates, but still sends the plain
+    /// layout: the names must not be read from where macFUSE's extension would be
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn rename_plain_layout_with_rename_swap_negotiated() {
+        let mut req = AnyRequest::try_from(&RENAME_REQUEST[..]).unwrap();
+        req.set_negotiated(InitFlags::FUSE_RENAME_SWAP | InitFlags::FUSE_RENAME_EXCL);
+        match req.operation().unwrap() {
+            Operation::Rename(x) => {
+                assert_eq!(x.src().name, Path::new("old.txt"));
+                assert_eq!(x.dest().dir, INodeNo(0x99aa_bbcc_ddee_ff00));
+                assert_eq!(x.dest().name, Path::new("new.txt"));
+                assert_eq!(x.flags(), crate::RenameFlags::empty());
+            }
+            _ => panic!("Unexpected request operation"),
+        }
+    }
+
+    /// What follows `newdir` says which rename layout a request uses: the plain one holds only
+    /// the two names' terminators
+    #[test]
+    fn rename_layout_is_read_from_the_request() {
+        let names = b"old.txt\0new.txt\0";
+        assert!(!op::rename_in_has_macos_ext(names));
+        for flags in [0u32, 2, 4] {
+            let mut ext = flags.to_ne_bytes().to_vec();
+            ext.extend_from_slice(&[0; 4]);
+            ext.extend_from_slice(names);
+            assert!(op::rename_in_has_macos_ext(&ext), "flags {flags}");
         }
     }
 
