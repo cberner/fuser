@@ -48,7 +48,10 @@ impl MountImpl {
         let fuse = Fuse::new(transport, caller);
         let export = super::export_name(options);
         let read_only = options.contains(&MountOption::RO);
-        let server = Server::bind(Nfs::new(fuse.clone(), read_only, &export)?, port)?;
+        let v4 = super::wants_v4(options);
+        let nfs = Nfs::new(fuse.clone(), read_only, &export, v4)?;
+        let path = nfs.export_path();
+        let server = Server::bind(nfs, port)?;
         let stopper = server.stopper()?;
         let init = fuse.start_init().map_err(io::Error::from_raw_os_error)?;
         let initializing = fuse.clone();
@@ -61,7 +64,7 @@ impl MountImpl {
         let server = std::thread::Builder::new()
             .name("fuser-nfs-server".to_string())
             .spawn(move || server.run())?;
-        info!("Serving NFS on 127.0.0.1:{port}, export /{export}, for another client to mount");
+        info!("Serving NFS on 127.0.0.1:{port}, export {path}, for another client to mount");
         Ok((
             device,
             MountImpl {

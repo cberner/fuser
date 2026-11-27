@@ -1,11 +1,14 @@
 //! The FUSE side of the NFS server: what the FUSE kernel module would send the session.
 //!
 //! Requests are queued on a [`Transport`] and their replies awaited, blocking the calling
-//! thread. Node ids are never forgotten: NFS has no counterpart to `FUSE_FORGET`.
+//! thread. Node ids are never forgotten: NFS has no counterpart to `FUSE_FORGET`, and a
+//! forgotten id could be given to a new file that old handles would then name.
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc;
 use std::time::Duration;
@@ -22,16 +25,20 @@ use super::transport::Transport;
 use crate::ll::flags::init_flags::InitFlags;
 use crate::ll::fuse_abi::FUSE_KERNEL_MINOR_VERSION;
 use crate::ll::fuse_abi::FUSE_KERNEL_VERSION;
+use crate::ll::fuse_abi::fuse_access_in;
 use crate::ll::fuse_abi::fuse_attr;
 use crate::ll::fuse_abi::fuse_attr_out;
 use crate::ll::fuse_abi::fuse_create_in;
 use crate::ll::fuse_abi::fuse_dirent;
 use crate::ll::fuse_abi::fuse_entry_out;
+use crate::ll::fuse_abi::fuse_file_lock;
 use crate::ll::fuse_abi::fuse_flush_in;
 use crate::ll::fuse_abi::fuse_fsync_in;
 use crate::ll::fuse_abi::fuse_getattr_in;
 use crate::ll::fuse_abi::fuse_init_in;
 use crate::ll::fuse_abi::fuse_kstatfs;
+use crate::ll::fuse_abi::fuse_lk_in;
+use crate::ll::fuse_abi::fuse_lk_out;
 use crate::ll::fuse_abi::fuse_mknod_in;
 use crate::ll::fuse_abi::fuse_opcode;
 use crate::ll::fuse_abi::fuse_open_in;
@@ -58,6 +65,21 @@ pub(crate) const S_IFMT: u32 = 0o170000;
 pub(crate) const S_IFDIR: u32 = 0o040000;
 pub(crate) const S_IFREG: u32 = 0o100000;
 
+thread_local! {
+    /// Whom the NFS call being answered on this thread was made by
+    static CALLER: Cell<Option<Caller>> = const { Cell::new(None) };
+}
+
+/// Runs `answer` with the FUSE requests it makes carrying `caller`, from the call's AUTH_SYS
+/// credentials. Requests made outside any call, and calls without credentials, carry the
+/// mounting user
+pub(crate) fn as_caller<T>(caller: Option<Caller>, answer: impl FnOnce() -> T) -> T {
+    let previous = CALLER.replace(caller);
+    let result = answer();
+    CALLER.set(previous);
+    result
+}
+
 /// A FUSE error: the errno the filesystem replied with
 pub(crate) type FuseResult<T> = Result<T, i32>;
 
@@ -65,7 +87,12 @@ pub(crate) type FuseResult<T> = Result<T, i32>;
 /// and release it
 #[derive(Debug, Clone, Copy)]
 struct Handle {
+    /// Unique among the handles kept, as `fh` need not be: a filesystem may answer every open
+    /// with the same one
+    id: u64,
     fh: u64,
+    /// The uid and gid it was opened as: only their calls use it
+    owner: (u32, u32),
     /// The flags it was opened with
     flags: i32,
     readable: bool,
@@ -88,6 +115,10 @@ struct Inner {
     parents: Mutex<HashMap<u64, u64>>,
     /// The filesystem answered FSYNC with ENOSYS, so it is not sent again, as the kernel does
     no_fsync: AtomicBool,
+    /// The same for ACCESS
+    no_access: AtomicBool,
+    /// The id of the last handle kept
+    next_handle: AtomicU64,
 }
 
 /// A directory entry, and the cookie that resumes the listing after it
@@ -112,6 +143,8 @@ impl Fuse {
             handles: Mutex::default(),
             parents: Mutex::default(),
             no_fsync: AtomicBool::new(false),
+            no_access: AtomicBool::new(false),
+            next_handle: AtomicU64::new(0),
         }))
     }
 
@@ -174,16 +207,64 @@ impl Fuse {
         let receiver = self
             .0
             .transport
-            .submit(opcode, nodeid, self.0.caller, args)
+            .submit(opcode, nodeid, self.caller(), args)
             .map_err(|e| e as i32)?;
         // Dropped without a reply once the connection has closed
         let reply = receiver.recv().map_err(|_| libc::EIO)?;
         parse_reply(&reply).map(<[u8]>::to_vec)
     }
 
+    fn caller(&self) -> Caller {
+        CALLER.get().unwrap_or(self.0.caller)
+    }
+
+    fn owner(&self) -> (u32, u32) {
+        let caller = self.caller();
+        (caller.uid, caller.gid)
+    }
+
+    /// Which of the NFS ACCESS bits `asked` (READ 0x1, LOOKUP 0x2, MODIFY 0x4, EXTEND 0x8,
+    /// DELETE 0x10 and EXECUTE 0x20, the same in NFSv3 and NFSv4) the filesystem grants the
+    /// caller, through FUSE_ACCESS. Clients check these before operations they send no request
+    /// for, such as opening a file. A filesystem without ACCESS grants them all, and is not
+    /// asked again, as the kernel does.
+    ///
+    /// DELETE is always granted. macOS asks it of the node to be removed or renamed, which
+    /// only its directory (and that directory's sticky bit) decides, and this server does not
+    /// know which directory is meant. The REMOVE or RENAME that follows is the filesystem's to
+    /// refuse
+    pub(crate) fn granted_access(&self, nodeid: u64, asked: u32) -> FuseResult<u32> {
+        let mut granted = asked & 0x10;
+        for (bits, mask) in [
+            (0x1, libc::R_OK),
+            (0x2 | 0x20, libc::X_OK),
+            (0x4 | 0x8, libc::W_OK),
+        ] {
+            let wanted = asked & bits;
+            if wanted == 0 {
+                continue;
+            }
+            if self.0.no_access.load(Ordering::Relaxed) {
+                granted |= wanted;
+                continue;
+            }
+            let arg = fuse_access_in { mask, padding: 0 };
+            match self.call(fuse_opcode::FUSE_ACCESS, nodeid, &[arg.as_bytes()]) {
+                Ok(_) => granted |= wanted,
+                Err(libc::EACCES | libc::EPERM | libc::EROFS) => {}
+                Err(libc::ENOSYS) => {
+                    self.0.no_access.store(true, Ordering::Relaxed);
+                    granted |= wanted;
+                }
+                Err(errno) => return Err(errno),
+            }
+        }
+        Ok(granted)
+    }
+
     /// Queues a request whose reply does not matter
     fn post(&self, opcode: fuse_opcode, nodeid: u64, args: &[&[u8]]) {
-        let _ = self.0.transport.submit(opcode, nodeid, self.0.caller, args);
+        let _ = self.0.transport.submit(opcode, nodeid, self.caller(), args);
     }
 
     /// Sends a request that creates a node in `dir`, recording a new directory's parent
@@ -268,15 +349,17 @@ impl Fuse {
     fn acquire(&self, nodeid: u64, write: bool) -> FuseResult<HandleGuard> {
         {
             let mut handles = self.0.handles.lock();
+            let owner = self.owner();
             if let Some(handle) = handles.get_mut(&nodeid).and_then(|hs| {
                 hs.iter_mut()
-                    .find(|h| if write { h.writable } else { h.readable })
+                    .find(|h| h.owner == owner && if write { h.writable } else { h.readable })
             }) {
                 handle.users += 1;
                 handle.last_used = Instant::now();
                 return Ok(HandleGuard {
                     fuse: self.clone(),
                     nodeid,
+                    id: handle.id,
                     fh: handle.fh,
                     flags: handle.flags,
                 });
@@ -288,30 +371,36 @@ impl Fuse {
             libc::O_RDONLY
         };
         let fh = self.open(nodeid, fuse_opcode::FUSE_OPEN, flags)?;
-        self.keep(nodeid, fh, flags, 1);
+        let id = self.keep(nodeid, fh, flags, 1);
         Ok(HandleGuard {
             fuse: self.clone(),
             nodeid,
+            id,
             fh,
             flags,
         })
     }
 
-    fn keep(&self, nodeid: u64, fh: u64, flags: i32, users: u32) {
+    /// Keeps a handle for later reads and writes, returning its id
+    fn keep(&self, nodeid: u64, fh: u64, flags: i32, users: u32) -> u64 {
         let access = flags & libc::O_ACCMODE;
+        let id = self.0.next_handle.fetch_add(1, Ordering::Relaxed) + 1;
         self.0
             .handles
             .lock()
             .entry(nodeid)
             .or_default()
             .push(Handle {
+                id,
                 fh,
+                owner: self.owner(),
                 flags,
                 readable: access != libc::O_WRONLY,
                 writable: access != libc::O_RDONLY,
                 users,
                 last_used: Instant::now(),
             });
+        id
     }
 
     /// Releases the file handles unused for `idle`
@@ -358,18 +447,109 @@ impl Fuse {
         self.0.transport.close();
     }
 
+    /// Opens a file for an open the client keeps, rather than one kept here
+    pub(crate) fn open_file(&self, nodeid: u64, flags: i32) -> FuseResult<u64> {
+        self.open(nodeid, fuse_opcode::FUSE_OPEN, flags)
+    }
+
+    /// Flushes and releases what `open_file` or `create_open` opened
+    /// Closes a file handle as close(2) does, returning what the flush of a writable one
+    /// answered, which is how a filesystem reports a write it could not complete
+    pub(crate) fn close_file_checked(&self, nodeid: u64, fh: u64, flags: i32) -> FuseResult<()> {
+        let flushed = if flags & libc::O_ACCMODE == libc::O_RDONLY {
+            Ok(())
+        } else {
+            let mut flush = fuse_flush_in::new_zeroed();
+            flush.fh = fh;
+            match self.call(fuse_opcode::FUSE_FLUSH, nodeid, &[flush.as_bytes()]) {
+                Ok(_) | Err(libc::ENOSYS) => Ok(()),
+                Err(errno) => Err(errno),
+            }
+        };
+        let mut release = fuse_release_in::new_zeroed();
+        release.fh = fh;
+        release.flags = flags;
+        self.post(fuse_opcode::FUSE_RELEASE, nodeid, &[release.as_bytes()]);
+        flushed
+    }
+
+    pub(crate) fn close_file(&self, nodeid: u64, fh: u64, flags: i32) {
+        let access = flags & libc::O_ACCMODE;
+        self.release_file(
+            nodeid,
+            &Handle {
+                id: 0,
+                fh,
+                owner: self.owner(),
+                flags,
+                readable: access != libc::O_WRONLY,
+                writable: access != libc::O_RDONLY,
+                users: 0,
+                last_used: Instant::now(),
+            },
+        );
+    }
+
+    /// Takes or drops (`typ` F_UNLCK) a POSIX lock on `start..=end`, without waiting
+    pub(crate) fn setlk(
+        &self,
+        nodeid: u64,
+        fh: u64,
+        owner: u64,
+        start: u64,
+        end: u64,
+        typ: i32,
+    ) -> FuseResult<()> {
+        let arg = lk_in(fh, owner, start, end, typ);
+        self.call(fuse_opcode::FUSE_SETLK, nodeid, &[arg.as_bytes()])
+            .map(drop)
+    }
+
+    /// The lock that would conflict with `typ` on `start..=end`; its type is F_UNLCK if none
+    pub(crate) fn getlk(
+        &self,
+        nodeid: u64,
+        fh: Option<u64>,
+        owner: u64,
+        start: u64,
+        end: u64,
+        typ: i32,
+    ) -> FuseResult<fuse_file_lock> {
+        let handle = match fh {
+            Some(_) => None,
+            None => Some(self.acquire(nodeid, false)?),
+        };
+        let fh = fh.or(handle.as_ref().map(|h| h.fh)).unwrap_or_default();
+        let arg = lk_in(fh, owner, start, end, typ);
+        let out: fuse_lk_out =
+            decode(&self.call(fuse_opcode::FUSE_GETLK, nodeid, &[arg.as_bytes()])?)?;
+        Ok(out.lk)
+    }
+
     /// Reads up to `count` bytes, splitting the read into FUSE-sized requests. Returns the data
     /// and whether it ends at the end of the file
     pub(crate) fn read(&self, nodeid: u64, offset: u64, count: u32) -> FuseResult<(Vec<u8>, bool)> {
         let handle = self.acquire(nodeid, false)?;
+        self.read_with(nodeid, handle.fh, handle.flags, offset, count)
+    }
+
+    /// `read` through the open file handle `fh`
+    pub(crate) fn read_with(
+        &self,
+        nodeid: u64,
+        fh: u64,
+        flags: i32,
+        offset: u64,
+        count: u32,
+    ) -> FuseResult<(Vec<u8>, bool)> {
         let mut data = Vec::new();
         while data.len() < count as usize {
             let want = (count - data.len() as u32).min(MAX_READ);
             let mut arg = fuse_read_in::new_zeroed();
-            arg.fh = handle.fh;
+            arg.fh = fh;
             arg.offset = offset + data.len() as u64;
             arg.size = want;
-            arg.flags = handle.flags;
+            arg.flags = flags;
             let chunk = self.call(fuse_opcode::FUSE_READ, nodeid, &[arg.as_bytes()])?;
             data.extend_from_slice(&chunk[..chunk.len().min(want as usize)]);
             if chunk.len() < want as usize {
@@ -389,8 +569,16 @@ impl Fuse {
         let handle = self
             .acquire(nodeid, true)
             .or_else(|_| self.acquire(nodeid, false))?;
+        self.fsync_with(nodeid, handle.fh)
+    }
+
+    /// Syncs a file through the handle `fh`, as fsync(2) on a descriptor does
+    pub(crate) fn fsync_with(&self, nodeid: u64, fh: u64) -> FuseResult<()> {
+        if self.0.no_fsync.load(Ordering::Relaxed) {
+            return Ok(());
+        }
         let mut arg = fuse_fsync_in::new_zeroed();
-        arg.fh = handle.fh;
+        arg.fh = fh;
         match self.call(fuse_opcode::FUSE_FSYNC, nodeid, &[arg.as_bytes()]) {
             Ok(_) => Ok(()),
             Err(libc::ENOSYS) => {
@@ -403,16 +591,28 @@ impl Fuse {
 
     /// Writes all of `data`, splitting it to the session's `max_write`
     pub(crate) fn write(&self, nodeid: u64, offset: u64, data: &[u8]) -> FuseResult<()> {
-        let max_write = self.max_write()? as usize;
         let handle = self.acquire(nodeid, true)?;
+        self.write_with(nodeid, handle.fh, handle.flags, offset, data)
+    }
+
+    /// `write` through the open file handle `fh`
+    pub(crate) fn write_with(
+        &self,
+        nodeid: u64,
+        fh: u64,
+        flags: i32,
+        offset: u64,
+        data: &[u8],
+    ) -> FuseResult<()> {
+        let max_write = self.max_write()? as usize;
         let mut written = 0;
         while written < data.len() {
             let chunk = &data[written..data.len().min(written + max_write)];
             let mut arg = fuse_write_in::new_zeroed();
-            arg.fh = handle.fh;
+            arg.fh = fh;
             arg.offset = i64::try_from(offset + written as u64).map_err(|_| libc::EFBIG)?;
             arg.size = chunk.len() as u32;
-            arg.flags = handle.flags;
+            arg.flags = flags;
             let out: fuse_write_out =
                 decode(&self.call(fuse_opcode::FUSE_WRITE, nodeid, &[arg.as_bytes(), chunk])?)?;
             if out.size == 0 {
@@ -433,6 +633,22 @@ impl Fuse {
         mode: u32,
         exclusive: bool,
     ) -> FuseResult<fuse_entry_out> {
+        let (entry, opened) = self.create_open(dir, name, mode, exclusive)?;
+        if let Some((fh, flags)) = opened {
+            self.keep(entry.nodeid, fh, flags, 0);
+        }
+        Ok(entry)
+    }
+
+    /// Creates a regular file, returning the handle `FUSE_CREATE` opened, and its flags, for
+    /// the caller to release. None if the filesystem has no CREATE, and MKNOD made the file
+    pub(crate) fn create_open(
+        &self,
+        dir: u64,
+        name: &[u8],
+        mode: u32,
+        exclusive: bool,
+    ) -> FuseResult<(fuse_entry_out, Option<(u64, i32)>)> {
         let mut flags = libc::O_RDWR | libc::O_CREAT;
         if exclusive {
             flags |= libc::O_EXCL;
@@ -452,11 +668,10 @@ impl Fuse {
                 let entry: fuse_entry_out = decode(&reply)?;
                 let open: fuse_open_out =
                     decode(reply.get(size_of::<fuse_entry_out>()..).unwrap_or_default())?;
-                self.keep(entry.nodeid, open.fh, flags, 0);
-                Ok(entry)
+                Ok((entry, Some((open.fh, flags))))
             }
             // As the kernel does
-            Err(libc::ENOSYS) => self.mknod(dir, name, S_IFREG | (mode & 0o7777), 0),
+            Err(libc::ENOSYS) => Ok((self.mknod(dir, name, S_IFREG | (mode & 0o7777), 0)?, None)),
             Err(e) => Err(e),
         }
     }
@@ -540,6 +755,7 @@ impl Fuse {
 struct HandleGuard {
     fuse: Fuse,
     nodeid: u64,
+    id: u64,
     fh: u64,
     flags: i32,
 }
@@ -549,11 +765,26 @@ impl Drop for HandleGuard {
         let mut handles = self.fuse.0.handles.lock();
         if let Some(handle) = handles
             .get_mut(&self.nodeid)
-            .and_then(|hs| hs.iter_mut().find(|h| h.fh == self.fh))
+            .and_then(|hs| hs.iter_mut().find(|h| h.id == self.id))
         {
             handle.users -= 1;
             handle.last_used = Instant::now();
         }
+    }
+}
+
+fn lk_in(fh: u64, owner: u64, start: u64, end: u64, typ: i32) -> fuse_lk_in {
+    fuse_lk_in {
+        fh,
+        owner,
+        lk: fuse_file_lock {
+            start,
+            end,
+            typ,
+            pid: 0,
+        },
+        lk_flags: 0,
+        padding: 0,
     }
 }
 

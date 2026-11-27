@@ -595,6 +595,7 @@ pub(crate) struct fuse_getxattr_out {
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
+#[cfg_attr(any(fuser_mount_impl = "nfs", test), derive(IntoBytes))]
 pub(crate) struct fuse_lk_in {
     pub(crate) fh: u64,
     pub(crate) owner: u64,
@@ -605,12 +606,14 @@ pub(crate) struct fuse_lk_in {
 
 #[repr(C)]
 #[derive(Debug, IntoBytes, KnownLayout, Immutable)]
+#[cfg_attr(any(fuser_mount_impl = "nfs", test), derive(FromBytes))]
 pub(crate) struct fuse_lk_out {
     pub(crate) lk: fuse_file_lock,
 }
 
 #[repr(C)]
 #[derive(Debug, FromBytes, KnownLayout, Immutable)]
+#[cfg_attr(any(fuser_mount_impl = "nfs", test), derive(IntoBytes))]
 pub(crate) struct fuse_access_in {
     // NOTE: this field is defined as u32 in fuse_kernel.h in libfuse. However, it is then cast
     // to an i32 when invoking the filesystem's access method

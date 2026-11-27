@@ -15,7 +15,8 @@ New features:
   each call into FUSE requests for the unchanged session, so `mount()`, `spawn_mount()` and
   `Session` work as before. The NFS server is fuser's own, with no dependencies. Requests all
   carry the mounting user's ids, and extended attributes and notifications are not supported.
-  Linux still uses FUSE
+  Linux still uses FUSE. With `MountOption::CUSTOM("vers=4")` it mounts with NFSv4.1 instead,
+  which passes opens and byte-range locks on to the filesystem (more experimental still)
 * Add `ReplyCreate::created_with_ttls()` and `ReplyDirectoryPlus::add_with_ttls()` to reply with
   distinct entry and attribute TTLs, as `ReplyEntry::entry_with_ttls()` does
 * Add `ReplyData::data_vectored()` to reply with data from several buffers without first copying

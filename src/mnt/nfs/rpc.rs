@@ -12,17 +12,22 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc;
+use std::time::Duration;
+use std::time::Instant;
 
 use log::debug;
+use log::trace;
 use log::warn;
 use parking_lot::Mutex;
 
+use super::fuse::as_caller;
 use super::nfs3::MAX_IO;
 use super::nfs3::MOUNT_PROGRAM;
 use super::nfs3::NFS_PROGRAM;
 use super::nfs3::Nfs;
 use super::nfs3::Refused;
 use super::nfs3::VERSION;
+use super::transport::Caller;
 use super::xdr::Reader;
 use super::xdr::Writer;
 
@@ -41,9 +46,15 @@ const RPC_MISMATCH: u32 = 0;
 /// The last fragment of a record
 const LAST_FRAGMENT: u32 = 1 << 31;
 /// The largest record taken: a WRITE of `MAX_IO`, with room for its headers
-const MAX_RECORD: usize = MAX_IO as usize + 64 * 1024;
+pub(crate) const MAX_RECORD: usize = MAX_IO as usize + 64 * 1024;
 /// Threads answering the calls of one connection
 const WORKERS: usize = 8;
+/// Calls read from a connection before reading waits for them to be answered
+const QUEUED: usize = 4 * WORKERS;
+/// Connections served at once: a client needs one or two, and each takes `WORKERS` threads
+const MAX_CONNECTIONS: usize = 16;
+/// A call that takes longer than this is logged as a warning: a client may give up on it
+pub(crate) const SLOW_CALL: Duration = Duration::from_secs(1);
 
 /// Answers one RPC call message, returning the reply message. None for what is not a call
 pub(crate) fn answer(nfs: &Nfs, call: &[u8]) -> Option<Vec<u8>> {
@@ -63,24 +74,27 @@ pub(crate) fn answer(nfs: &Nfs, call: &[u8]) -> Option<Vec<u8>> {
         return Some(out);
     }
     let (program, version, procedure) = (a.u32().ok()?, a.u32().ok()?, a.u32().ok()?);
-    // The credentials and verifier: requests are all made as the mounting user
-    for _ in 0..2 {
-        a.u32().ok()?;
-        a.opaque().ok()?;
-    }
+    // The caller, from AUTH_SYS credentials; then the verifier, which is not checked
+    let flavor = a.u32().ok()?;
+    // Calls naming no one, with AUTH_NONE or credentials that do not parse, are nobody's
+    let caller = Some(caller(flavor, a.opaque().ok()?).unwrap_or(NOBODY));
+    a.u32().ok()?;
+    a.opaque().ok()?;
     out.put_u32(MSG_ACCEPTED);
     // AUTH_NONE verifier
     out.put_u32(0);
     out.put_u32(0);
-    let result = match program {
-        NFS_PROGRAM | MOUNT_PROGRAM if version != VERSION => {
+    let result = match (program, version) {
+        (NFS_PROGRAM, VERSION) => as_caller(caller, || nfs.nfs(procedure, a.rest())),
+        (NFS_PROGRAM, 4) => as_caller(caller, || nfs.v4().call(procedure, a.rest())),
+        (MOUNT_PROGRAM, VERSION) => nfs.mount(procedure, a.rest()),
+        (NFS_PROGRAM | MOUNT_PROGRAM, _) => {
+            // NFS versions 3 and 4, and MOUNT version 3
             out.put_u32(PROG_MISMATCH);
             out.put_u32(VERSION);
-            out.put_u32(VERSION);
+            out.put_u32(if program == NFS_PROGRAM { 4 } else { VERSION });
             return Some(out);
         }
-        NFS_PROGRAM => nfs.nfs(procedure, a.rest()),
-        MOUNT_PROGRAM => nfs.mount(procedure, a.rest()),
         _ => {
             out.put_u32(PROG_UNAVAIL);
             return Some(out);
@@ -95,6 +109,35 @@ pub(crate) fn answer(nfs: &Nfs, call: &[u8]) -> Option<Vec<u8>> {
         Err(Refused::Garbage) => out.put_u32(GARBAGE_ARGS),
     }
     Some(out)
+}
+
+/// Whom calls without credentials act as
+#[cfg(target_os = "macos")]
+const NOBODY: Caller = Caller {
+    uid: u32::MAX - 1,
+    gid: u32::MAX - 1,
+};
+#[cfg(not(target_os = "macos"))]
+const NOBODY: Caller = Caller {
+    uid: 65534,
+    gid: 65534,
+};
+
+/// Whom AUTH_SYS credentials (RFC 5531, appendix A) name. The supplementary groups are not
+/// passed on: FUSE requests carry one uid and gid
+fn caller(flavor: u32, body: &[u8]) -> Option<Caller> {
+    const AUTH_SYS: u32 = 1;
+    if flavor != AUTH_SYS {
+        return None;
+    }
+    let mut a = Reader::new(body);
+    // stamp, machinename
+    a.u32().ok()?;
+    a.opaque().ok()?;
+    Some(Caller {
+        uid: a.u32().ok()?,
+        gid: a.u32().ok()?,
+    })
 }
 
 /// Reads one record, joining its fragments
@@ -188,6 +231,14 @@ impl Server {
         Ok(self.listener.local_addr()?.port())
     }
 
+    #[cfg_attr(
+        any(not(fuser_mount_impl = "nfs"), fuser_nfs_serve_only),
+        allow(dead_code)
+    )]
+    pub(crate) fn nfs(&self) -> Arc<Nfs> {
+        self.nfs.clone()
+    }
+
     pub(crate) fn stopper(&self) -> io::Result<Stopper> {
         Ok(Stopper {
             stop: self.stop.clone(),
@@ -213,7 +264,20 @@ impl Server {
                 stream,
                 writing: Mutex::new(()),
             });
-            self.stop.connections.lock().push(connection.clone());
+            {
+                let mut connections = self.stop.connections.lock();
+                // Taken while stop() ran, it would be missed by it: ended here instead
+                if self.stop.stopped.load(Ordering::SeqCst) {
+                    let _ = connection.stream.shutdown(std::net::Shutdown::Both);
+                    break;
+                }
+                if connections.len() >= MAX_CONNECTIONS {
+                    warn!("NFS server: refusing a connection, {MAX_CONNECTIONS} are open");
+                    let _ = connection.stream.shutdown(std::net::Shutdown::Both);
+                    continue;
+                }
+                connections.push(connection.clone());
+            }
             let nfs = self.nfs.clone();
             let stop = self.stop.clone();
             let spawned = std::thread::Builder::new()
@@ -234,7 +298,8 @@ impl Server {
 
 /// Reads one connection's calls, answering them on worker threads, until it closes
 fn serve(nfs: &Arc<Nfs>, connection: &Arc<Connection>) {
-    let (calls, queue) = mpsc::channel::<Vec<u8>>();
+    // Each call with when it was read, so that its time here can be logged
+    let (calls, queue) = mpsc::sync_channel::<(Instant, Vec<u8>)>(QUEUED);
     let queue = Arc::new(Mutex::new(queue));
     for _ in 0..WORKERS {
         let (nfs, connection, queue) = (nfs.clone(), connection.clone(), queue.clone());
@@ -245,15 +310,34 @@ fn serve(nfs: &Arc<Nfs>, connection: &Arc<Connection>) {
                     // Not held while answering
                     let call = queue.lock().recv();
                     // Ends once the reader has gone and the queue is empty
-                    let Ok(call) = call else {
+                    let Ok((read, call)) = call else {
                         return;
                     };
+                    let started = read.elapsed();
                     let Some(reply) = answer(&nfs, &call) else {
                         continue;
                     };
                     let _writing = connection.writing.lock();
                     if let Err(err) = write_record(&mut &connection.stream, &reply) {
                         debug!("NFS server: replying failed: {err}");
+                    }
+                    // Program, version and procedure follow the xid, type and RPC version
+                    let word = |i: usize| {
+                        call.get(i * 4..i * 4 + 4)
+                            .map_or(0, |w| u32::from_be_bytes(w.try_into().expect("4 bytes")))
+                    };
+                    let took = read.elapsed();
+                    let (program, version, procedure) = (word(3), word(4), word(5));
+                    if took > SLOW_CALL {
+                        warn!(
+                            "NFS call {program}.{version}.{procedure} took {took:?}, after \
+                             {started:?} queued"
+                        );
+                    } else {
+                        trace!(
+                            "NFS call {program}.{version}.{procedure} answered in {took:?}, \
+                             after {started:?} queued"
+                        );
                     }
                 }
             });
@@ -262,7 +346,7 @@ fn serve(nfs: &Arc<Nfs>, connection: &Arc<Connection>) {
     loop {
         match read_record(&mut input) {
             Ok(call) => {
-                if calls.send(call).is_err() {
+                if calls.send((Instant::now(), call)).is_err() {
                     return;
                 }
             }

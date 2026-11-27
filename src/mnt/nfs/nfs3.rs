@@ -1,23 +1,27 @@
 //! The NFSv3 (RFC 1813) and MOUNT v3 procedures, answered with FUSE requests.
 //!
-//! A file handle is the FUSE node id. Replies carry attributes only where FUSE handed them
-//! over anyway: weak cache consistency data is always left out, which the client takes as a
-//! reason to fetch attributes again.
+//! A file handle is the FUSE node id and the server's key. Replies carry attributes where FUSE
+//! handed them over anyway, and WRITE's and COMMIT's weak cache consistency data, by which the
+//! client tells its own writes from another's. Elsewhere that data is left out, which the
+//! client takes as a reason to fetch attributes again.
 
 use std::io;
 use std::io::Read;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
+use std::time::Instant;
 
+use log::trace;
 use zerocopy::FromZeros;
 use zerocopy::IntoBytes;
 
 use super::fuse::DirEntry;
 use super::fuse::Fuse;
-use super::fuse::MAX_READ;
 use super::fuse::READDIR_SIZE;
 use super::fuse::S_IFDIR;
 use super::fuse::S_IFMT;
+use super::nfs4::Nfs4;
 use super::xdr;
 use super::xdr::Reader;
 use super::xdr::Writer;
@@ -125,17 +129,17 @@ type Result<T = ()> = std::result::Result<T, Error>;
 
 /// Attributes a client asks to set
 #[derive(Debug, Default)]
-struct Sattr {
-    mode: Option<u32>,
-    uid: Option<u32>,
-    gid: Option<u32>,
-    size: Option<u64>,
-    atime: SetTime,
-    mtime: SetTime,
+pub(super) struct Sattr {
+    pub(super) mode: Option<u32>,
+    pub(super) uid: Option<u32>,
+    pub(super) gid: Option<u32>,
+    pub(super) size: Option<u64>,
+    pub(super) atime: SetTime,
+    pub(super) mtime: SetTime,
 }
 
 #[derive(Debug, Default)]
-enum SetTime {
+pub(super) enum SetTime {
     #[default]
     Keep,
     Now,
@@ -147,7 +151,8 @@ enum SetTime {
 pub(crate) struct Nfs {
     fuse: Fuse,
     read_only: bool,
-    /// What `EXPORT` lists
+    /// The path MNT answers: the filesystem's name and a secret made up for the server, which
+    /// the mount table shows only once the mount is in use
     export: Vec<u8>,
     /// Write verifier: the same for as long as this server runs
     verifier: [u8; 8],
@@ -156,21 +161,53 @@ pub(crate) struct Nfs {
     /// A request has used a handle: the mount this server is for is in use, and MNT hands out
     /// no more
     mounted: AtomicBool,
+    v4: Nfs4,
+    /// The mount is NFSv4's, not NFSv3's
+    #[cfg_attr(not(any(fuser_mount_impl = "nfs", test)), allow(dead_code))]
+    is_v4: bool,
 }
 
 impl Nfs {
-    pub(crate) fn new(fuse: Fuse, read_only: bool, export: &str) -> io::Result<Self> {
-        let mut random = [0; 16];
+    /// A server for a mount with NFSv3, or with `v4` NFSv4.1. The other version cannot then
+    /// hand out file handles at all
+    pub(crate) fn new(fuse: Fuse, read_only: bool, export: &str, v4: bool) -> io::Result<Self> {
+        let mut random = [0; 24];
         std::fs::File::open("/dev/urandom")?.read_exact(&mut random)?;
-        let (verifier, key) = random.split_at(8);
+        let verifier: [u8; 8] = random[..8].try_into().expect("8 bytes");
+        let key: [u8; 8] = random[8..16].try_into().expect("8 bytes");
+        let secret = random[16..].iter().fold(String::new(), |mut hex, b| {
+            hex.push_str(&format!("{b:02x}"));
+            hex
+        });
+        let name = if export.is_empty() {
+            secret
+        } else {
+            format!("{export}.{secret}")
+        };
         Ok(Self {
+            v4: Nfs4::new(fuse.clone(), read_only, key, verifier, name.clone(), !v4),
             fuse,
             read_only,
-            export: format!("/{export}").into_bytes(),
-            verifier: verifier.try_into().expect("8 bytes"),
-            key: key.try_into().expect("8 bytes"),
-            mounted: AtomicBool::new(false),
+            export: format!("/{name}").into_bytes(),
+            verifier,
+            key,
+            mounted: AtomicBool::new(v4),
+            is_v4: v4,
         })
+    }
+
+    /// The path `mount_nfs` mounts, for the version the server is for
+    #[cfg_attr(not(any(fuser_mount_impl = "nfs", test)), allow(dead_code))]
+    pub(crate) fn export_path(&self) -> String {
+        if self.is_v4 {
+            self.v4.export_path()
+        } else {
+            String::from_utf8_lossy(&self.export).into_owned()
+        }
+    }
+
+    pub(crate) fn v4(&self) -> &Nfs4 {
+        &self.v4
     }
 
     /// Runs MOUNT procedure `proc`, returning its encoded results
@@ -179,13 +216,12 @@ impl Nfs {
         match proc {
             // NULL, UMNT, UMNTALL: nothing is kept per client
             0 | 3 | 4 => {}
-            // MNT: any path mounts the root, until the mount is in use. Other local users can
-            // reach this server too, but get no handle with which to ask it anything once the
-            // mount's first request has used its own. Some clients ask more than once, as libnfs
-            // does after looking for the export
+            // MNT: the export's secret path mounts the root, until the mount is in use. Other
+            // local users can reach this server too, but know no path to ask for before then,
+            // and get nothing after. Some clients ask more than once, as libnfs does
             1 => {
-                Reader::new(args).opaque().map_err(|_| Refused::Garbage)?;
-                if self.mounted.load(Ordering::SeqCst) {
+                let path = Reader::new(args).opaque().map_err(|_| Refused::Garbage)?;
+                if self.mounted.load(Ordering::SeqCst) || path != self.export.as_slice() {
                     // MNT3ERR_ACCES
                     out.put_u32(13);
                     return Ok(out);
@@ -198,13 +234,8 @@ impl Nfs {
             }
             // DUMP: no list of clients
             2 => out.put_bool(false),
-            // EXPORT: one export, open to everyone
-            5 => {
-                out.put_bool(true);
-                out.put_opaque(&self.export);
-                out.put_bool(false);
-                out.put_bool(false);
-            }
+            // EXPORT: none listed, as the path is the secret
+            5 => out.put_bool(false),
             _ => return Err(Refused::NoProcedure),
         }
         Ok(out)
@@ -311,7 +342,7 @@ impl Nfs {
 
     fn lookup(&self, a: &mut Reader<'_>, out: &mut Vec<u8>) -> Result {
         let dir = self.handle(a)?;
-        let name = a.opaque()?;
+        let name = name_arg(a.opaque()?, Name::Lookup)?;
         let (node, attr) = if name == b"." || name == b".." {
             let node = self.fuse.resolve(dir, name)?;
             (node, self.fuse.getattr(node)?)
@@ -327,11 +358,11 @@ impl Nfs {
     }
 
     fn access(&self, a: &mut Reader<'_>, out: &mut Vec<u8>) -> Result {
-        self.handle(a)?;
+        let node = self.handle(a)?;
         let access = a.u32()?;
+        let granted = self.fuse.granted_access(node, access)?;
         put_post_op(out, None);
-        // Whatever is asked: the filesystem checks each operation itself
-        out.put_u32(access);
+        out.put_u32(granted);
         Ok(())
     }
 
@@ -362,6 +393,13 @@ impl Nfs {
         a.u32()?;
         let stable = a.u32()?;
         let data = a.opaque()?;
+        trace!(
+            "NFSv3 WRITE of {} bytes at {offset}, stable {stable}",
+            data.len()
+        );
+        // The attributes around the write let the client tell its own change from another's,
+        // without which it would drop what it has cached of the file
+        let before = self.fuse.getattr(node).ok();
         self.fuse.write(node, offset, data)?;
         // Unstable writes reach the filesystem's fsync with the COMMIT that follows them
         let committed = if stable == UNSTABLE {
@@ -370,7 +408,7 @@ impl Nfs {
             self.fuse.fsync(node)?;
             FILE_SYNC
         };
-        put_no_wcc(out);
+        put_wcc(out, before.as_ref(), self.fuse.getattr(node).ok().as_ref());
         out.put_u32(data.len() as u32);
         out.put_u32(committed);
         out.put_fixed(&self.verifier);
@@ -379,7 +417,7 @@ impl Nfs {
 
     fn create(&self, a: &mut Reader<'_>, out: &mut Vec<u8>) -> Result {
         let dir = self.handle(a)?;
-        let name = a.opaque()?;
+        let name = name_arg(a.opaque()?, Name::Create)?;
         let how = a.u32()?;
         let attr = if how == EXCLUSIVE {
             // The verifier is not kept: a retransmitted exclusive create fails
@@ -396,7 +434,7 @@ impl Nfs {
 
     fn mkdir(&self, a: &mut Reader<'_>, out: &mut Vec<u8>) -> Result {
         let dir = self.handle(a)?;
-        let name = a.opaque()?;
+        let name = name_arg(a.opaque()?, Name::Create)?;
         let attr = sattr(a)?;
         let arg = fuse_mkdir_in {
             mode: attr.mode.unwrap_or(0o755) & 0o7777,
@@ -410,7 +448,7 @@ impl Nfs {
 
     fn symlink(&self, a: &mut Reader<'_>, out: &mut Vec<u8>) -> Result {
         let dir = self.handle(a)?;
-        let name = a.opaque()?;
+        let name = name_arg(a.opaque()?, Name::Create)?;
         // Its attributes are not set: a symlink's are not used
         sattr(a)?;
         let target = a.opaque()?;
@@ -424,7 +462,7 @@ impl Nfs {
 
     fn mknod(&self, a: &mut Reader<'_>, out: &mut Vec<u8>) -> Result {
         let dir = self.handle(a)?;
-        let name = a.opaque()?;
+        let name = name_arg(a.opaque()?, Name::Create)?;
         let kind = match a.u32()? {
             NF3CHR => S_IFCHR,
             NF3BLK => S_IFBLK,
@@ -463,7 +501,14 @@ impl Nfs {
 
     fn remove(&self, a: &mut Reader<'_>, out: &mut Vec<u8>, opcode: fuse_opcode) -> Result {
         let dir = self.handle(a)?;
-        let name = a.opaque()?;
+        let name = name_arg(
+            a.opaque()?,
+            if matches!(opcode, fuse_opcode::FUSE_RMDIR) {
+                Name::Rmdir
+            } else {
+                Name::Unlink
+            },
+        )?;
         self.fuse.call(opcode, dir, &[name, b"\0"])?;
         put_no_wcc(out);
         Ok(())
@@ -471,9 +516,9 @@ impl Nfs {
 
     fn rename(&self, a: &mut Reader<'_>, out: &mut Vec<u8>) -> Result {
         let from_dir = self.handle(a)?;
-        let from = a.opaque()?;
+        let from = name_arg(a.opaque()?, Name::Rename)?;
         let to_dir = self.handle(a)?;
-        let to = a.opaque()?;
+        let to = name_arg(a.opaque()?, Name::Rename)?;
         let arg = fuse_rename_in { newdir: to_dir };
         self.fuse.call(
             fuse_opcode::FUSE_RENAME,
@@ -492,7 +537,7 @@ impl Nfs {
     fn link(&self, a: &mut Reader<'_>, out: &mut Vec<u8>) -> Result {
         let node = self.handle(a)?;
         let dir = self.handle(a)?;
-        let name = a.opaque()?;
+        let name = name_arg(a.opaque()?, Name::Create)?;
         let arg = fuse_link_in { oldnodeid: node };
         let entry = self
             .fuse
@@ -517,7 +562,7 @@ impl Nfs {
         // status, dir_attributes, cookieverf, the list's end, eof
         let mut size = 4 + 4 + 8 + 4 + 4;
         let mut dirsize = 0;
-        let (entries, eof) = self.fuse.read_dir(dir, cookie, |name| {
+        let (entries, mut eof) = self.fuse.read_dir(dir, cookie, |name| {
             let dirpart = 4 + 8 + 4 + name.len().next_multiple_of(4) + 8;
             // name_attributes, and name_handle: present, its length and the handle
             let entry = if plus {
@@ -537,7 +582,13 @@ impl Nfs {
         }
         put_post_op(out, None);
         out.put_fixed(&[0; 8]);
-        for DirEntry { name, ino, cookie } in entries {
+        let started = Instant::now();
+        for (listed, DirEntry { name, ino, cookie }) in entries.into_iter().enumerate() {
+            // Looking each entry up may take long: the client asks again for the rest
+            if plus && listed > 0 && started.elapsed() > READDIR_BUDGET {
+                eof = false;
+                break;
+            }
             out.put_bool(true);
             out.put_u64(ino);
             out.put_opaque(&name);
@@ -590,7 +641,9 @@ impl Nfs {
     fn fsinfo(&self, a: &mut Reader<'_>, out: &mut Vec<u8>) -> Result {
         self.handle(a)?;
         put_post_op(out, None);
-        for value in [MAX_IO, MAX_READ, 4096, MAX_IO, MAX_IO, 4096, READDIR_SIZE] {
+        // rtmax, rtpref, rtmult, wtmax, wtpref, wtmult and dtpref: reads are split into FUSE
+        // requests here, so the client may ask for as much as it likes
+        for value in [MAX_IO, MAX_IO, 4096, MAX_IO, MAX_IO, 4096, READDIR_SIZE] {
             out.put_u32(value);
         }
         out.put_u64(i64::MAX as u64);
@@ -626,8 +679,9 @@ impl Nfs {
         // offset and count: the whole file is committed
         a.u64()?;
         a.u32()?;
+        let before = self.fuse.getattr(node).ok();
         self.fuse.fsync(node)?;
-        put_no_wcc(out);
+        put_wcc(out, before.as_ref(), self.fuse.getattr(node).ok().as_ref());
         out.put_fixed(&self.verifier);
         Ok(())
     }
@@ -654,7 +708,7 @@ fn sattr(a: &mut Reader<'_>) -> xdr::Result<Sattr> {
 
 /// The `FUSE_SETATTR` that sets `attr`, but for its mode with `skip_mode`. None if there is
 /// nothing to set
-fn setattr_in(attr: &Sattr, skip_mode: bool) -> Option<fuse_setattr_in> {
+pub(super) fn setattr_in(attr: &Sattr, skip_mode: bool) -> Option<fuse_setattr_in> {
     let mut arg = fuse_setattr_in::new_zeroed();
     let mut valid = FattrFlags::empty();
     if let Some(mode) = attr.mode.filter(|_| !skip_mode) {
@@ -735,6 +789,62 @@ fn put_post_op(out: &mut Vec<u8>, attr: Option<&fuse_attr>) {
     }
 }
 
+/// How long a listing with attributes may spend looking its entries up before it answers with
+/// those it has: clients give up on calls that take seconds
+pub(super) const READDIR_BUDGET: Duration = Duration::from_millis(100);
+
+/// The longest name taken, as Linux's and macOS's NAME_MAX
+pub(super) const NAME_MAX: usize = 255;
+
+/// What a name in a request is for, which decides what "." and ".." get
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Name {
+    Lookup,
+    Create,
+    Unlink,
+    Rmdir,
+    Rename,
+}
+
+/// A name from a request, checked as the kernel would before passing it on: not empty, without
+/// '/' or NUL, and no longer than NAME_MAX. "." and ".." name the directory and its parent,
+/// which only a lookup may: anything else gets what POSIX says, rather than reaching the
+/// filesystem, which might act on the parent
+pub(super) fn name_arg(name: &[u8], name_use: Name) -> std::result::Result<&[u8], i32> {
+    if name.is_empty() || name.contains(&b'/') || name.contains(&0) {
+        return Err(libc::EINVAL);
+    }
+    if name.len() > NAME_MAX {
+        return Err(libc::ENAMETOOLONG);
+    }
+    let dot = name == b".";
+    if !dot && name != b".." {
+        return Ok(name);
+    }
+    match name_use {
+        Name::Lookup => Ok(name),
+        Name::Create => Err(libc::EEXIST),
+        // Both are directories
+        Name::Unlink => Err(libc::EPERM),
+        Name::Rmdir if dot => Err(libc::EINVAL),
+        Name::Rmdir => Err(libc::ENOTEMPTY),
+        Name::Rename => Err(libc::EINVAL),
+    }
+}
+
+/// `wcc_data`: the size and times from before an operation, and the attributes after
+fn put_wcc(out: &mut Vec<u8>, before: Option<&fuse_attr>, after: Option<&fuse_attr>) {
+    out.put_bool(before.is_some());
+    if let Some(attr) = before {
+        out.put_u64(attr.size);
+        for (seconds, nanoseconds) in [(attr.mtime, attr.mtimensec), (attr.ctime, attr.ctimensec)] {
+            out.put_u32(seconds.clamp(0, u32::MAX.into()) as u32);
+            out.put_u32(nanoseconds);
+        }
+    }
+    put_post_op(out, after);
+}
+
 /// `wcc_data` without attributes from before or after
 fn put_no_wcc(out: &mut Vec<u8>) {
     out.put_bool(false);
@@ -743,7 +853,7 @@ fn put_no_wcc(out: &mut Vec<u8>) {
 
 /// The NFS status for an errno. NFSv3 has a status for most of what a filesystem would reply;
 /// the rest become `NFS3ERR_IO`
-fn nfsstat(errno: i32) -> u32 {
+pub(super) fn nfsstat(errno: i32) -> u32 {
     match errno {
         libc::EPERM => 1,
         libc::ENOENT => 2,
