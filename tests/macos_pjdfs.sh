@@ -31,8 +31,10 @@ DATA_DIR=$(mktemp --directory)
 # Canonical, as the mount table lists it (/var is a symlink to /private/var)
 DIR=$(cd "$(mktemp --directory)" && pwd -P)
 
-cargo build --release --example simple
-cargo run --release --example simple -- -vvv --suid ${FUSER_MOUNT_OPTION:+-o "$FUSER_MOUNT_OPTION"} --data-dir $DATA_DIR --mount-point $DIR > /tmp/mount.log 2>&1 &
+# e.g. FUSER_FEATURES=macos-nfs to test the NFS backend
+FEATURES=${FUSER_FEATURES:+--features $FUSER_FEATURES}
+cargo build --release $FEATURES --example simple
+cargo run --release $FEATURES --example simple -- -vvv --suid ${FUSER_MOUNT_OPTION:+-o "$FUSER_MOUNT_OPTION"} --data-dir $DATA_DIR --mount-point $DIR > /tmp/mount.log 2>&1 &
 FUSE_PID=$!
 
 echo "mounting at $DIR"
@@ -46,10 +48,14 @@ mount
 mount | grep " on $DIR ("
 
 # macFUSE's FSKit backend reports a NAME_MAX of 256, one more than the filesystem allows, and no
-# PATH_MAX, so the tests that probe those limits cannot pass there
-FSKIT_SKIP='^$'
+# PATH_MAX, so the tests that probe those limits cannot pass there. macOS's NFSv3 client reports
+# no PATH_MAX either, which NFSv3 has no way to carry
+LIMIT_TESTS='/(chmod|ftruncate|link|mkdir|open|rmdir|symlink|truncate|unlink)'
+LIMIT_SKIP='^$'
 if [ "${FUSER_MOUNT_OPTION:-}" = "backend=fskit" ]; then
-  FSKIT_SKIP='/(chmod|ftruncate|link|mkdir|open|rmdir|symlink|truncate|unlink)/0[23]\.t$'
+  LIMIT_SKIP="$LIMIT_TESTS/0[23]\.t$"
+elif [ "${FUSER_FEATURES:-}" = "macos-nfs" ]; then
+  LIMIT_SKIP="$LIMIT_TESTS/03\.t$"
 fi
 
 set +e
@@ -109,13 +115,22 @@ find $PJDFS_TMP_DIR/pjdfstest/tests -name '*.t' \
 | grep -v 'open/06.t' \
 | grep -v 'open/07.t' \
 | grep -v 'open/08.t' \
-| grep -v -E "$FSKIT_SKIP" \
+| grep -v -E "$LIMIT_SKIP" \
 | xargs prove -f  | tee /tmp/pjdfs.log
 export PJDFS_EXIT_STATUS=$?
 echo "Total failed:"
 cat /tmp/pjdfs.log | egrep -o 'Failed: [0-9]+' | egrep -o '[0-9]+' | paste -s -d+ - | bc
+TOTAL=$(egrep -o 'Tests=[0-9]+' /tmp/pjdfs.log | egrep -o '[0-9]+' | tail -n 1)
+FAILED=$(egrep -o 'Failed: [0-9]+' /tmp/pjdfs.log | egrep -o '[0-9]+' | awk '{ s += $1 } END { print s + 0 }')
+echo "pjdfs: $((${TOTAL:-0} - FAILED)) of ${TOTAL:-0} tests passed, $FAILED failed"
 
 rm -rf ${DATA_DIR}
 
+# Killing the server would leave an NFS mount behind, unanswered: unmount it first, which
+# ends the session
+if [ -n "${FUSER_FEATURES:-}" ]; then
+  cd "$PROJ_DIR"
+  umount "$DIR"
+fi
 kill $FUSE_PID
 wait $FUSE_PID

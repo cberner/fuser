@@ -16,6 +16,8 @@ mod fuse_pure;
 #[cfg(fuser_macfuse_fskit)]
 pub(crate) mod mfmount;
 pub(crate) mod mount_options;
+#[cfg(any(fuser_mount_impl = "nfs", test))]
+pub(crate) mod nfs;
 
 use std::io;
 
@@ -132,6 +134,7 @@ use crate::SessionACL;
 /// gone. Without `allow_other` the kernel refuses that check unless root owns the mount, so
 /// before fusermount3 3.15, which makes it as the mount's owner, the watcher leaves the mount
 /// in place. libfuse 2's fusermount never got that change.
+#[cfg(not(fuser_mount_impl = "nfs"))]
 pub(crate) fn check_auto_unmount(options: &[MountOption], acl: SessionACL) -> io::Result<()> {
     if !options.contains(&MountOption::AutoUnmount)
         || acl != SessionACL::Owner
@@ -180,8 +183,16 @@ pub(crate) fn check_auto_unmount(options: &[MountOption], acl: SessionACL) -> io
     }
 }
 
+/// The NFS backend has no helper: `MountOption::AutoUnmount` is approximated by `mount_nfs`
+/// itself (see `nfs::mount_nfs_options`)
+#[cfg(fuser_mount_impl = "nfs")]
+pub(crate) fn check_auto_unmount(_options: &[MountOption], _acl: SessionACL) -> io::Result<()> {
+    Ok(())
+}
+
 /// Parses the major and minor version from `fusermount -V` output, such as
 /// "fusermount3 version: 3.14.0"
+#[cfg_attr(all(fuser_mount_impl = "nfs", not(test)), expect(dead_code))]
 fn fusermount_version(output: &str) -> Option<(u32, u32)> {
     let version = output.split("version:").nth(1)?.trim();
     let mut parts = version.split('.');
@@ -198,6 +209,8 @@ enum MountImpl {
     Fuse2(fuse2::MountImpl),
     #[cfg(fuser_mount_impl = "libfuse3")]
     Fuse3(fuse3::MountImpl),
+    #[cfg(fuser_mount_impl = "nfs")]
+    Nfs(nfs::MountImpl),
 }
 
 impl MountImpl {
@@ -209,6 +222,8 @@ impl MountImpl {
             MountImpl::Fuse2(mount) => mount.umount_impl(),
             #[cfg(fuser_mount_impl = "libfuse3")]
             MountImpl::Fuse3(mount) => mount.umount_impl(),
+            #[cfg(fuser_mount_impl = "nfs")]
+            MountImpl::Nfs(mount) => mount.umount_impl(),
             // This branch is needed because Rust does not consider & empty enum non-empty.
             #[cfg(fuser_mount_impl = "macos-no-mount")]
             _ => Ok(()),
@@ -259,6 +274,11 @@ impl Mount {
             let (dev_fuse, mount) = fuse3::MountImpl::new(mountpoint, options, acl)?;
             (dev_fuse, MountImpl::Fuse3(mount))
         };
+        #[cfg(fuser_mount_impl = "nfs")]
+        let (dev_fuse, mount_impl) = {
+            let (dev_fuse, mount) = nfs::MountImpl::new(mountpoint, options, acl)?;
+            (dev_fuse, MountImpl::Nfs(mount))
+        };
         #[cfg(fuser_mount_impl = "macos-no-mount")]
         {
             let _ = (mountpoint, options, acl);
@@ -276,6 +296,16 @@ impl Mount {
                     fuse_device: dev_fuse,
                 },
             ))
+        }
+    }
+
+    /// Waits until the filesystem is reachable at the mount point. Only the NFS backend
+    /// mounts in the background, as its mount completes only once the session runs
+    pub(crate) fn wait_mounted(&self) -> io::Result<()> {
+        match &self.mount_impl {
+            #[cfg(fuser_mount_impl = "nfs")]
+            Some(MountImpl::Nfs(mount)) => mount.wait_mounted(),
+            _ => Ok(()),
         }
     }
 
@@ -342,6 +372,7 @@ impl Drop for Mount {
 }
 
 #[cfg_attr(fuser_mount_impl = "macos-no-mount", expect(dead_code))]
+#[cfg_attr(fuser_nfs_serve_only, allow(dead_code))]
 fn libc_umount(mnt: &CStr) -> nix::Result<()> {
     #[cfg(any(
         target_os = "macos",

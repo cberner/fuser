@@ -169,6 +169,50 @@ jobs:
       - name: pjdfs tests (FSKit)
         run: FUSER_MOUNT_OPTION=backend=fskit ./tests/macos_pjdfs.sh
 
+      # Informational: the timings show in the job summary
+      - name: Benchmark (FSKit)
+        continue-on-error: true
+        timeout-minutes: 15
+        run: FUSER_MOUNT_OPTION=backend=fskit ./tests/macos_bench.sh
+
+      # Experimental: mount through macOS's own NFS client, without macFUSE
+      - name: Build (NFS)
+        run: |
+          cargo build --all --all-targets --features macos-nfs
+          cargo clippy --all-targets --features macos-nfs
+          cargo test --lib --features macos-nfs -- --skip mnt::test
+
+      - name: Mount tests (NFS)
+        timeout-minutes: 10
+        run: FUSER_FEATURES=macos-nfs cargo run -p fuser-tests -- macos-mount
+
+      - name: pjdfs tests (NFS)
+        timeout-minutes: 30
+        run: FUSER_FEATURES=macos-nfs ./tests/macos_pjdfs.sh
+
+      - name: Benchmark (NFS)
+        continue-on-error: true
+        timeout-minutes: 15
+        run: FUSER_FEATURES=macos-nfs ./tests/macos_bench.sh
+
+  # The NFS backend's server, with another client than macOS's: Linux's kernel client runs
+  # the Connectathon suite against it
+  nfs-linux-client:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      RUSTFLAGS: --deny warnings
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nfs-common libtirpc-dev groff-base
+
+      - name: cthon04 through Linux's NFS client
+        run: ./tests/linux_nfs_cthon.sh
+
   freebsd-ci:
     runs-on: ubuntu-24.04
     timeout-minutes: 30

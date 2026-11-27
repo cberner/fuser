@@ -21,14 +21,15 @@ pub(crate) struct MountEntry {
 impl MountEntry {
     /// Returns true if this is a FUSE mount at the specified mountpoint.
     pub(crate) fn is_fuse_mount_at(&self, mountpoint: &Path) -> bool {
-        let expected_fstype = if cfg!(target_os = "macos") {
-            "macfuse"
+        let expected_fstypes: &[&str] = if cfg!(target_os = "macos") {
+            // fuser's experimental NFS backend mounts through macOS's NFS client
+            &["macfuse", "nfs"]
         } else if cfg!(target_os = "freebsd") {
-            "fusefs"
+            &["fusefs"]
         } else {
-            "fuse"
+            &["fuse"]
         };
-        self.fstype == expected_fstype && self.mountpoint == mountpoint
+        expected_fstypes.contains(&self.fstype.as_str()) && self.mountpoint == mountpoint
     }
 }
 
