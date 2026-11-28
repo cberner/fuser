@@ -18,7 +18,6 @@ use std::time::Instant;
 use log::debug;
 use log::error;
 use log::info;
-use log::warn;
 use parking_lot::Condvar;
 use parking_lot::Mutex;
 
@@ -64,6 +63,7 @@ struct Shared {
     state: Mutex<State>,
     changed: Condvar,
     fuse: Fuse,
+    nfs: Arc<Nfs>,
     transport: Arc<Transport>,
     stopper: Stopper,
     /// Set by `umount_impl` while mounting, so that a mount which completes anyway is undone
@@ -100,14 +100,9 @@ impl MountImpl {
     pub(crate) fn new(
         mountpoint: &Path,
         options: &[MountOption],
-        acl: SessionACL,
+        // Enforced by the session, which sees each request's caller
+        _acl: SessionACL,
     ) -> io::Result<(Arc<DevFuse>, MountImpl)> {
-        if acl != SessionACL::Owner {
-            warn!(
-                "The NFS backend cannot tell users apart: every request reaches the filesystem \
-                 as the mounting user, whatever {acl:?} allows"
-            );
-        }
         // As the mount table names it, so that the watcher can find it there
         let canonical = std::fs::canonicalize(mountpoint).map_err(|err| {
             super::super::context(format_args!("mountpoint {}", mountpoint.display()), err)
@@ -124,10 +119,13 @@ impl MountImpl {
         let export = super::export_name(options);
         let read_only = options.contains(&MountOption::RO);
         let fuse = Fuse::new(transport.clone(), caller);
-        let server = Server::bind(Nfs::new(fuse.clone(), read_only, &export)?, 0)?;
+        let v4 = super::wants_v4(options);
+        let nfs = Nfs::new(fuse.clone(), read_only, &export, v4)?;
+        // The export, by its secret path: under v4's pseudo-root, or what v3's MNT answers
+        let source = format!("127.0.0.1:{}", nfs.export_path());
+        let server = Server::bind(nfs, 0)?;
         let port = server.port()?;
         let nfs_options = super::mount_nfs_options(options, port);
-        let source = format!("127.0.0.1:/{export}");
 
         let shared = Arc::new(Shared {
             state: Mutex::new(State {
@@ -136,6 +134,7 @@ impl MountImpl {
             }),
             changed: Condvar::new(),
             fuse: fuse.clone(),
+            nfs: server.nfs(),
             transport: transport.clone(),
             stopper: server.stopper()?,
             cancelled: AtomicBool::new(false),
@@ -294,6 +293,8 @@ fn mount_and_watch(shared: &Shared, mut command: Command) {
         return;
     }
     info!("Mounted {} on {:?}", shared.source, shared.mountpoint);
+    // The export's name, which the mount table now shows, can no longer be looked up
+    shared.nfs.v4().seal();
     shared.set_phase(Phase::Mounted);
 
     let mut state = shared.state.lock();

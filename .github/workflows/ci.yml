@@ -195,6 +195,42 @@ jobs:
         timeout-minutes: 15
         run: FUSER_FEATURES=macos-nfs ./tests/macos_bench.sh
 
+      # The same backend with NFSv4.1
+      - name: Mount tests (NFSv4.1)
+        timeout-minutes: 10
+        run: FUSER_FEATURES=macos-nfs FUSER_MOUNT_OPTION=vers=4.1 cargo run -p fuser-tests -- macos-mount
+
+      - name: pjdfs tests (NFSv4.1)
+        timeout-minutes: 30
+        run: FUSER_FEATURES=macos-nfs FUSER_MOUNT_OPTION=vers=4.1 ./tests/macos_pjdfs.sh
+
+      - name: Benchmark (NFSv4.1)
+        continue-on-error: true
+        timeout-minutes: 15
+        run: FUSER_FEATURES=macos-nfs FUSER_MOUNT_OPTION=vers=4.1 ./tests/macos_bench.sh
+
+      # Experimental, last as they leave /etc/fuse.conf allowing other users: the pjdfstest
+      # cases the runs above exclude, as root, as most switch users. The job summary lists
+      # which pass on each backend
+      - name: pjdfs excluded tests, as root (FSKit)
+        continue-on-error: true
+        timeout-minutes: 30
+        run: FUSER_MOUNT_OPTION=backend=fskit PJDFS_EXCLUDED=1 ./tests/macos_pjdfs.sh
+
+      - name: pjdfs excluded tests, as root (NFSv3)
+        continue-on-error: true
+        timeout-minutes: 30
+        run: FUSER_FEATURES=macos-nfs PJDFS_EXCLUDED=1 ./tests/macos_pjdfs.sh
+
+      # macOS's v4 client cannot chown to root through its identity service, which fails
+      # before any request reaches the server: mapping ids itself, it can
+      - name: pjdfs excluded tests, as root (NFSv4.1)
+        continue-on-error: true
+        timeout-minutes: 30
+        run: |
+          sudo sysctl -w vfs.generic.nfs.client.idmap_ctrl=0
+          FUSER_FEATURES=macos-nfs FUSER_MOUNT_OPTION=vers=4.1 PJDFS_EXCLUDED=1 ./tests/macos_pjdfs.sh
+
   # The NFS backend's server, with another client than macOS's: Linux's kernel client runs
   # the Connectathon suite against it
   nfs-linux-client:
@@ -212,6 +248,9 @@ jobs:
 
       - name: cthon04 through Linux's NFS client
         run: ./tests/linux_nfs_cthon.sh
+
+      - name: cthon04 through Linux's NFS client (NFSv4.1)
+        run: NFS_VERS=4.1 FUSER_NFS_PORT=20491 ./tests/linux_nfs_cthon.sh
 
   freebsd-ci:
     runs-on: ubuntu-24.04

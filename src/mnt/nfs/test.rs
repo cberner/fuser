@@ -26,6 +26,7 @@ use super::transport::Caller;
 use super::transport::Transport;
 use super::xdr::Reader;
 use super::xdr::Writer;
+use crate::AccessFlags;
 use crate::Config;
 use crate::Errno;
 use crate::FileAttr;
@@ -77,6 +78,8 @@ struct Counters {
     /// The largest write received
     largest_write: AtomicU64,
     fsyncs: AtomicU64,
+    /// Size changes that came with a file handle, as ftruncate's do
+    truncates_with_handle: AtomicU64,
     destroyed: AtomicBool,
 }
 
@@ -203,7 +206,7 @@ impl Filesystem for MemFs {
         atime: Option<TimeOrNow>,
         mtime: Option<TimeOrNow>,
         _ctime: Option<SystemTime>,
-        _fh: Option<FileHandle>,
+        fh: Option<FileHandle>,
         _crtime: Option<SystemTime>,
         _chgtime: Option<SystemTime>,
         _bkuptime: Option<SystemTime>,
@@ -211,6 +214,11 @@ impl Filesystem for MemFs {
         _kill_suid_gid: bool,
         reply: ReplyAttr,
     ) {
+        if size.is_some() && fh.is_some() {
+            self.counters
+                .truncates_with_handle
+                .fetch_add(1, Ordering::SeqCst);
+        }
         let mut nodes = self.nodes.lock();
         let Some(node) = nodes.get_mut(&ino.0) else {
             reply.error(Errno::ENOENT);
@@ -531,6 +539,16 @@ impl Filesystem for MemFs {
         }
     }
 
+    /// Writing needs a write bit; nothing else is refused
+    fn access(&self, _req: &Request, ino: INodeNo, mask: AccessFlags, reply: ReplyEmpty) {
+        let perm = self.nodes.lock()[&ino.0].attr.perm;
+        if mask.contains(AccessFlags::W_OK) && perm & 0o222 == 0 {
+            reply.error(Errno::EACCES);
+        } else {
+            reply.ok();
+        }
+    }
+
     fn statfs(&self, _req: &Request, _ino: INodeNo, reply: ReplyStatfs) {
         reply.statfs(100, 50, 40, 10, 5, 512, NAME_MAX, 4096);
     }
@@ -574,9 +592,17 @@ struct Harness {
     counters: Arc<Counters>,
     background: crate::BackgroundSession,
     xid: u32,
+    /// The NFSv4.1 session COMPOUNDs are sent in, and the sequence id of its slot 0
+    session: Option<[u8; 16]>,
+    sequence: u32,
 }
 
 fn start(read_only: bool) -> Harness {
+    start_version(read_only, false)
+}
+
+/// A harness for a mount with NFSv3, or with `v4` NFSv4.1
+fn start_version(read_only: bool, v4: bool) -> Harness {
     let transport = Arc::new(Transport::default());
     let caller = Caller {
         uid: nix::unistd::geteuid().as_raw(),
@@ -596,7 +622,7 @@ fn start(read_only: bool) -> Harness {
     .unwrap();
     let background = session.spawn().unwrap();
     fuse.finish_init(&init).unwrap();
-    let nfs = Nfs::new(fuse.clone(), read_only, "export").unwrap();
+    let nfs = Nfs::new(fuse.clone(), read_only, "export", v4).unwrap();
     KEY.set(nfs.handle_key());
     Harness {
         nfs,
@@ -604,10 +630,36 @@ fn start(read_only: bool) -> Harness {
         counters,
         background,
         xid: 0,
+        session: None,
+        sequence: 0,
     }
 }
 
 fn call_message(xid: u32, program: u32, version: u32, procedure: u32, args: &[u8]) -> Vec<u8> {
+    let (uid, gid) = (
+        nix::unistd::geteuid().as_raw(),
+        nix::unistd::getegid().as_raw(),
+    );
+    call_message_as(xid, program, version, procedure, args, uid, gid)
+}
+
+/// A call with AUTH_UNIX credentials for `uid` and `gid`
+fn call_message_as(
+    xid: u32,
+    program: u32,
+    version: u32,
+    procedure: u32,
+    args: &[u8],
+    uid: u32,
+    gid: u32,
+) -> Vec<u8> {
+    let mut credentials = Vec::new();
+    // stamp, machinename, uid, gid, no supplementary groups
+    credentials.put_u32(0);
+    credentials.put_opaque(b"localhost");
+    credentials.put_u32(uid);
+    credentials.put_u32(gid);
+    credentials.put_u32(0);
     let mut call = Vec::new();
     call.put_u32(xid);
     // CALL, RPC version 2
@@ -618,7 +670,7 @@ fn call_message(xid: u32, program: u32, version: u32, procedure: u32, args: &[u8
     call.put_u32(procedure);
     // AUTH_UNIX credentials, then an AUTH_NONE verifier
     call.put_u32(1);
-    call.put_opaque(&[0; 20]);
+    call.put_opaque(&credentials);
     call.put_u32(0);
     call.put_opaque(&[]);
     call.extend_from_slice(args);
@@ -818,8 +870,10 @@ fn nfs_procedures_reach_the_filesystem() {
         }),
     );
     let mut r = Reader::new(&results);
-    // No wcc_data
-    assert_eq!((r.bool(), r.bool()), (Ok(false), Ok(false)));
+    // wcc_data: the size and times before, then the attributes after
+    assert_eq!((r.bool(), r.u64()), (Ok(true), Ok(0)));
+    r.fixed(16).unwrap();
+    assert_eq!(post_op(&mut r).map(|attr| attr.size), Some(10_000));
     assert_eq!((r.u32(), r.u32()), (Ok(10_000), Ok(0)));
     let verifier = r.fixed(8).unwrap().to_vec();
     assert_eq!(h.counters.fsyncs.load(Ordering::SeqCst), 0);
@@ -851,7 +905,8 @@ fn nfs_procedures_reach_the_filesystem() {
             a.put_u32(0);
         }),
     );
-    assert_eq!(&results[8..], &verifier[..]);
+    // wcc_data around the sync, then the verifier the writes gave
+    assert_eq!(&results[results.len() - 8..], &verifier[..]);
     // The COMMIT reached the filesystem's fsync, as does a stable write
     assert_eq!(h.counters.fsyncs.load(Ordering::SeqCst), 1);
     let results = h.ok(
@@ -865,7 +920,9 @@ fn nfs_procedures_reach_the_filesystem() {
             a.put_opaque(&data[..1]);
         }),
     );
-    assert_eq!(&results[8..16], [0, 0, 0, 1, 0, 0, 0, 2]);
+    // After the wcc_data: count, then FILE_SYNC, then the verifier
+    let tail = &results[results.len() - 16..];
+    assert_eq!(&tail[..8], [0, 0, 0, 1, 0, 0, 0, 2]);
     assert_eq!(h.counters.fsyncs.load(Ordering::SeqCst), 2);
     let mut a = dirop(dir, "file");
     // EXCLUSIVE, with its verifier
@@ -909,6 +966,21 @@ fn nfs_procedures_reach_the_filesystem() {
         }),
     );
     assert_eq!(&results[4..], 0x3fu32.to_be_bytes());
+    // The filesystem's own answer: the file has no write bits, so no MODIFY or EXTEND. DELETE
+    // is its directory's to decide, at REMOVE
+    let mut a = dirop(dir, "readonly");
+    a.put_u32(0);
+    put_sattr(&mut a, Some(0o444));
+    let (readonly, _) = created(&h.ok(CREATE, &a));
+    let results = h.ok(
+        ACCESS,
+        &args(|a| {
+            put_handle(a, readonly);
+            a.put_u32(0x3f);
+        }),
+    );
+    assert_eq!(&results[4..], 0x33u32.to_be_bytes());
+    h.ok(REMOVE, &dirop(dir, "readonly"));
 
     // Symlinks, hard links and special files
     let mut a = dirop(dir, "link");
@@ -1045,8 +1117,9 @@ fn rpc_errors() {
 
     let (stat, rest) = accepted(&answer(&call_message(2, 100_000, 2, 3, &[])), 2);
     assert_eq!((stat, rest.len()), (1, 0));
-    let (stat, rest) = accepted(&answer(&call_message(3, NFS, 4, 0, &[])), 3);
-    assert_eq!((stat, &rest[..]), (2, &[0, 0, 0, 3, 0, 0, 0, 3][..]));
+    // NFS versions 3 and 4 are served
+    let (stat, rest) = accepted(&answer(&call_message(3, NFS, 2, 0, &[])), 3);
+    assert_eq!((stat, &rest[..]), (2, &[0, 0, 0, 3, 0, 0, 0, 4][..]));
     let (stat, _) = accepted(&answer(&call_message(4, NFS, 3, 22, &[])), 4);
     assert_eq!(stat, 3);
     // Handles that are not this server's: too short, or with another key
@@ -1073,29 +1146,91 @@ fn rpc_errors() {
 }
 
 #[test]
+fn requests_carry_the_callers_ids() {
+    let h = start(false);
+    let getattr = args(|a| put_handle(a, ROOT));
+    let answer = |uid| {
+        let gid = nix::unistd::getegid().as_raw();
+        let call = call_message_as(1, NFS, 3, GETATTR, &getattr, uid, gid);
+        let (stat, rest) = accepted(&rpc::answer(&h.nfs, &call).unwrap(), 1);
+        assert_eq!(stat, 0);
+        u32::from_be_bytes(rest[..4].try_into().unwrap())
+    };
+    // The session admits only the mounting user, as FUSE mounts do without allow_other: so
+    // the caller's uid reached it
+    assert_eq!(answer(nix::unistd::geteuid().as_raw()), 0);
+    let other = nix::unistd::geteuid().as_raw().wrapping_add(4242);
+    // NFS3ERR_ACCES
+    assert_eq!(answer(other), 13);
+    h.finish();
+}
+
+#[test]
 fn mount_protocol() {
     let mut h = start(false);
-    let results = h.call(MOUNT, 1, &args(|a| a.put_opaque(b"/export")));
+    // The export's path is the filesystem's name and a secret: no other path mounts
+    let export = h.nfs.export_path();
+    assert!(export.starts_with("/export.") && export.len() > 20);
+    let mnt = |path: &str| args(|a| a.put_opaque(path.as_bytes()));
+    assert_eq!(h.call(MOUNT, 1, &mnt("/export")), 13u32.to_be_bytes());
+    assert_eq!(h.call(MOUNT, 1, &mnt("/")), 13u32.to_be_bytes());
+    let results = h.call(MOUNT, 1, &mnt(&export));
     let mut r = Reader::new(&results);
     assert_eq!(r.u32(), Ok(0));
     assert_eq!(handle(&mut r), ROOT);
     // AUTH_UNIX
     assert_eq!((r.u32(), r.u32()), (Ok(1), Ok(1)));
     // Again, as some clients ask, until the mount is in use: then no one else gets a handle
-    let again = h.call(MOUNT, 1, &args(|a| a.put_opaque(b"/export")));
+    let again = h.call(MOUNT, 1, &mnt(&export));
     assert_eq!(again, results);
     h.ok(GETATTR, &args(|a| put_handle(a, ROOT)));
-    let results = h.call(MOUNT, 1, &args(|a| a.put_opaque(b"/export")));
-    assert_eq!(results, 13u32.to_be_bytes());
-    let results = h.call(MOUNT, 5, &[]);
-    let mut r = Reader::new(&results);
-    assert_eq!(r.bool(), Ok(true));
-    assert_eq!(r.opaque(), Ok(&b"/export"[..]));
-    assert_eq!((r.bool(), r.bool()), (Ok(false), Ok(false)));
+    assert_eq!(h.call(MOUNT, 1, &mnt(&export)), 13u32.to_be_bytes());
+    // EXPORT lists nothing, as the path is the secret
+    assert_eq!(h.call(MOUNT, 5, &[]), [0, 0, 0, 0]);
     assert!(
         h.call(MOUNT, 3, &args(|a| a.put_opaque(b"/export")))
             .is_empty()
     );
+    h.finish();
+}
+
+#[test]
+fn names_are_checked() {
+    let mut h = start(false);
+    let create = |name: &[u8]| {
+        let mut a = Vec::new();
+        put_handle(&mut a, ROOT);
+        a.put_opaque(name);
+        a.put_u32(0);
+        put_sattr(&mut a, None);
+        a
+    };
+    // As the kernel never would: '/', NUL or nothing
+    for name in [&b"a/b"[..], b"a\0b", b""] {
+        assert_eq!(h.fails(CREATE, &create(name)), 22, "{name:?}");
+    }
+    // "." and ".." get what POSIX says, not the filesystem's say: they exist, are not files,
+    // and are not empty
+    for name in [&b"."[..], b".."] {
+        assert_eq!(h.fails(CREATE, &create(name)), 17, "{name:?}");
+        assert_eq!(
+            h.fails(
+                REMOVE,
+                &args(|a| {
+                    put_handle(a, ROOT);
+                    a.put_opaque(name);
+                })
+            ),
+            1
+        );
+    }
+    assert_eq!(h.fails(RMDIR, &dirop(ROOT, ".")), 22);
+    assert_eq!(h.fails(RMDIR, &dirop(ROOT, "..")), 66);
+    // Longer than NAME_MAX
+    assert_eq!(h.fails(CREATE, &create(&[b'x'; 256])), 63);
+    h.ok(CREATE, &create(&[b'x'; 255]));
+    // LOOKUP of ".." is how clients find a parent
+    h.ok(LOOKUP, &dirop(ROOT, ".."));
     h.finish();
 }
 
@@ -1146,7 +1281,7 @@ fn idle_handles_are_released() {
 #[test]
 fn tcp_server_answers_and_stops() {
     let h = start(false);
-    let server = Server::bind(Nfs::new(h.fuse.clone(), false, "").unwrap(), 0).unwrap();
+    let server = Server::bind(Nfs::new(h.fuse.clone(), false, "", false).unwrap(), 0).unwrap();
     let port = server.port().unwrap();
     let stopper = server.stopper().unwrap();
     let running = std::thread::spawn(move || server.run());
@@ -1192,6 +1327,8 @@ fn mount_options_map_to_mount_nfs() {
         "mountport=1234",
         "rdonly",
         "nosuid",
+        "rsize=1048576",
+        "wsize=524288",
         "rsize=4096",
     ] {
         assert!(opts.iter().any(|o| o == expected), "{expected} in {opts:?}");
@@ -1201,6 +1338,11 @@ fn mount_options_map_to_mount_nfs() {
             .iter()
             .any(|o| o == "rdonly")
     );
+    // Attributes are cached for a second, unless the options say otherwise: mount_nfs takes
+    // the last of each
+    let opts = super::mount_nfs_options(&[MountOption::CUSTOM("actimeo=0".to_string())], 1);
+    let actimeo: Vec<_> = opts.iter().filter(|o| o.starts_with("actimeo=")).collect();
+    assert_eq!(actimeo, ["actimeo=1", "actimeo=0"]);
 
     assert_eq!(
         super::export_name(&[MountOption::FSName("hello".to_string())]),
@@ -1212,4 +1354,705 @@ fn mount_options_map_to_mount_nfs() {
         ""
     );
     assert_eq!(super::export_name(&[]), "");
+    // NFSv4.1 when asked for, without NFSv3's MOUNT program or local locks
+    let v4 = super::mount_nfs_options(&[MountOption::CUSTOM("vers=4".to_string())], 1234);
+    assert!(super::wants_v4(&[MountOption::CUSTOM(
+        "vers=4".to_string()
+    )]));
+    assert_eq!(&v4[..3], ["vers=4.1", "tcp", "port=1234"]);
+    assert!(v4.iter().any(|o| o == "wsize=1048576"));
+    assert_eq!(
+        super::mount_nfs_options(&[MountOption::CUSTOM("vers=4.1".to_string())], 1234),
+        v4
+    );
+    assert!(
+        !v4.iter()
+            .any(|o| o.starts_with("mountport") || o == "locallocks" || o == "vers=3")
+    );
+    // Read-only: soft read-only mounts would get locallocks, which NFSv4 refuses
+    let v4_ro = super::mount_nfs_options(
+        &[MountOption::CUSTOM("vers=4".to_string()), MountOption::RO],
+        1234,
+    );
+    assert!(v4_ro.iter().any(|o| o == "nolocallocks"));
+    assert!(
+        !super::mount_nfs_options(&[MountOption::RO], 1)
+            .iter()
+            .any(|o| o == "nolocallocks")
+    );
+}
+
+// NFSv4.1 operations
+const OP_ACCESS: u32 = 3;
+const OP_CLOSE: u32 = 4;
+const OP_CREATE: u32 = 6;
+const OP_GETATTR: u32 = 9;
+const OP_GETFH: u32 = 10;
+const OP_LOCK: u32 = 12;
+const OP_LOCKT: u32 = 13;
+const OP_LOCKU: u32 = 14;
+const OP_LOOKUP: u32 = 15;
+const OP_LOOKUPP: u32 = 16;
+const OP_OPEN: u32 = 18;
+const OP_PUTFH: u32 = 22;
+const OP_PUTROOTFH: u32 = 24;
+const OP_READ: u32 = 25;
+const OP_READDIR: u32 = 26;
+const OP_REMOVE: u32 = 28;
+const OP_RENAME: u32 = 29;
+const OP_RENEW: u32 = 30;
+const OP_SAVEFH: u32 = 32;
+const OP_SETATTR: u32 = 34;
+const OP_WRITE: u32 = 38;
+const OP_EXCHANGE_ID: u32 = 42;
+const OP_CREATE_SESSION: u32 = 43;
+const OP_DESTROY_SESSION: u32 = 44;
+const OP_FREE_STATEID: u32 = 45;
+const OP_SEQUENCE: u32 = 53;
+const OP_TEST_STATEID: u32 = 55;
+const OP_DESTROY_CLIENTID: u32 = 57;
+const OP_RECLAIM_COMPLETE: u32 = 58;
+
+/// The current stateid, which stands for the one the last operation left
+const CURRENT_STATEID: [u8; 16] = [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+type Ops = Vec<(u32, Vec<u8>)>;
+
+impl Harness {
+    /// Sends a COMPOUND, the whole of whose reply is returned
+    fn compound_raw(&mut self, minor: u32, ops: &[(u32, Vec<u8>)]) -> Vec<u8> {
+        let mut a = Vec::new();
+        a.put_opaque(b"tag");
+        a.put_u32(minor);
+        a.put_u32(ops.len() as u32);
+        for (op, args) in ops {
+            a.put_u32(*op);
+            a.extend_from_slice(args);
+        }
+        self.xid += 1;
+        let reply = rpc::answer(&self.nfs, &call_message(self.xid, NFS, 4, 1, &a)).unwrap();
+        let (stat, results) = accepted(&reply, self.xid);
+        assert_eq!(stat, 0);
+        results
+    }
+
+    /// The SEQUENCE that starts the next COMPOUND of the session, on slot 0
+    fn sequence4(&mut self, cache: bool) -> (u32, Vec<u8>) {
+        let session = self.session.expect("a session");
+        self.sequence += 1;
+        let sequence = self.sequence;
+        (OP_SEQUENCE, sequence_args(&session, sequence, cache))
+    }
+
+    /// Sends a COMPOUND of `ops`, after SEQUENCE once there is a session. Returns the COMPOUND's status and what the last operation answered
+    /// after its status
+    fn compound(&mut self, ops: &[(u32, Vec<u8>)]) -> (u32, Vec<u8>) {
+        let mut all = Vec::new();
+        if self.session.is_some() {
+            all.push(self.sequence4(false));
+        }
+        all.extend_from_slice(ops);
+        let results = self.compound_raw(1, &all);
+        compound_result(&all, &results)
+    }
+
+    /// The handle the last of `ops` leaves current
+    fn fh4(&mut self, ops: &[(u32, Vec<u8>)]) -> Vec<u8> {
+        let mut ops = ops.to_vec();
+        ops.push((OP_GETFH, Vec::new()));
+        let (status, body) = self.compound(&ops);
+        assert_eq!(status, 0);
+        Reader::new(&body).opaque().unwrap().to_vec()
+    }
+
+    /// EXCHANGE_ID and CREATE_SESSION, after which COMPOUNDs go in the session. Returns the
+    /// client id
+    fn session4(&mut self) -> u64 {
+        let a = exchange_id4(b"test client", [1; 8]);
+        let (status, body) = self.compound(&[(OP_EXCHANGE_ID, a)]);
+        assert_eq!(status, 0);
+        let mut r = Reader::new(&body);
+        let clientid = r.u64().unwrap();
+        let sequence = r.u32().unwrap();
+        // Not pNFS, and not yet confirmed
+        assert_eq!(r.u32(), Ok(0x0001_0000));
+        let mut a = Vec::new();
+        a.put_u64(clientid);
+        a.put_u32(sequence);
+        // CONN_BACK_CHAN and PERSIST
+        a.put_u32(3);
+        for attrs in [
+            [0, 1 << 20, 1 << 20, 1 << 16, 32, 64],
+            [0, 4096, 4096, 0, 2, 1],
+        ] {
+            for value in attrs {
+                a.put_u32(value);
+            }
+            a.put_u32(0);
+        }
+        a.put_u32(0x4000_0000);
+        // AUTH_NONE for callbacks
+        a.put_u32(1);
+        a.put_u32(0);
+        let (status, body) = self.compound(&[(OP_CREATE_SESSION, a.clone())]);
+        assert_eq!(status, 0);
+        let mut r = Reader::new(&body);
+        let session: [u8; 16] = r.fixed(16).unwrap().try_into().unwrap();
+        assert_eq!(r.u32(), Ok(sequence));
+        // Not persistent; the backchannel taken
+        assert_eq!(r.u32(), Ok(2));
+        // The fore channel: no padding, the sizes asked for, no more operations than 128 and
+        // slots than 16
+        let fore: Vec<u32> = (0..6).map(|_| r.u32().unwrap()).collect();
+        assert_eq!(fore, [0, 1 << 20, 1 << 20, 1 << 16, 32, 16]);
+        // A retransmitted CREATE_SESSION gets the same reply
+        let (status, again) = self.compound(&[(OP_CREATE_SESSION, a)]);
+        assert_eq!((status, &again), (0, &body));
+        self.session = Some(session);
+        self.sequence = 0;
+        assert_eq!(
+            self.compound(&[(OP_RECLAIM_COMPLETE, args(|a| a.put_bool(false)))])
+                .0,
+            0
+        );
+        clientid
+    }
+}
+
+/// EXCHANGE_ID's arguments for a client `owner`, with SP4_NONE and an implementation id
+fn exchange_id4(owner: &[u8], verifier: [u8; 8]) -> Vec<u8> {
+    let mut a = Vec::new();
+    a.put_fixed(&verifier);
+    a.put_opaque(owner);
+    a.put_u32(0);
+    a.put_u32(0);
+    a.put_u32(1);
+    a.put_opaque(b"example.com");
+    a.put_opaque(b"test");
+    a.put_u64(0);
+    a.put_u32(0);
+    a
+}
+
+fn sequence_args(session: &[u8; 16], sequence: u32, cache: bool) -> Vec<u8> {
+    let mut a = Vec::new();
+    a.put_fixed(session);
+    a.put_u32(sequence);
+    // Slot 0, the highest in use
+    a.put_u32(0);
+    a.put_u32(0);
+    a.put_bool(cache);
+    a
+}
+
+/// The status of a COMPOUND's reply to `ops`, and what its last operation answered after its
+/// status, checking that the others succeeded
+fn compound_result(ops: &[(u32, Vec<u8>)], results: &[u8]) -> (u32, Vec<u8>) {
+    let mut r = Reader::new(results);
+    let status = r.u32().unwrap();
+    assert_eq!(r.opaque(), Ok(&b"tag"[..]));
+    let count = r.u32().unwrap();
+    for i in 0..count {
+        let op = r.u32().unwrap();
+        let op_status = r.u32().unwrap();
+        assert_eq!(op, ops[i as usize].0, "results of {ops:?}");
+        if i + 1 == count {
+            return (status, r.rest().to_vec());
+        }
+        assert_eq!(op_status, 0, "operation {op} failed");
+        // The bodies of those that have one
+        match op {
+            OP_SEQUENCE => {
+                r.fixed(16 + 20).unwrap();
+            }
+            OP_OPEN => {
+                // stateid, change_info4, rflags, attrset and no delegation
+                r.fixed(16 + 20 + 4).unwrap();
+                for _ in 0..r.u32().unwrap() {
+                    r.u32().unwrap();
+                }
+                r.u32().unwrap();
+            }
+            OP_READ => {
+                r.bool().unwrap();
+                r.opaque().unwrap();
+            }
+            _ => {}
+        }
+    }
+    (status, Vec::new())
+}
+
+fn opaque4(data: &[u8]) -> Vec<u8> {
+    args(|a| a.put_opaque(data))
+}
+
+/// A bitmap4 of `bits`
+fn bits4(bits: &[u32]) -> Vec<u8> {
+    let mut mask = [0u32; 2];
+    for bit in bits {
+        mask[(bit / 32) as usize] |= 1 << (bit % 32);
+    }
+    args(|a| {
+        a.put_u32(2);
+        a.put_u32(mask[0]);
+        a.put_u32(mask[1]);
+    })
+}
+
+/// An OPEN of `name` in `dir`, creating it UNCHECKED4 with mode 0640 if `create`. Returns
+/// the status, the stateid and the result flags
+fn open4(
+    h: &mut Harness,
+    dir: &[u8],
+    clientid: u64,
+    name: &str,
+    access: u32,
+    create: bool,
+) -> (u32, Vec<u8>, u32) {
+    let mut a = Vec::new();
+    a.put_u32(0);
+    a.put_u32(access);
+    a.put_u32(0);
+    a.put_u64(clientid);
+    a.put_opaque(b"owner");
+    a.put_u32(u32::from(create));
+    if create {
+        a.put_u32(0);
+        a.extend_from_slice(&bits4(&[33]));
+        a.put_opaque(&0o640u32.to_be_bytes());
+    }
+    // CLAIM_NULL
+    a.put_u32(0);
+    a.put_opaque(name.as_bytes());
+    let (status, body) = h.compound(&[(OP_PUTFH, opaque4(dir)), (OP_OPEN, a)]);
+    if status != 0 {
+        return (status, Vec::new(), 0);
+    }
+    let mut r = Reader::new(&body);
+    let stateid = r.fixed(16).unwrap().to_vec();
+    // change_info4
+    r.bool().unwrap();
+    r.u64().unwrap();
+    r.u64().unwrap();
+    let rflags = r.u32().unwrap();
+    (status, stateid, rflags)
+}
+
+/// A LOCKT of bytes 50..51 by `owner`
+fn lockt4(file: &[u8], clientid: u64, owner: &[u8]) -> Ops {
+    let mut a = Vec::new();
+    // WRITE_LT
+    a.put_u32(2);
+    a.put_u64(50);
+    a.put_u64(1);
+    a.put_u64(clientid);
+    a.put_opaque(owner);
+    vec![(OP_PUTFH, opaque4(file)), (OP_LOCKT, a)]
+}
+
+#[test]
+fn nfs4_mount_files_and_locks() {
+    let mut h = start_version(false, true);
+    let clientid = h.session4();
+    // The export is the pseudo-root's one entry, by its secret name
+    let export = h.nfs.v4().export_path();
+    let name = export.trim_start_matches('/').to_owned();
+    assert!(name.starts_with("export.") && name.len() > 20);
+    let root = h.fh4(&[
+        (OP_PUTROOTFH, Vec::new()),
+        (OP_LOOKUP, opaque4(name.as_bytes())),
+    ]);
+    assert_eq!(handle(&mut Reader::new(&opaque4(&root))), ROOT);
+    let (status, body) = h.compound(&[
+        (OP_PUTFH, opaque4(&root)),
+        (OP_GETATTR, bits4(&[1, 20, 33])),
+    ]);
+    assert_eq!(status, 0);
+    let mut r = Reader::new(&body);
+    // The attributes asked for come back, in order: type, fileid, mode
+    assert_eq!(
+        (r.u32(), r.u32(), r.u32()),
+        (Ok(2), Ok((1 << 1) | (1 << 20)), Ok(1 << 1))
+    );
+    let values = r.opaque().unwrap().to_vec();
+    let mut v = Reader::new(&values);
+    assert_eq!(v.u32(), Ok(2));
+    assert_eq!(v.u64(), Ok(1));
+    assert_eq!(v.u32(), Ok(0o755));
+    // Among the attributes supported, NFSv4.1's suppattr_exclcreat, in the third word
+    let (status, body) = h.compound(&[(OP_PUTFH, opaque4(&root)), (OP_GETATTR, bits4(&[0]))]);
+    assert_eq!(status, 0);
+    let mut r = Reader::new(&body);
+    assert_eq!((r.u32(), r.u32(), r.u32()), (Ok(1), Ok(1), Ok(4 + 3 * 4)));
+    assert_eq!(r.u32(), Ok(3));
+    r.u32().unwrap();
+    r.u32().unwrap();
+    assert_eq!(r.u32(), Ok(1 << (75 - 64)));
+    // LOOKUPP from the root leads back to the pseudo-root, which may be read and searched,
+    // not changed
+    let pseudo = h.fh4(&[(OP_PUTFH, opaque4(&root)), (OP_LOOKUPP, Vec::new())]);
+    assert_eq!(&pseudo[..8], [0; 8]);
+    let (status, body) = h.compound(&[
+        (OP_PUTROOTFH, Vec::new()),
+        (OP_ACCESS, args(|a| a.put_u32(0x3f))),
+    ]);
+    assert_eq!(
+        (status, &body[..]),
+        (0, &[0, 0, 0, 0x3f, 0, 0, 0, 0x23][..])
+    );
+    // NFSv3's MNT hands out nothing on a v4 server
+    let results = h.call(MOUNT, 1, &args(|a| a.put_opaque(b"/export")));
+    assert_eq!(results, 13u32.to_be_bytes());
+
+    // An open that creates, written and read through its stateid, then closed. Only POSIX
+    // locks are promised: no confirmation, as in NFSv4.0
+    let (status, stateid, rflags) = open4(&mut h, &root, clientid, "file", 3, true);
+    assert_eq!((status, rflags), (0, 4));
+    let file = h.fh4(&[(OP_PUTFH, opaque4(&root)), (OP_LOOKUP, opaque4(b"file"))]);
+    let data: Vec<u8> = (0..10_000u32).map(|i| i as u8).collect();
+    let mut a = Vec::new();
+    a.put_fixed(&stateid);
+    a.put_u64(0);
+    // UNSTABLE4
+    a.put_u32(0);
+    a.put_opaque(&data);
+    let (status, body) = h.compound(&[(OP_PUTFH, opaque4(&file)), (OP_WRITE, a)]);
+    assert_eq!(status, 0);
+    assert_eq!(&body[..8], [0, 0, 0x27, 0x10, 0, 0, 0, 0]);
+    // Split at the session's max_write
+    assert_eq!(h.counters.largest_write.load(Ordering::SeqCst), 4096);
+    let mut a = Vec::new();
+    a.put_fixed(&stateid);
+    a.put_u64(9000);
+    a.put_u32(5000);
+    let (status, body) = h.compound(&[(OP_PUTFH, opaque4(&file)), (OP_READ, a)]);
+    assert_eq!(status, 0);
+    let mut r = Reader::new(&body);
+    assert_eq!(r.bool(), Ok(true));
+    assert_eq!(r.opaque(), Ok(&data[9000..]));
+    let (status, body) = h.compound(&[(OP_PUTFH, opaque4(&file)), (OP_GETATTR, bits4(&[33]))]);
+    assert_eq!(status, 0);
+    assert_eq!(&body[body.len() - 4..], 0o640u32.to_be_bytes());
+    // A size set through the open is an ftruncate, which carries the open's handle; one with
+    // the anonymous stateid is a truncate
+    for (stateid, with_handle) in [(stateid.clone(), 1), (vec![0; 16], 1)] {
+        let mut a = Vec::new();
+        a.put_fixed(&stateid);
+        a.extend_from_slice(&bits4(&[4]));
+        a.put_opaque(&10_000u64.to_be_bytes());
+        let ops = [(OP_PUTFH, opaque4(&file)), (OP_SETATTR, a)];
+        assert_eq!(h.compound(&ops).0, 0);
+        assert_eq!(
+            h.counters.truncates_with_handle.load(Ordering::SeqCst),
+            with_handle
+        );
+    }
+
+    // Byte-range locks, kept here as the filesystem has none
+    let mut a = Vec::new();
+    // WRITE_LT, not a reclaim, bytes 0..100, by a new lock-owner of the open
+    a.put_u32(2);
+    a.put_bool(false);
+    a.put_u64(0);
+    a.put_u64(100);
+    a.put_bool(true);
+    a.put_u32(0);
+    a.put_fixed(&stateid);
+    a.put_u32(0);
+    a.put_u64(clientid);
+    a.put_opaque(b"locker");
+    let (status, body) = h.compound(&[(OP_PUTFH, opaque4(&file)), (OP_LOCK, a)]);
+    assert_eq!(status, 0);
+    let lock = body[..16].to_vec();
+    // NFS4ERR_DENIED for another owner, not for the one holding it
+    assert_eq!(h.compound(&lockt4(&file, clientid, b"other")).0, 10010);
+    assert_eq!(h.compound(&lockt4(&file, clientid, b"locker")).0, 0);
+    let mut a = Vec::new();
+    a.put_u32(2);
+    a.put_u32(0);
+    a.put_fixed(&lock);
+    a.put_u64(0);
+    a.put_u64(u64::MAX);
+    assert_eq!(
+        h.compound(&[(OP_PUTFH, opaque4(&file)), (OP_LOCKU, a)]).0,
+        0
+    );
+    assert_eq!(h.compound(&lockt4(&file, clientid, b"other")).0, 0);
+
+    let mut a = Vec::new();
+    a.put_u32(0);
+    a.put_fixed(&stateid);
+    assert_eq!(
+        h.compound(&[(OP_PUTFH, opaque4(&file)), (OP_CLOSE, a)]).0,
+        0
+    );
+    // NFS4ERR_BAD_STATEID once closed
+    let mut a = Vec::new();
+    a.put_fixed(&stateid);
+    a.put_u64(0);
+    a.put_u32(1);
+    assert_eq!(
+        h.compound(&[(OP_PUTFH, opaque4(&file)), (OP_READ, a)]).0,
+        10025
+    );
+    // An open of the current file (CLAIM_FH), read and closed through the current stateid
+    let mut a = Vec::new();
+    a.put_u32(0);
+    a.put_u32(1);
+    a.put_u32(0);
+    a.put_u64(clientid);
+    a.put_opaque(b"owner");
+    a.put_u32(0);
+    a.put_u32(4);
+    let mut read = Vec::new();
+    read.put_fixed(&CURRENT_STATEID);
+    read.put_u64(0);
+    read.put_u32(3);
+    let mut close = Vec::new();
+    close.put_u32(0);
+    close.put_fixed(&CURRENT_STATEID);
+    let (status, body) = h.compound(&[
+        (OP_PUTFH, opaque4(&file)),
+        (OP_OPEN, a.clone()),
+        (OP_READ, read),
+        (OP_CLOSE, close.clone()),
+    ]);
+    // The invalid stateid once closed
+    assert_eq!(
+        (status, &body[..]),
+        (0, &[&u32::MAX.to_be_bytes()[..], &[0; 12]].concat()[..])
+    );
+    // Without an operation before it to set one, the current stateid is NFS4ERR_BAD_STATEID
+    let ops = [(OP_PUTFH, opaque4(&file)), (OP_CLOSE, close)];
+    assert_eq!(h.compound(&ops).0, 10025);
+    // TEST_STATEID knows an open's stateid, and FREE_STATEID leaves it to CLOSE
+    let (status, body) = h.compound(&[(OP_PUTFH, opaque4(&file)), (OP_OPEN, a)]);
+    assert_eq!(status, 0);
+    let stateid = body[..16].to_vec();
+    let mut test = Vec::new();
+    test.put_u32(2);
+    test.put_fixed(&stateid);
+    test.put_fixed(&[9; 16]);
+    let (status, body) = h.compound(&[(OP_TEST_STATEID, test)]);
+    assert_eq!(status, 0);
+    assert_eq!(body, [0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0x27, 0x29]);
+    let (status, _) = h.compound(&[(OP_FREE_STATEID, stateid.clone())]);
+    assert_eq!(status, 10037);
+    let mut a = Vec::new();
+    a.put_u32(0);
+    a.put_fixed(&stateid);
+    assert_eq!(
+        h.compound(&[(OP_PUTFH, opaque4(&file)), (OP_CLOSE, a)]).0,
+        0
+    );
+    assert_eq!(open4(&mut h, &root, clientid, "missing", 1, false).0, 2);
+
+    // A directory, listed, renamed and removed
+    let mut a = Vec::new();
+    a.put_u32(2);
+    a.put_opaque(b"dir");
+    a.extend_from_slice(&bits4(&[]));
+    a.put_opaque(&[]);
+    let (status, body) = h.compound(&[(OP_PUTFH, opaque4(&root)), (OP_CREATE, a)]);
+    // change_info4, and no attributes set
+    assert_eq!((status, body.len()), (0, 20 + 4));
+    let dir = h.fh4(&[(OP_PUTFH, opaque4(&root)), (OP_LOOKUP, opaque4(b"dir"))]);
+    let parent = h.fh4(&[(OP_PUTFH, opaque4(&dir)), (OP_LOOKUPP, Vec::new())]);
+    assert_eq!(parent, root);
+    let mut a = Vec::new();
+    a.put_u64(0);
+    a.put_fixed(&[0; 8]);
+    a.put_u32(1000);
+    a.put_u32(8192);
+    a.extend_from_slice(&bits4(&[1, 19]));
+    let (status, body) = h.compound(&[(OP_PUTFH, opaque4(&root)), (OP_READDIR, a)]);
+    assert_eq!(status, 0);
+    let mut r = Reader::new(&body[8..]);
+    let mut names = Vec::new();
+    while r.bool().unwrap() {
+        // Cookies 1 and 2 are reserved
+        assert!(r.u64().unwrap() > 2);
+        names.push(String::from_utf8(r.opaque().unwrap().to_vec()).unwrap());
+        // The bitmap of type and filehandle, then their values
+        let words = r.u32().unwrap();
+        assert_eq!(words, 1);
+        assert_eq!(r.u32(), Ok((1 << 1) | (1 << 19)));
+        r.opaque().unwrap();
+    }
+    assert_eq!(r.bool(), Ok(true));
+    assert_eq!(names, ["dir", "file"]);
+    let rename = args(|a| {
+        a.put_opaque(b"dir");
+        a.put_opaque(b"moved");
+    });
+    let ops = [
+        (OP_PUTFH, opaque4(&root)),
+        (OP_SAVEFH, Vec::new()),
+        (OP_PUTFH, opaque4(&root)),
+        (OP_RENAME, rename),
+    ];
+    assert_eq!(h.compound(&ops).0, 0);
+    let ops = [(OP_PUTFH, opaque4(&root)), (OP_REMOVE, opaque4(b"moved"))];
+    assert_eq!(h.compound(&ops).0, 0);
+    let ops = [(OP_PUTFH, opaque4(&root)), (OP_LOOKUP, opaque4(b"moved"))];
+    assert_eq!(h.compound(&ops).0, 2);
+
+    // NFSv4.0's RENEW is gone; ACCESS grants what is asked
+    assert_eq!(
+        h.compound(&[(OP_RENEW, args(|a| a.put_u64(clientid)))]).0,
+        10004
+    );
+    let (status, body) = h.compound(&[
+        (OP_PUTFH, opaque4(&root)),
+        (OP_ACCESS, args(|a| a.put_u32(0x1f))),
+    ]);
+    assert_eq!(
+        (status, &body[..]),
+        (0, &[0, 0, 0, 0x1f, 0, 0, 0, 0x1f][..])
+    );
+
+    // Once a handle of the export has been used, the mount is made: the export can no longer
+    // be looked up
+    let ops = [
+        (OP_PUTROOTFH, Vec::new()),
+        (OP_LOOKUP, opaque4(name.as_bytes())),
+    ];
+    assert_eq!(h.compound(&ops).0, 2);
+    // A handle with another key is NFS4ERR_BADHANDLE
+    let mut forged = root.clone();
+    forged[15] ^= 1;
+    assert_eq!(h.compound(&[(OP_PUTFH, opaque4(&forged))]).0, 10001);
+    h.finish();
+}
+
+#[test]
+fn nfs4_errors() {
+    let mut h = start_version(false, false);
+    // Outside a session, only what sets one up, and alone
+    assert_eq!(h.compound(&[(OP_PUTROOTFH, Vec::new())]).0, 10071);
+    let ops = [
+        (OP_DESTROY_SESSION, vec![0; 16]),
+        (OP_PUTROOTFH, Vec::new()),
+    ];
+    assert_eq!(h.compound(&ops).0, 10081);
+    // An operation that is not one: NFS4ERR_OP_ILLEGAL, with OP_ILLEGAL as its result
+    let mut a = Vec::new();
+    a.put_opaque(b"tag");
+    a.put_u32(1);
+    a.put_u32(1);
+    a.put_u32(99);
+    h.xid += 1;
+    let reply = rpc::answer(&h.nfs, &call_message(h.xid, NFS, 4, 1, &a)).unwrap();
+    let (_, results) = accepted(&reply, h.xid);
+    let illegal = 10044u32.to_be_bytes();
+    assert_eq!(&results[..4], illegal);
+    assert_eq!(&results[results.len() - 8..], [illegal, illegal].concat());
+    // Minor versions other than 1, NFSv4.0 included
+    let results = h.compound_raw(0, &[]);
+    assert_eq!(&results[..4], 10021u32.to_be_bytes());
+    // Versions other than 3 and 4: PROG_MISMATCH, 3 to 4
+    h.xid += 1;
+    let reply = rpc::answer(&h.nfs, &call_message(h.xid, NFS, 5, 0, &[])).unwrap();
+    let (stat, rest) = accepted(&reply, h.xid);
+    assert_eq!((stat, &rest[..]), (2, &[0, 0, 0, 3, 0, 0, 0, 4][..]));
+
+    // An NFSv3 mount's server takes no NFSv4 client: NFS4ERR_PERM
+    let ops = [(OP_EXCHANGE_ID, exchange_id4(b"test client", [1; 8]))];
+    assert_eq!(h.compound(&ops).0, 1);
+    h.finish();
+
+    let mut h = start_version(false, true);
+    let clientid = h.session4();
+    // Once the mount is made, the client it was made with is the only one: no other owner, nor
+    // the same one claiming to have restarted, which would drop what it holds
+    h.nfs.v4().seal();
+    let ops = [(OP_EXCHANGE_ID, exchange_id4(b"another", [1; 8]))];
+    assert_eq!(h.compound(&ops).0, 1);
+    let ops = [(OP_EXCHANGE_ID, exchange_id4(b"test client", [2; 8]))];
+    assert_eq!(h.compound(&ops).0, 1);
+    let ops = [(OP_EXCHANGE_ID, exchange_id4(b"test client", [1; 8]))];
+    let (status, body) = h.compound(&ops);
+    assert_eq!((status, &body[..8]), (0, &clientid.to_be_bytes()[..]));
+    // No current handle: NFS4ERR_NOFILEHANDLE
+    assert_eq!(h.compound(&[(OP_GETFH, Vec::new())]).0, 10020);
+    // SEQUENCE only first
+    let session = h.session.unwrap();
+    let ops = [(OP_SEQUENCE, sequence_args(&session, 1, false))];
+    assert_eq!(h.compound(&ops).0, 10064);
+
+    // A retransmission is answered from the slot, without running again
+    let create = |name: &[u8]| {
+        let mut a = Vec::new();
+        a.put_u32(2);
+        a.put_opaque(name);
+        a.extend_from_slice(&bits4(&[]));
+        a.put_opaque(&[]);
+        a
+    };
+    let root = h.fh4(&[(OP_PUTROOTFH, Vec::new())]);
+    let sequence = h.sequence4(true);
+    let ops = [
+        sequence,
+        (OP_PUTFH, opaque4(&root)),
+        (OP_CREATE, create(b"dir")),
+    ];
+    // The pseudo-root takes no directory
+    let first = h.compound_raw(1, &ops);
+    assert_eq!(compound_result(&ops, &first).0, 13);
+    let again = h.compound_raw(1, &ops);
+    assert_eq!(again, first);
+    // A large reply not asked to be cached is not, and its retransmission is not run again
+    let export_root = args(|a| put_handle(a, ROOT));
+    let export_root = Reader::new(&export_root).opaque().unwrap().to_vec();
+    let (status, stateid, _) = open4(&mut h, &export_root, clientid, "big", 3, true);
+    assert_eq!(status, 0);
+    let big = h.fh4(&[
+        (OP_PUTFH, opaque4(&export_root)),
+        (OP_LOOKUP, opaque4(b"big")),
+    ]);
+    // A stateid is for the file it was opened for
+    let mut a = Vec::new();
+    a.put_fixed(&stateid);
+    a.put_u64(0);
+    a.put_u32(1);
+    let ops = [(OP_PUTFH, opaque4(&export_root)), (OP_READ, a)];
+    assert_eq!(h.compound(&ops).0, 10025);
+    let mut write = Vec::new();
+    write.put_fixed(&stateid);
+    write.put_u64(0);
+    write.put_u32(2);
+    write.put_opaque(&[7; 8192]);
+    let mut read = Vec::new();
+    read.put_fixed(&stateid);
+    read.put_u64(0);
+    read.put_u32(8192);
+    let ops = [(OP_PUTFH, opaque4(&big)), (OP_WRITE, write)];
+    assert_eq!(h.compound(&ops).0, 0);
+    let sequence = h.sequence4(false);
+    let ops = [sequence, (OP_PUTFH, opaque4(&big)), (OP_READ, read)];
+    let (status, body) = compound_result(&ops, &h.compound_raw(1, &ops));
+    assert_eq!((status, body.len()), (0, 8 + 8192));
+    let results = h.compound_raw(1, &ops);
+    assert_eq!(compound_result(&ops, &results).0, 10068);
+    // Sequence ids out of order, slots and sessions that are not
+    let ops = [(OP_SEQUENCE, sequence_args(&session, h.sequence + 5, false))];
+    assert_eq!(compound_result(&ops, &h.compound_raw(1, &ops)).0, 10063);
+    let ops = [(OP_SEQUENCE, sequence_args(&[7; 16], 1, false))];
+    assert_eq!(compound_result(&ops, &h.compound_raw(1, &ops)).0, 10052);
+    let mut slot = sequence_args(&session, 1, false);
+    slot[20..24].copy_from_slice(&99u32.to_be_bytes());
+    let ops = [(OP_SEQUENCE, slot)];
+    assert_eq!(compound_result(&ops, &h.compound_raw(1, &ops)).0, 10053);
+
+    // The client cannot go while its session is there; after DESTROY_SESSION it can
+    let destroy = (OP_DESTROY_CLIENTID, args(|a| a.put_u64(clientid)));
+    assert_eq!(h.compound(&[destroy.clone()]).0, 10074);
+    h.session = None;
+    assert_eq!(h.compound(&[(OP_DESTROY_SESSION, session.to_vec())]).0, 0);
+    let ops = [(OP_SEQUENCE, sequence_args(&session, h.sequence + 1, false))];
+    assert_eq!(compound_result(&ops, &h.compound_raw(1, &ops)).0, 10052);
+    assert_eq!(h.compound(&[destroy.clone()]).0, 0);
+    assert_eq!(h.compound(&[destroy]).0, 10022);
+    h.finish();
 }

@@ -81,10 +81,15 @@ System Extensions. FSKit does not tell the filesystem who made a request: `Reque
 does not support the notification API yet. fuser's macOS CI tests use this backend.
 
 Experimental: with the `macos-nfs` feature, fuser needs neither macFUSE nor FUSE-T. It serves the
-filesystem over NFSv3 on 127.0.0.1 from within the process and mounts it with macOS's own
-`mount_nfs`; filesystems use the same API. NFS carries less than FUSE: every request reaches the
-filesystem as the mounting user, and there are no extended attributes or notifications. `MountOption::CUSTOM` values are passed to `mount_nfs`. See
-`src/mnt/nfs/mod.rs` for the details.
+filesystem over NFS on 127.0.0.1 from within the process and mounts it with macOS's own
+`mount_nfs`; filesystems use the same API. NFSv3 is the default, and
+`MountOption::CUSTOM("vers=4.1")` mounts with NFSv4.1, which also passes opens and byte-range
+locks on to the filesystem. Other `MountOption::CUSTOM` values are passed to `mount_nfs`. NFS
+carries less than FUSE: requests carry the caller's uid and gid but no supplementary groups, and
+there are no extended attributes or notifications. With NFSv4.1, macOS's client cannot give a
+file the owner or group 0 while it maps ids through its identity service: `chown` fails with "No
+space left on device". `sudo sysctl vfs.generic.nfs.client.idmap_ctrl=0` has it map them
+itself. See `src/mnt/nfs/mod.rs` for the details.
 
 
 #### To install using Homebrew

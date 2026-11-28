@@ -1,4 +1,4 @@
-//! XDR (RFC 4506), as far as NFSv3 needs it: big-endian 32 and 64 bit integers, booleans, and
+//! XDR (RFC 4506), as far as NFSv3 and NFSv4.1 need it: big-endian 32 and 64 bit integers, booleans, and
 //! opaque data padded to 4 bytes.
 
 /// Arguments that do not decode: answered with `GARBAGE_ARGS`

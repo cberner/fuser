@@ -94,8 +94,8 @@ impl Transport {
         loop {
             if let Some(request) = state.requests.pop_front() {
                 let Some(dest) = buffer.get_mut(..request.len()) else {
-                    // The session sizes its buffer for the largest write it negotiated, and
-                    // writes are split to fit
+                    // The session's buffer takes the largest write FUSE allows, and writes
+                    // are split to the max_write it negotiated
                     log::error!(
                         "FUSE request of {} bytes does not fit the {} byte buffer",
                         request.len(),
